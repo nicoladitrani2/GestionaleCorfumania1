@@ -145,12 +145,24 @@ export function ParticipantsList({
   const exportToPDF = () => {
     const doc = new jsPDF()
     
-    // Add title and excursion info
-    doc.setFontSize(20)
-    doc.text(excursionName || 'Lista Partecipanti', 14, 22)
+    // --- Header Styling ---
+    // Blue header bar
+    doc.setFillColor(37, 99, 235) // Blue-600
+    doc.rect(0, 0, 210, 40, 'F')
     
-    doc.setFontSize(11)
-    doc.setTextColor(100)
+    // Title (White)
+    doc.setTextColor(255, 255, 255)
+    doc.setFontSize(22)
+    doc.setFont('helvetica', 'bold')
+    doc.text(excursionName || 'Dettagli Escursione', 14, 18)
+    
+    // Subtitle "Lista Partecipanti Attivi" (White)
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'normal')
+    doc.text('Lista Partecipanti Attivi', 14, 26)
+
+    // Date (White, smaller)
+    doc.setFontSize(10)
     if (excursionDate) {
       const dateStr = new Date(excursionDate).toLocaleDateString('it-IT', { 
         weekday: 'long', 
@@ -160,34 +172,49 @@ export function ParticipantsList({
         hour: '2-digit',
         minute: '2-digit'
       })
-      doc.text(dateStr, 14, 30)
+      // Capitalize first letter
+      const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
+      doc.text(formattedDate, 14, 34)
     }
 
     // Filter active participants
     const activeParticipants = participants.filter(p => !p.isExpired)
 
     // Prepare table data
+    // Columns: Nome, Posti, Nazionalità, Inserito da, Telefono, Note
+    // Removed: Prezzo, Acconto, Stato (come richiesto)
     const tableData = activeParticipants.map(p => [
       `${p.firstName} ${p.lastName}`,
       p.groupSize?.toString() || '1',
       p.nationality || '-',
       `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.trim() || '-',
       p.phoneNumber || '-',
-      `€ ${p.price?.toFixed(2) || '0.00'}`,
-      `€ ${p.deposit?.toFixed(2) || '0.00'}`,
-      getStatusText(p),
       p.notes || '-'
     ])
 
     autoTable(doc, {
-      head: [['Nome', 'Posti', 'Nazionalità', 'Inserito da', 'Telefono', 'Prezzo', 'Acconto', 'Stato', 'Note']],
+      head: [['Nome', 'Posti', 'Nazionalità', 'Inserito da', 'Telefono', 'Note']],
       body: tableData,
-      startY: 40,
-      styles: { fontSize: 8 },
-      headStyles: { fillColor: [66, 139, 202] }, // Blue header
+      startY: 50,
+      styles: { fontSize: 10, cellPadding: 3 },
+      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' }, // Darker blue header
+      alternateRowStyles: { fillColor: [243, 244, 246] }, // Light gray for alternate rows
+      columnStyles: {
+        0: { fontStyle: 'bold' }, // Name bold
+        1: { halign: 'center' }, // Group size centered
+      }
     })
 
-    doc.save(`partecipanti-${excursionName || 'escursione'}.pdf`)
+    // Footer with generation date
+    const pageCount = doc.getNumberOfPages()
+    doc.setFontSize(8)
+    doc.setTextColor(156, 163, 175) // Gray-400
+    for(let i = 1; i <= pageCount; i++) {
+        doc.setPage(i)
+        doc.text(`Generato il ${new Date().toLocaleDateString('it-IT')} - Pagina ${i} di ${pageCount}`, 14, doc.internal.pageSize.height - 10)
+    }
+
+    doc.save(`partecipanti-attivi-${excursionName || 'escursione'}.pdf`)
   }
 
   if (loading) return (
