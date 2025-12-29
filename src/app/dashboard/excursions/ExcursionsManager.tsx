@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History } from 'lucide-react'
+import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro } from 'lucide-react'
 import { ParticipantForm } from './ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
 import { AuditLogList } from './AuditLogList'
@@ -390,6 +390,15 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                       </div>
                     </div>
                   )}
+                  {currentUserRole === 'ADMIN' && (selectedExcursion.totalCollected !== undefined) && (
+                    <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
+                      <Euro className="w-4 h-4 text-green-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-green-600 font-semibold uppercase tracking-wide">Incasso</span>
+                        <span className="font-medium font-mono">€ {selectedExcursion.totalCollected.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
               <button
@@ -563,6 +572,14 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                       <span className="font-medium text-gray-700 ml-2">
                         {excursion._count?.participants || 0} Partecipanti
                       </span>
+                      {currentUserRole === 'ADMIN' && (excursion.totalCollected !== undefined) && (
+                        <div className="ml-auto flex items-center gap-1 bg-green-50 px-2 py-1 rounded text-green-700 border border-green-100">
+                          <Euro className="w-3 h-3" />
+                          <span className="font-mono font-medium text-sm">
+                            {excursion.totalCollected.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>

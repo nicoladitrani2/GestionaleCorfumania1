@@ -58,20 +58,36 @@ export async function GET(request: Request) {
     include: {
       participants: {
         where: { isExpired: false },
-        select: { groupSize: true }
+        select: { 
+          groupSize: true,
+          deposit: true 
+        }
       }
     }
   })
 
   const excursions = excursionsData.map(excursion => {
     const totalParticipants = excursion.participants.reduce((sum, p) => sum + (p.groupSize || 1), 0)
+    
+    // Calculate total collected (sum of deposits)
+    // Note: deposit field holds the actual paid amount (whether it's deposit or full balance)
+    const totalCollected = excursion.participants.reduce((sum, p) => sum + (p.deposit || 0), 0)
+
     const { participants, ...rest } = excursion
-    return {
+    
+    const result: any = {
       ...rest,
       _count: {
         participants: totalParticipants
       }
     }
+
+    // Only include totalCollected if user is ADMIN
+    if (session.user.role === 'ADMIN') {
+      result.totalCollected = totalCollected
+    }
+
+    return result
   })
 
   return NextResponse.json(excursions)
