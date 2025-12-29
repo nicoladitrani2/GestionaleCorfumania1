@@ -79,7 +79,14 @@ export async function POST(request: Request) {
       }
     })
 
-    const details = `Aggiunto partecipante ${firstName} ${lastName} (Gruppo: ${groupSize}, Prezzo: €${price}, Acconto: €${deposit}, Metodo: ${paymentMethod})`
+    const paymentMethodMap: Record<string, string> = {
+      'CASH': 'Contanti',
+      'TRANSFER': 'Bonifico',
+      'CARD': 'Carta'
+    }
+
+    const methodLabel = paymentMethodMap[paymentMethod] || paymentMethod
+    const details = `Aggiunto partecipante ${firstName} ${lastName} (Gruppo: ${groupSize}, Prezzo: €${price}, Acconto: €${deposit}, Metodo: ${methodLabel})`
 
     await createAuditLog(
       session.user.id,

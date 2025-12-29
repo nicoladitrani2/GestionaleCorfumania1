@@ -94,11 +94,26 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (body.supplier !== undefined && body.supplier !== participant.supplier) {
       changes.push(`Fornitore: ${participant.supplier || 'Nessuno'} -> ${body.supplier}`)
     }
+    // Helper maps for translation
+    const paymentMethodMap: Record<string, string> = {
+      'CASH': 'Contanti',
+      'TRANSFER': 'Bonifico',
+      'CARD': 'Carta'
+    }
+    const paymentTypeMap: Record<string, string> = {
+      'DEPOSIT': 'Acconto',
+      'BALANCE': 'Saldo'
+    }
+
     if (body.paymentType !== undefined && body.paymentType !== participant.paymentType) {
-      changes.push(`Tipo Pagamento: ${participant.paymentType} -> ${body.paymentType}`)
+      const oldType = paymentTypeMap[participant.paymentType] || participant.paymentType
+      const newType = paymentTypeMap[body.paymentType] || body.paymentType
+      changes.push(`Tipo Pagamento: ${oldType} -> ${newType}`)
     }
     if (body.paymentMethod !== undefined && body.paymentMethod !== participant.paymentMethod) {
-      changes.push(`Metodo: ${participant.paymentMethod} -> ${body.paymentMethod}`)
+      const oldMethod = paymentMethodMap[participant.paymentMethod] || participant.paymentMethod
+      const newMethod = paymentMethodMap[body.paymentMethod] || body.paymentMethod
+      changes.push(`Metodo: ${oldMethod} -> ${newMethod}`)
     }
     if (body.notes !== undefined && body.notes !== participant.notes) {
       changes.push(`Note modificate`)

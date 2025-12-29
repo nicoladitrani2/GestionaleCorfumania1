@@ -52,6 +52,16 @@ export function AuditLogList({ excursionId }: AuditLogListProps) {
     }
   }
 
+  const formatDetails = (details: string) => {
+    return details
+      .replace(/\bBALANCE\b/g, 'Saldo')
+      .replace(/\bDEPOSIT\b/g, 'Acconto')
+      .replace(/\bCASH\b/g, 'Contanti')
+      .replace(/\bTRANSFER\b/g, 'Bonifico')
+      .replace(/\bCARD\b/g, 'Carta')
+      .replace(/\bCREATE_PARTICIPANT\b/g, 'Aggiunta Partecipante') // Fallback
+  }
+
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Caricamento cronologia...</div>
   }
@@ -87,7 +97,7 @@ export function AuditLogList({ excursionId }: AuditLogListProps) {
                   {formatAction(log.action)}
                 </h4>
                 <p className="text-sm text-gray-600">
-                  {log.details}
+                  {formatDetails(log.details)}
                 </p>
               </div>
             </div>
