@@ -198,7 +198,10 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
       return
     }
 
-    if (formData.deposit > formData.price) {
+    const depositVal = parseFloat(String(formData.deposit)) || 0
+    const priceVal = parseFloat(String(formData.price)) || 0
+
+    if (depositVal > priceVal) {
       setError('L\'acconto non può essere superiore al prezzo totale.')
       setLoading(false)
       return
