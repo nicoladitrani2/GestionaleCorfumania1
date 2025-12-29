@@ -1,0 +1,72 @@
+'use client'
+
+import Link from 'next/link'
+import { LogOut, Home, User } from 'lucide-react'
+import { useRouter, usePathname } from 'next/navigation'
+
+interface DashboardNavbarProps {
+  user: {
+    firstName?: string
+    lastName?: string
+    code?: string
+    role?: string
+  }
+}
+
+export function DashboardNavbar({ user }: DashboardNavbarProps) {
+  const router = useRouter()
+  const pathname = usePathname()
+
+  const handleLogout = async () => {
+    await fetch('/api/auth/logout', { method: 'POST' })
+    router.push('/login')
+  }
+
+  const isDashboardRoot = pathname === '/dashboard'
+
+  return (
+    <nav className="bg-white shadow-sm sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="flex justify-between h-16">
+          <div className="flex items-center gap-4">
+            <Link href="/dashboard" className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-gray-900 hover:text-blue-600 transition-colors">
+                Gestionale Corfumania
+              </h1>
+            </Link>
+            {!isDashboardRoot && (
+              <div className="hidden md:flex items-center text-sm text-gray-500 border-l border-gray-200 pl-4 ml-4">
+                <Link href="/dashboard" className="hover:text-blue-600 flex items-center gap-1">
+                  <Home className="w-4 h-4" />
+                  Dashboard
+                </Link>
+              </div>
+            )}
+          </div>
+          
+          <div className="flex items-center gap-6">
+            <div className="hidden md:flex flex-col items-end">
+              <span className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                <User className="w-4 h-4 text-blue-600" />
+                {user.firstName || user.lastName ? `${user.firstName || ''} ${user.lastName || ''}` : 'Utente'}
+              </span>
+              <span className="text-xs font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full" title="Codice Utente">
+                {user.code}
+              </span>
+            </div>
+
+            <div className="h-8 w-px bg-gray-200 mx-2 hidden md:block"></div>
+
+            <button
+              onClick={handleLogout}
+              className="flex items-center gap-2 text-gray-600 hover:text-red-600 px-3 py-2 rounded-md text-sm font-medium transition-colors hover:bg-red-50"
+            >
+              <LogOut className="w-4 h-4" />
+              Esci
+            </button>
+          </div>
+        </div>
+      </div>
+    </nav>
+  )
+}

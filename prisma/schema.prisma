@@ -1,0 +1,97 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                 String        @id @default(cuid())
+  email              String        @unique
+  password           String
+  code               String        @unique @default(cuid())
+  firstName          String?
+  lastName           String?
+  role               String        @default("USER")
+  mustChangePassword Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  participants       Participant[]
+  auditLogs          AuditLog[]
+}
+
+model Excursion {
+  id                   String        @id @default(cuid())
+  name                 String
+  startDate            DateTime
+  endDate              DateTime?
+  confirmationDeadline DateTime?
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
+  participants         Participant[]
+  auditLogs            AuditLog[]
+}
+
+model ExcursionTemplate {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id          String    @id @default(cuid())
+  action      String
+  details     String
+  
+  user        User      @relation(fields: [userId], references: [id])
+  userId      String
+
+  excursion   Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  excursionId String
+
+  createdAt   DateTime  @default(now())
+}
+
+model Participant {
+  id            String    @id @default(cuid())
+  firstName     String
+  lastName      String
+  nationality   String?
+  dateOfBirth   DateTime?
+  docNumber     String?
+  docType       String?
+  phoneNumber   String?
+  email         String?
+  notes         String?
+  groupSize     Int       @default(1)
+  isOption      Boolean   @default(false)
+  supplier      String
+  paymentType   String
+  paymentMethod String
+  
+  price         Float     @default(0)
+  deposit       Float     @default(0)
+
+  isExpired     Boolean   @default(false)
+
+  createdBy     User      @relation(fields: [createdById], references: [id])
+  createdById   String
+  excursion     Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  excursionId   String
+
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
