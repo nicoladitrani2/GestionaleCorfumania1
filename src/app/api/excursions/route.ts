@@ -140,7 +140,7 @@ export async function PUT(request: Request) {
     where: { id },
     data: {
       name,
-      startDate: startDate ? new Date(startDate) : null,
+      startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : null,
       confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null
     }
