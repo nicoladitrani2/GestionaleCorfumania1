@@ -87,6 +87,10 @@ export async function POST(request: Request) {
   const { name, startDate, endDate, confirmationDeadline } = body
 
   // Validation
+  if (!startDate) {
+    return NextResponse.json({ error: 'La data di inizio è obbligatoria.' }, { status: 400 })
+  }
+
   if (startDate) {
     const start = new Date(startDate)
     if (endDate && new Date(endDate) < start) {
@@ -100,7 +104,7 @@ export async function POST(request: Request) {
   const excursion = await prisma.excursion.create({
     data: {
       name,
-      startDate: startDate ? new Date(startDate) : null,
+      startDate: new Date(startDate),
       endDate: endDate ? new Date(endDate) : null,
       confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null
     }
