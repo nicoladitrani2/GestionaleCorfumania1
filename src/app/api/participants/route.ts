@@ -56,6 +56,21 @@ export async function POST(request: Request) {
       paymentType, paymentMethod, groupSize, price, deposit, pdfAttachment
     } = body
 
+    // Check expiration logic
+    let isExpired = false
+    const excursion = await prisma.excursion.findUnique({
+      where: { id: excursionId },
+      select: { confirmationDeadline: true }
+    })
+
+    if (excursion?.confirmationDeadline) {
+      const now = new Date()
+      const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
+      if (isDeadlinePassed && (isOption || paymentType === 'DEPOSIT')) {
+        isExpired = true
+      }
+    }
+
     const participant = await prisma.participant.create({
       data: {
         excursionId,
@@ -75,6 +90,7 @@ export async function POST(request: Request) {
         groupSize: parseInt(groupSize) || 1,
         price: price || 0,
         deposit: deposit || 0,
+        isExpired,
         createdById: session.user.id
       }
     })

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro } from 'lucide-react'
+import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown } from 'lucide-react'
 import { ParticipantForm } from './ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
 import { AuditLogList } from './AuditLogList'
@@ -32,6 +32,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
   const [newExcursionName, setNewExcursionName] = useState('')
   const [editingExcursionId, setEditingExcursionId] = useState<string | null>(null)
   const [error, setError] = useState('')
+  const [isTemplateDropdownOpen, setIsTemplateDropdownOpen] = useState(false)
 
   const [refreshParticipantsTrigger, setRefreshParticipantsTrigger] = useState(0)
 
@@ -45,6 +46,15 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
   useEffect(() => {
     fetchExcursions()
   }, [activeTab])
+
+  // Polling for live updates (every 5 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchExcursions()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [activeTab]) // Re-run when tab changes
 
   useEffect(() => {
     const checkAndFetch = async () => {
@@ -108,6 +118,49 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
     }
   }
 
+  const handleDeleteExcursion = async (id: string, name: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (!window.confirm(`Sei sicuro di voler eliminare l'escursione "${name}"? Questa azione è irreversibile.`)) {
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/excursions?id=${id}`, {
+        method: 'DELETE'
+      })
+
+      if (res.ok) {
+        fetchExcursions()
+      } else {
+        alert('Errore durante l\'eliminazione')
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Errore di connessione')
+    }
+  }
+
+  const handleClearArchive = async () => {
+    if (!window.confirm('Sei sicuro di voler svuotare l\'archivio? Tutte le escursioni passate verranno eliminate definitivamente.')) {
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/excursions?archived=true`, {
+        method: 'DELETE'
+      })
+
+      if (res.ok) {
+        fetchExcursions()
+      } else {
+        alert('Errore durante lo svuotamento dell\'archivio')
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Errore di connessione')
+    }
+  }
+
   const handleCreateExcursion = () => {
     setEditingExcursionId(null)
     setNewExcursionName('')
@@ -140,10 +193,36 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
     setIsCreating(true)
   }
 
+  const handleDeleteTemplate = async (templateId: string, templateName: string) => {
+    if (!window.confirm(`Sei sicuro di voler eliminare il template "${templateName}"?`)) {
+      return
+    }
+
+    try {
+      const res = await fetch(`/api/excursions/templates?id=${templateId}`, {
+        method: 'DELETE'
+      })
+
+      if (res.ok) {
+        setTemplates(templates.filter(t => t.id !== templateId))
+        setSelectedTemplateId('')
+        setNewExcursionName('')
+      } else {
+        alert('Errore durante l\'eliminazione del template')
+      }
+    } catch (e) {
+      console.error(e)
+      alert('Errore di connessione')
+    }
+  }
+
   const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
     const templateId = e.target.value
     setSelectedTemplateId(templateId)
-    if (templateId) {
+    
+    if (templateId === 'OTHER') {
+      setNewExcursionName('')
+    } else if (templateId) {
       const template = templates.find(t => t.id === templateId)
       if (template) setNewExcursionName(template.name)
     }
@@ -203,6 +282,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
 
       setIsCreating(false)
       fetchExcursions()
+      fetchTemplates() // Refresh templates as new one might have been added
     } catch (err: any) {
       setError(err.message)
     }
@@ -251,16 +331,77 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                 <div>
                   <label className="block text-sm font-medium text-gray-700 mb-1">Template</label>
                   <div className="relative">
-                    <select
-                      value={selectedTemplateId}
-                      onChange={handleTemplateChange}
-                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-3 bg-gray-50 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    <button
+                      type="button"
+                      onClick={() => setIsTemplateDropdownOpen(!isTemplateDropdownOpen)}
+                      className="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 text-left flex justify-between items-center transition-all"
                     >
-                      <option value="">Seleziona template...</option>
-                      {templates.map(t => (
-                        <option key={t.id} value={t.id}>{t.name}</option>
-                      ))}
-                    </select>
+                      <span className="truncate">
+                        {selectedTemplateId === 'OTHER' 
+                          ? 'Altro (inserisci manuale)' 
+                          : templates.find(t => t.id === selectedTemplateId)?.name || 'Seleziona template...'}
+                      </span>
+                      <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${isTemplateDropdownOpen ? 'rotate-180' : ''}`} />
+                    </button>
+
+                    {isTemplateDropdownOpen && (
+                      <>
+                        <div 
+                          className="fixed inset-0 z-10" 
+                          onClick={() => setIsTemplateDropdownOpen(false)} 
+                        />
+                        <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
+                          <ul className="py-1 text-sm text-gray-700">
+                            <li 
+                              className="px-4 py-2 hover:bg-gray-50 cursor-pointer text-gray-400 italic"
+                              onClick={() => {
+                                setSelectedTemplateId('')
+                                setNewExcursionName('')
+                                setIsTemplateDropdownOpen(false)
+                              }}
+                            >
+                              Nessuna selezione
+                            </li>
+                            {templates.map((t) => (
+                              <li key={t.id} className="flex items-center justify-between hover:bg-gray-50 group border-t border-gray-50">
+                                <div 
+                                  className="flex-grow px-4 py-2.5 cursor-pointer"
+                                  onClick={() => {
+                                    setSelectedTemplateId(t.id)
+                                    setNewExcursionName(t.name)
+                                    setIsTemplateDropdownOpen(false)
+                                  }}
+                                >
+                                  {t.name}
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    handleDeleteTemplate(t.id, t.name)
+                                  }}
+                                  className="mr-2 p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
+                                  title="Elimina template"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </li>
+                            ))}
+                            <li 
+                              className="px-4 py-2.5 hover:bg-blue-50 cursor-pointer text-blue-600 font-medium border-t border-gray-100 flex items-center gap-2"
+                              onClick={() => {
+                                setSelectedTemplateId('OTHER')
+                                setNewExcursionName('')
+                                setIsTemplateDropdownOpen(false)
+                              }}
+                            >
+                              <Plus className="w-4 h-4" />
+                              Altro (inserisci manuale)
+                            </li>
+                          </ul>
+                        </div>
+                      </>
+                    )}
                   </div>
                 </div>
               )}
@@ -460,6 +601,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
               key={refreshParticipantsTrigger}
               refreshTrigger={refreshParticipantsTrigger}
               onEdit={setEditingParticipant}
+              onUpdate={fetchExcursions}
               currentUserId={currentUserId}
               currentUserRole={currentUserRole}
             />
@@ -508,13 +650,24 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
             </div>
 
             {currentUserRole === 'ADMIN' && (
-              <button
-                onClick={handleCreateExcursion}
-                className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-sm hover:shadow transition-all transform hover:-translate-y-0.5 font-medium"
-              >
-                <Plus className="w-4 h-4" />
-                Nuova Escursione
-              </button>
+              <div className="flex gap-2">
+                {activeTab === 'ARCHIVE' && excursions.length > 0 && (
+                  <button
+                    onClick={handleClearArchive}
+                    className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 flex items-center gap-2 shadow-sm transition-all font-medium"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Svuota Archivio
+                  </button>
+                )}
+                <button
+                  onClick={handleCreateExcursion}
+                  className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-sm hover:shadow transition-all transform hover:-translate-y-0.5 font-medium"
+                >
+                  <Plus className="w-4 h-4" />
+                  Nuova Escursione
+                </button>
+              </div>
             )}
           </div>
 
@@ -535,12 +688,23 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                       </h3>
                     </div>
                     {currentUserRole === 'ADMIN' && (
-                      <button 
-                        onClick={(e) => handleEditExcursion(excursion, e)}
-                        className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-full transition-colors"
-                      >
-                        <Edit className="w-4 h-4" />
-                      </button>
+                      <div className="flex gap-1">
+                        {activeTab === 'ARCHIVE' && (
+                          <button 
+                            onClick={(e) => handleDeleteExcursion(excursion.id, excursion.name, e)}
+                            className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-full transition-colors"
+                            title="Elimina Escursione"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                        <button 
+                          onClick={(e) => handleEditExcursion(excursion, e)}
+                          className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-full transition-colors"
+                        >
+                          <Edit className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                   

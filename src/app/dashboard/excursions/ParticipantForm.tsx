@@ -124,7 +124,11 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
   }, [initialData])
 
   useEffect(() => {
-    if (formData.deposit > formData.price) {
+    const deposit = parseFloat(String(formData.deposit)) || 0
+    const price = parseFloat(String(formData.price)) || 0
+    
+    // Tolleranza per evitare errori di arrotondamento float
+    if (deposit > price + 0.01) {
       setDepositError('L\'acconto non può essere superiore al prezzo totale.')
     } else {
       setDepositError('')
@@ -160,10 +164,9 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
         newData.deposit = parseFloat(String(newData.price)) || 0
       }
 
-      // Selezionato Contanti: acconto = prezzo totale e imposta come Saldo
-      if (name === 'paymentMethod' && value === 'CASH') {
+      // Selezionato Contanti: imposta acconto = prezzo totale (solo se era Saldo)
+      if (name === 'paymentMethod' && value === 'CASH' && prev.paymentType === 'BALANCE') {
         newData.deposit = parseFloat(String(newData.price)) || 0
-        newData.paymentType = 'BALANCE'
       }
 
       // Se cambia il prezzo e siamo in Saldo, aggiorna acconto

@@ -1,4 +1,4 @@
-import { X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, Users, CheckCircle, AlertCircle, Clock, Info, UserCheck, FileDown } from 'lucide-react'
+import { X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, Users, CheckCircle, AlertCircle, Clock, Info, UserCheck, FileDown, RotateCcw } from 'lucide-react'
 import { generateParticipantPDF } from '@/lib/pdf-generator'
 
 interface ParticipantDetailsModalProps {
@@ -21,6 +21,7 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
   }
 
   const getStatusConfig = () => {
+    if (participant.paymentType === 'REFUNDED') return { color: 'text-gray-600 bg-gray-100', icon: RotateCcw, text: 'Rimborsato' }
     if (participant.isOption) return { color: 'text-red-600 bg-red-50', icon: Clock, text: 'Non pagato / Opzione' }
     if (participant.paymentType === 'DEPOSIT') return { color: 'text-orange-600 bg-orange-50', icon: AlertCircle, text: 'Acconto Versato' }
     if (participant.paymentType === 'BALANCE') return { color: 'text-green-600 bg-green-50', icon: CheckCircle, text: 'Saldato / Confermato' }

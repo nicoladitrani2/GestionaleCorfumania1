@@ -30,6 +30,24 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ error: 'Il numero di partecipanti deve essere almeno 1.' }, { status: 400 })
     }
     
+    // Check expiration logic
+    let newIsExpired = false
+    const excursion = await prisma.excursion.findUnique({
+      where: { id: participant.excursionId },
+      select: { confirmationDeadline: true }
+    })
+
+    if (excursion?.confirmationDeadline) {
+      const now = new Date()
+      const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
+      const finalPaymentType = body.paymentType || participant.paymentType
+      const finalIsOption = body.isOption !== undefined ? body.isOption : participant.isOption
+
+      if (isDeadlinePassed && (finalIsOption || finalPaymentType === 'DEPOSIT')) {
+        newIsExpired = true
+      }
+    }
+
     const updated = await prisma.participant.update({
       where: { id },
       data: {
@@ -48,7 +66,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           groupSize: body.groupSize ? parseInt(body.groupSize) : 1,
           price: body.price !== undefined ? body.price : undefined,
           deposit: body.deposit !== undefined ? body.deposit : undefined,
-          isExpired: false
+          isExpired: newIsExpired
       }
     })
 

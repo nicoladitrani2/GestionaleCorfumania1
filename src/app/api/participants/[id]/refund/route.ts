@@ -30,24 +30,30 @@ export async function POST(
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     }
 
-    // 1. Delete the participant
-    await prisma.participant.delete({
-      where: { id }
-    })
-
-    // 2. Create Audit Log
     const methodLabels: Record<string, string> = {
       'CASH': 'Contanti',
       'TRANSFER': 'Bonifico',
       'CARD': 'Carta'
     }
 
-    const details = `RIMBORSO: Partecipante ${participant.firstName} ${participant.lastName} rimborsato di €${refundAmount} tramite ${methodLabels[refundMethod] || refundMethod}. ${notes ? `Note: ${notes}. ` : ''}Partecipante eliminato.`
+    // 1. Update the participant to REFUNDED status instead of deleting
+    await prisma.participant.update({
+      where: { id },
+      data: {
+        paymentType: 'REFUNDED',
+        notes: participant.notes 
+          ? `${participant.notes}\n[${new Date().toLocaleDateString()}] Rimborsato €${refundAmount} (${methodLabels[refundMethod] || refundMethod}) - ${notes || ''}`
+          : `[${new Date().toLocaleDateString()}] Rimborsato €${refundAmount} (${methodLabels[refundMethod] || refundMethod}) - ${notes || ''}`
+      }
+    })
+
+    // 2. Create Audit Log
+    const details = `RIMBORSO: Partecipante ${participant.firstName} ${participant.lastName} rimborsato di €${refundAmount} tramite ${methodLabels[refundMethod] || refundMethod}. Stato aggiornato a REFUNDED.`
 
     await createAuditLog(
       session.user.id,
       participant.excursionId,
-      'DELETE_PARTICIPANT', // Using DELETE_PARTICIPANT category but with specific refund details
+      'UPDATE_PARTICIPANT', 
       details
     )
 

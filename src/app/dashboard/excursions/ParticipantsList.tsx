@@ -9,6 +9,7 @@ import { RefundModal } from './RefundModal'
 
 interface ParticipantsListProps {
   onEdit: (participant: any) => void
+  onUpdate?: () => void
   refreshTrigger: number
   currentUserId: string
   currentUserRole: string
@@ -17,6 +18,7 @@ interface ParticipantsListProps {
 
 export function ParticipantsList({ 
   onEdit, 
+  onUpdate,
   refreshTrigger, 
   currentUserId, 
   currentUserRole, 
@@ -47,6 +49,15 @@ export function ParticipantsList({
     }
   }
 
+  // Polling for live updates (every 5 seconds)
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchParticipants()
+    }, 5000)
+
+    return () => clearInterval(interval)
+  }, [excursionId])
+
   useEffect(() => {
     fetchParticipants()
   }, [excursionId, refreshTrigger])
@@ -60,6 +71,7 @@ export function ParticipantsList({
       })
       if (res.ok) {
         fetchParticipants()
+        if (onUpdate) onUpdate()
       }
     } catch (error) {
       console.error('Error deleting participant:', error)
@@ -84,6 +96,7 @@ export function ParticipantsList({
 
       if (res.ok) {
         fetchParticipants()
+        if (onUpdate) onUpdate()
       }
     } catch (error) {
       console.error('Error settling balance:', error)
@@ -98,7 +111,9 @@ export function ParticipantsList({
         body: JSON.stringify({ refundAmount: amount, refundMethod: method, notes })
       })
       if (res.ok) {
+        setShowRefund(false)
         fetchParticipants()
+        if (onUpdate) onUpdate()
       } else {
         const errorData = await res.json()
         alert(`Errore: ${errorData.error}`)
@@ -110,6 +125,7 @@ export function ParticipantsList({
   }
 
   const getStatusColor = (p: any) => {
+    if (p.paymentType === 'REFUNDED') return 'bg-gray-100 text-gray-500 border-gray-200' // Rimborsato
     if (p.isOption) return 'bg-red-50 text-red-700 border-red-100' // Non pagato / Opzione
     if (p.paymentType === 'DEPOSIT') return 'bg-orange-50 text-orange-700 border-orange-100' // Acconto
     if (p.paymentType === 'BALANCE') return 'bg-green-50 text-green-700 border-green-100' // Saldo / Confermato
@@ -117,6 +133,7 @@ export function ParticipantsList({
   }
 
   const getStatusIcon = (p: any) => {
+    if (p.paymentType === 'REFUNDED') return <RotateCcw className="w-3 h-3 mr-1" />
     if (p.isOption) return <Clock className="w-3 h-3 mr-1" />
     if (p.paymentType === 'DEPOSIT') return <AlertCircle className="w-3 h-3 mr-1" />
     if (p.paymentType === 'BALANCE') return <CheckCircle className="w-3 h-3 mr-1" />
@@ -124,6 +141,7 @@ export function ParticipantsList({
   }
 
   const getStatusText = (p: any) => {
+    if (p.paymentType === 'REFUNDED') return 'Rimborsato'
     if (p.isOption) return 'Non pagato'
     if (p.paymentType === 'DEPOSIT') return 'Acconto'
     if (p.paymentType === 'BALANCE') return 'Confermato'
@@ -136,13 +154,14 @@ export function ParticipantsList({
   }
 
   const getRowBackground = (p: any) => {
+    if (p.paymentType === 'REFUNDED') return 'bg-gray-50/50 hover:bg-gray-100/50 opacity-75'
     if (p.isOption) return 'bg-red-50/50 hover:bg-red-100/50'
     if (p.paymentType === 'DEPOSIT') return 'bg-orange-50/50 hover:bg-orange-100/50'
     if (p.paymentType === 'BALANCE') return 'bg-green-50/50 hover:bg-green-100/50'
     return 'hover:bg-gray-50'
   }
 
-  const exportToPDF = () => {
+  const exportListToPDF = (list: any[], title: string, filenamePrefix: string) => {
     const doc = new jsPDF()
     
     // --- Header Styling ---
@@ -156,10 +175,10 @@ export function ParticipantsList({
     doc.setFont('helvetica', 'bold')
     doc.text(excursionName || 'Dettagli Escursione', 14, 18)
     
-    // Subtitle "Lista Partecipanti Attivi" (White)
+    // Subtitle (White)
     doc.setFontSize(14)
     doc.setFont('helvetica', 'normal')
-    doc.text('Lista Partecipanti Attivi', 14, 26)
+    doc.text(title, 14, 26)
 
     // Date (White, smaller)
     doc.setFontSize(10)
@@ -177,13 +196,10 @@ export function ParticipantsList({
       doc.text(formattedDate, 14, 34)
     }
 
-    // Filter active participants
-    const activeParticipants = participants.filter(p => !p.isExpired)
-
     // Prepare table data
     // Columns: Nome, Posti, Nazionalità, Inserito da, Telefono, Note
     // Removed: Prezzo, Acconto, Stato (come richiesto)
-    const tableData = activeParticipants.map(p => [
+    const tableData = list.map(p => [
       `${p.firstName} ${p.lastName}`,
       p.groupSize?.toString() || '1',
       p.nationality || '-',
@@ -214,7 +230,7 @@ export function ParticipantsList({
         doc.text(`Generato il ${new Date().toLocaleDateString('it-IT')} - Pagina ${i} di ${pageCount}`, 14, doc.internal.pageSize.height - 10)
     }
 
-    doc.save(`partecipanti-attivi-${excursionName || 'escursione'}.pdf`)
+    doc.save(`${filenamePrefix}-${excursionName || 'escursione'}.pdf`)
   }
 
   if (loading) return (
@@ -223,8 +239,13 @@ export function ParticipantsList({
     </div>
   )
 
-  const activeParticipants = participants.filter(p => !p.isExpired)
-  const expiredParticipants = participants.filter(p => p.isExpired)
+  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED')
+  const expiredParticipants = participants.filter(p => p.isExpired && p.paymentType !== 'REFUNDED')
+  const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
+
+  const exportToPDF = () => {
+    exportListToPDF(activeParticipants, 'Lista Partecipanti Attivi', 'partecipanti-attivi')
+  }
 
   const thClassName = "px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
 
@@ -429,12 +450,15 @@ export function ParticipantsList({
       </div>
 
       <div className="space-y-4">
-        <div className="flex items-center gap-2 px-1">
-          <CheckCircle className="w-5 h-5 text-green-600" />
-          <h3 className="text-lg font-bold text-gray-800">Lista Partecipanti Attivi</h3>
-          <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-green-200">
-            {activeParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
-          </span>
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <h3 className="text-lg font-bold text-gray-800">Lista Partecipanti Attivi</h3>
+            <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-green-200">
+              {activeParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+            </span>
+          </div>
+          {/* Top button already handles this, but consistency is good. Keeping top button for main action. */}
         </div>
         <ParticipantsTable 
           data={activeParticipants} 
@@ -442,14 +466,50 @@ export function ParticipantsList({
         />
       </div>
 
+      {refundedParticipants.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-gray-600" />
+              <h3 className="text-lg font-bold text-gray-800">Lista Rimborsati</h3>
+              <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-gray-200">
+                {refundedParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+              </span>
+            </div>
+            <button
+              onClick={() => exportListToPDF(refundedParticipants, 'Lista Rimborsati', 'partecipanti-rimborsati')}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Esporta PDF
+            </button>
+          </div>
+          <div className="opacity-75 hover:opacity-100 transition-opacity">
+            <ParticipantsTable 
+              data={refundedParticipants} 
+              emptyMessage="Nessun partecipante rimborsato" 
+            />
+          </div>
+        </div>
+      )}
+
       {expiredParticipants.length > 0 && (
         <div className="space-y-4">
-          <div className="flex items-center gap-2 px-1">
-            <Clock className="w-5 h-5 text-red-600" />
-            <h3 className="text-lg font-bold text-gray-800">Lista d'Attesa / Scaduti</h3>
-            <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
-              {expiredParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
-            </span>
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-red-600" />
+              <h3 className="text-lg font-bold text-gray-800">Lista d'Attesa / Scaduti</h3>
+              <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
+                {expiredParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+              </span>
+            </div>
+            <button
+              onClick={() => exportListToPDF(expiredParticipants, 'Lista d\'Attesa / Scaduti', 'partecipanti-scaduti')}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Esporta PDF
+            </button>
           </div>
           <div className="opacity-75 hover:opacity-100 transition-opacity">
             <ParticipantsTable 
