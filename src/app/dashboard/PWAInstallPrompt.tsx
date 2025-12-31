@@ -19,8 +19,8 @@ export default function PWAInstallPrompt() {
     const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
     setIsIOS(ios)
 
-    // Check local storage
-    const dismissed = sessionStorage.getItem('pwa-prompt-dismissed')
+    // Check local storage (new key to reset state)
+    const dismissed = sessionStorage.getItem('pwa-prompt-dismissed-v2')
     const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
     // Initial check for global deferred prompt
@@ -47,13 +47,14 @@ export default function PWAInstallPrompt() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
 
-    // Force show if mobile and not installed (even if no prompt caught yet)
+    // Force show if not installed (even if no prompt caught yet)
     // This allows showing manual instructions if the prompt fails
-    if (!isStandalone && isMobile && !dismissed) {
+    // Removed isMobile check to ensure it appears for debugging/tablet users too
+    if (!isStandalone && !dismissed) {
          // We wait a bit to see if the event fires, if not we show the manual prompt
          const timer = setTimeout(() => {
              setShowPrompt(true)
-         }, 2000)
+         }, 1000)
          return () => clearTimeout(timer)
     }
 
@@ -77,7 +78,7 @@ export default function PWAInstallPrompt() {
 
   const handleDismiss = () => {
       setShowPrompt(false)
-      sessionStorage.setItem('pwa-prompt-dismissed', 'true')
+      sessionStorage.setItem('pwa-prompt-dismissed-v2', 'true')
   }
 
   if (isStandalone || !showPrompt) return null
