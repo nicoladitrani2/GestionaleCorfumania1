@@ -19,40 +19,46 @@ export default function PWAInstallPrompt() {
     const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream
     setIsIOS(ios)
 
-    // Listen for install prompt (Android/Desktop)
+    // Check local storage
+    const dismissed = sessionStorage.getItem('pwa-prompt-dismissed')
+
+    // Initial check for global deferred prompt
+    if ((window as any).deferredPrompt) {
+        setDeferredPrompt((window as any).deferredPrompt)
+        if (!dismissed) setShowPrompt(true)
+    }
+
+    // Listen for custom event from PWALifecycle
+    const handlePWAPromptReady = () => {
+        if ((window as any).deferredPrompt) {
+            setDeferredPrompt((window as any).deferredPrompt)
+            if (!dismissed) setShowPrompt(true)
+        }
+    }
+    window.addEventListener('pwa-prompt-ready', handlePWAPromptReady)
+
+    // Listen for install prompt (Android/Desktop) - Backup
     const handleBeforeInstallPrompt = (e: any) => {
       e.preventDefault()
       setDeferredPrompt(e)
-      setShowPrompt(true)
+      if (!dismissed) setShowPrompt(true)
     }
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
 
-    // Check if installed
-    if (window.matchMedia('(display-mode: standalone)').matches) {
-      setIsStandalone(true)
-    }
-
-    // Logic for iOS or manual trigger if not installed
-    // We check if it's NOT standalone to decide whether to show the prompt
-    // For iOS, we don't get 'beforeinstallprompt', so we just check standalone status
-    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
-    
-    // Check local storage to see if user dismissed it recently (optional, but good practice)
-    // For now, user requested "proprio che c'è un pop up", so we'll be aggressive but respect a session dismissal
-    const dismissed = sessionStorage.getItem('pwa-prompt-dismissed')
-
-    if (!dismissed) {
-        if (ios && !isStandalone) {
-            setShowPrompt(true)
-        } else if (!isStandalone && isMobile) {
-            // For Android without beforeinstallprompt (unlikely but possible), or just waiting for event
-            // The event listener above will handle the prompt availability
-        }
+    // Force show if mobile and not installed (even if no prompt caught yet)
+    // This allows showing manual instructions if the prompt fails
+    if (!isStandalone && isMobile && !dismissed) {
+         // We wait a bit to see if the event fires, if not we show the manual prompt
+         const timer = setTimeout(() => {
+             setShowPrompt(true)
+         }, 2000)
+         return () => clearTimeout(timer)
     }
 
     return () => {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
+      window.removeEventListener('pwa-prompt-ready', handlePWAPromptReady)
     }
   }, [isStandalone])
 
@@ -104,22 +110,43 @@ export default function PWAInstallPrompt() {
           {isIOS ? (
             <div className="w-full bg-gray-50 rounded-xl p-4 text-left space-y-3 border border-gray-100">
               <div className="flex items-center gap-3 text-gray-700">
-                <Share className="w-5 h-5 text-blue-500" />
-                <span className="text-sm font-medium">1. Tocca il tasto <span className="font-bold">Condividi</span></span>
+                <span className="flex items-center justify-center w-8 h-8 bg-white rounded-lg shadow-sm text-blue-600">
+                  <Share className="w-5 h-5" />
+                </span>
+                <span className="text-sm font-medium">1. Tocca il tasto Condividi</span>
               </div>
               <div className="flex items-center gap-3 text-gray-700">
-                <PlusSquare className="w-5 h-5 text-blue-500" />
-                <span className="text-sm font-medium">2. Scorri e seleziona <span className="font-bold">Aggiungi alla schermata Home</span></span>
+                <span className="flex items-center justify-center w-8 h-8 bg-white rounded-lg shadow-sm text-blue-600">
+                  <PlusSquare className="w-5 h-5" />
+                </span>
+                <span className="text-sm font-medium">2. Scorri e seleziona "Aggiungi alla Home"</span>
               </div>
             </div>
           ) : (
-            <button
-              onClick={handleInstallClick}
-              className="w-full py-3.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-base font-bold shadow-lg shadow-blue-200 transition-all active:scale-95 flex items-center justify-center gap-2"
-            >
-              <Download className="w-5 h-5" />
-              Installa Applicazione
-            </button>
+             deferredPrompt ? (
+                <button
+                onClick={handleInstallClick}
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-all duration-200"
+                >
+                Installa App
+                </button>
+             ) : (
+                <div className="w-full bg-gray-50 rounded-xl p-4 text-left space-y-3 border border-gray-100">
+                    <p className="text-sm text-gray-600 mb-2 font-medium">Installa dal menu del browser:</p>
+                    <div className="flex items-center gap-3 text-gray-700">
+                        <span className="flex items-center justify-center w-8 h-8 bg-white rounded-lg shadow-sm text-gray-600">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
+                        </span>
+                        <span className="text-sm font-medium">1. Tocca i 3 puntini in alto a destra</span>
+                    </div>
+                    <div className="flex items-center gap-3 text-gray-700">
+                        <span className="flex items-center justify-center w-8 h-8 bg-white rounded-lg shadow-sm text-gray-600">
+                        <Download className="w-5 h-5" />
+                        </span>
+                        <span className="text-sm font-medium">2. Seleziona "Installa app"</span>
+                    </div>
+                </div>
+             )
           )}
           
           <div className="mt-4">
