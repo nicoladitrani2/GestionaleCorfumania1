@@ -3,7 +3,7 @@
   "short_name": "Corfumania",
   "description": "Gestionale per escursioni e trasferimenti",
   "scope": "/",
-  "start_url": "/dashboard",
+  "start_url": "/login",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#2563eb",

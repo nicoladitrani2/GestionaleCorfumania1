@@ -28,6 +28,11 @@ export default function PWAInstallPrompt() {
 
     window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt)
 
+    // Check if installed
+    if (window.matchMedia('(display-mode: standalone)').matches) {
+      setIsStandalone(true)
+    }
+
     // Logic for iOS or manual trigger if not installed
     // We check if it's NOT standalone to decide whether to show the prompt
     // For iOS, we don't get 'beforeinstallprompt', so we just check standalone status
