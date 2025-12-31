@@ -236,6 +236,13 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
     const start = new Date(newStartDate)
     const end = newEndDate ? new Date(newEndDate) : null
     const deadline = newConfirmationDeadline ? new Date(newConfirmationDeadline) : null
+    const now = new Date()
+
+    // Controllo data passata (solo per nuovi inserimenti)
+    if (!editingExcursionId && start < now) {
+      setError('La data di inizio non può essere nel passato.')
+      return
+    }
 
     if (end && end < start) {
       setError('La data di fine non può essere precedente alla data di inizio.')

@@ -179,6 +179,21 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
         return
     }
 
+    // Validazione date
+    const start = new Date(newDate)
+    const end = newEndDate ? new Date(newEndDate) : null
+    const now = new Date()
+
+    if (!editingTransferId && start < now) {
+      setError('La data di partenza non può essere nel passato.')
+      return
+    }
+
+    if (end && end < start) {
+      setError('La data di arrivo non può essere precedente alla data di partenza.')
+      return
+    }
+
     try {
       const url = '/api/transfers'
       const method = editingTransferId ? 'PUT' : 'POST'

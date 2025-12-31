@@ -115,6 +115,13 @@ export async function POST(request: Request) {
 
   if (startDate) {
     const start = new Date(startDate)
+    const now = new Date()
+    
+    // Validate past date (allow 5 minute buffer for clock sync issues)
+    if (start < new Date(now.getTime() - 5 * 60 * 1000)) {
+       return NextResponse.json({ error: 'La data di inizio non può essere nel passato.' }, { status: 400 })
+    }
+
     if (endDate && new Date(endDate) < start) {
       return NextResponse.json({ error: 'La data di fine non può essere precedente alla data di inizio.' }, { status: 400 })
     }

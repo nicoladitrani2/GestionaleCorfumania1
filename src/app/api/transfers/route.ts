@@ -145,6 +145,18 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
     }
 
+    const startDate = new Date(date)
+    const now = new Date()
+    
+    // Validate past date (allow 5 minute buffer)
+    if (startDate < new Date(now.getTime() - 5 * 60 * 1000)) {
+        return NextResponse.json({ error: 'La data di partenza non può essere nel passato.' }, { status: 400 })
+    }
+
+    if (endDate && new Date(endDate) < startDate) {
+        return NextResponse.json({ error: 'La data di arrivo non può essere precedente alla data di partenza.' }, { status: 400 })
+    }
+
     const transfer = await prisma.transfer.create({
       data: {
         name,
@@ -182,6 +194,14 @@ export async function PUT(request: Request) {
     const { id, name, date, supplier, pickupLocation, dropoffLocation, endDate } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
+
+    if (date && endDate) {
+        const start = new Date(date)
+        const end = new Date(endDate)
+        if (end < start) {
+            return NextResponse.json({ error: 'La data di arrivo non può essere precedente alla data di partenza.' }, { status: 400 })
+        }
+    }
 
     const transfer = await prisma.transfer.update({
       where: { id },
