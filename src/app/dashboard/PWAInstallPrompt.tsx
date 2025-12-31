@@ -21,6 +21,7 @@ export default function PWAInstallPrompt() {
 
     // Check local storage
     const dismissed = sessionStorage.getItem('pwa-prompt-dismissed')
+    const isMobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent)
 
     // Initial check for global deferred prompt
     if ((window as any).deferredPrompt) {
