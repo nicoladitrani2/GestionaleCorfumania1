@@ -52,9 +52,10 @@ export async function POST(
 
     await createAuditLog(
       session.user.id,
-      participant.excursionId,
       'UPDATE_PARTICIPANT', 
-      details
+      details,
+      participant.excursionId,
+      participant.transferId
     )
 
     return NextResponse.json({ success: true })

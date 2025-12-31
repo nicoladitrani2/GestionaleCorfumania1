@@ -32,19 +32,39 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     
     // Check expiration logic
     let newIsExpired = false
-    const excursion = await prisma.excursion.findUnique({
-      where: { id: participant.excursionId },
-      select: { confirmationDeadline: true }
-    })
+    if (participant.excursionId) {
+      const excursion = await prisma.excursion.findUnique({
+        where: { id: participant.excursionId },
+        select: { confirmationDeadline: true }
+      })
 
-    if (excursion?.confirmationDeadline) {
-      const now = new Date()
-      const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
-      const finalPaymentType = body.paymentType || participant.paymentType
-      const finalIsOption = body.isOption !== undefined ? body.isOption : participant.isOption
+      if (excursion?.confirmationDeadline) {
+        const now = new Date()
+        const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
+        const finalPaymentType = body.paymentType || participant.paymentType
+        const finalIsOption = body.isOption !== undefined ? body.isOption : participant.isOption
 
-      if (isDeadlinePassed && (finalIsOption || finalPaymentType === 'DEPOSIT')) {
-        newIsExpired = true
+        if (isDeadlinePassed && (finalIsOption || finalPaymentType === 'DEPOSIT')) {
+          newIsExpired = true
+        }
+      }
+    } else if (participant.transferId) {
+      const transfer = await prisma.transfer.findUnique({
+        where: { id: participant.transferId },
+        select: { date: true }
+      })
+
+      if (transfer) {
+        const startOfToday = new Date()
+        startOfToday.setHours(0, 0, 0, 0)
+        
+        const isTransferPassed = new Date(transfer.date) < startOfToday
+        const finalPaymentType = body.paymentType || participant.paymentType
+        const finalIsOption = body.isOption !== undefined ? body.isOption : participant.isOption
+
+        if (isTransferPassed && (finalIsOption || finalPaymentType === 'DEPOSIT')) {
+          newIsExpired = true
+        }
       }
     }
 
@@ -63,6 +83,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           isOption: body.isOption,
           paymentType: body.paymentType,
           paymentMethod: body.paymentMethod,
+          depositPaymentMethod: body.depositPaymentMethod,
+          balancePaymentMethod: body.balancePaymentMethod,
+          
+          // Transfer fields
+          pickupLocation: body.pickupLocation,
+          dropoffLocation: body.dropoffLocation,
+          pickupTime: body.pickupTime,
+          returnPickupLocation: body.returnPickupLocation,
+          returnDate: body.returnDate ? new Date(body.returnDate) : undefined,
+          returnTime: body.returnTime,
+
           groupSize: body.groupSize ? parseInt(body.groupSize) : 1,
           price: body.price !== undefined ? body.price : undefined,
           deposit: body.deposit !== undefined ? body.deposit : undefined,
@@ -136,6 +167,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (body.notes !== undefined && body.notes !== participant.notes) {
       changes.push(`Note modificate`)
     }
+    if (body.pickupLocation !== undefined && body.pickupLocation !== participant.pickupLocation) {
+        changes.push(`Pickup: ${participant.pickupLocation || 'N/A'} -> ${body.pickupLocation}`)
+    }
+    if (body.dropoffLocation !== undefined && body.dropoffLocation !== participant.dropoffLocation) {
+        changes.push(`Dropoff: ${participant.dropoffLocation || 'N/A'} -> ${body.dropoffLocation}`)
+    }
+    if (body.returnDate && formatDate(new Date(body.returnDate)) !== formatDate(participant.returnDate)) {
+        changes.push(`Ritorno: ${formatDate(participant.returnDate)} -> ${formatDate(new Date(body.returnDate))}`)
+    }
 
     let details = `Modificato partecipante ${updated.firstName} ${updated.lastName}`
     if (changes.length > 0) {
@@ -144,9 +184,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     await createAuditLog(
       session.user.id,
-      participant.excursionId,
       'UPDATE_PARTICIPANT',
-      details
+      details,
+      participant.excursionId,
+      participant.transferId
     )
 
     // Send Email if email and PDF are provided (Logic copied from POST)
@@ -183,7 +224,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         const info = await transporter.sendMail({
             from: `"Corfumania" <${process.env.EMAIL_USER}>`,
             to: body.email,
-            subject: 'Aggiornamento Prenotazione Escursione - Corfumania',
+            subject: 'Aggiornamento Prenotazione - Corfumania',
             text: `Gentile ${updated.firstName} ${updated.lastName},\n\nIn allegato trovi il riepilogo AGGIORNATO della tua prenotazione.\n\nCordiali saluti,\nTeam Corfumania`,
             attachments: [
                 {
@@ -237,9 +278,10 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   await createAuditLog(
     session.user.id,
-    participant.excursionId,
     'DELETE_PARTICIPANT',
-    `Eliminato partecipante ${participant.firstName} ${participant.lastName}`
+    `Eliminato partecipante ${participant.firstName} ${participant.lastName}`,
+    participant.excursionId,
+    participant.transferId
   )
 
   return NextResponse.json({ success: true })

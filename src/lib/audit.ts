@@ -2,18 +2,28 @@ import { prisma } from '@/lib/prisma'
 
 export async function createAuditLog(
   userId: string,
-  excursionId: string,
   action: string,
-  details: string
+  details: string,
+  excursionId?: string | null,
+  transferId?: string | null
 ) {
   try {
+    const data: any = {
+      userId,
+      action,
+      details,
+    }
+
+    if (excursionId) {
+        data.excursionId = excursionId
+    }
+    
+    if (transferId) {
+        data.transferId = transferId
+    }
+
     await prisma.auditLog.create({
-      data: {
-        userId,
-        excursionId,
-        action,
-        details,
-      },
+      data,
     })
   } catch (error) {
     console.error('Failed to create audit log:', error)

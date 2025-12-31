@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Map, Users, Settings, Briefcase } from 'lucide-react'
+import { Map, Users, Settings, Briefcase, Bus } from 'lucide-react'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { WeeklyCalendar } from './WeeklyCalendar'
@@ -42,6 +42,14 @@ export default async function DashboardPage() {
       icon: Map,
       href: '/dashboard/excursions',
       color: 'bg-blue-500',
+      visible: true
+    },
+    {
+      title: 'Trasferimenti',
+      description: 'Gestione trasferimenti e partecipanti',
+      icon: Bus,
+      href: '/dashboard/transfers',
+      color: 'bg-orange-500',
       visible: true
     },
     {

@@ -34,14 +34,28 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
                 Gestionale Corfumania
               </h1>
             </Link>
-            {!isDashboardRoot && (
-              <div className="hidden md:flex items-center text-sm text-gray-500 border-l border-gray-200 pl-4 ml-4">
-                <Link href="/dashboard" className="hover:text-blue-600 flex items-center gap-1">
-                  <Home className="w-4 h-4" />
-                  Dashboard
-                </Link>
-              </div>
-            )}
+            
+            <div className="hidden md:flex items-center gap-4 ml-6 border-l border-gray-200 pl-6">
+              <Link href="/dashboard" className={`text-sm font-medium ${isDashboardRoot ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                Dashboard
+              </Link>
+              <Link href="/dashboard/excursions" className={`text-sm font-medium ${pathname.startsWith('/dashboard/excursions') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                Escursioni
+              </Link>
+              <Link href="/dashboard/transfers" className={`text-sm font-medium ${pathname.startsWith('/dashboard/transfers') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                Trasferimenti
+              </Link>
+              {user.role === 'ADMIN' && (
+                <>
+                  <Link href="/dashboard/users" className={`text-sm font-medium ${pathname.startsWith('/dashboard/users') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                    Assistenti
+                  </Link>
+                  <Link href="/dashboard/suppliers" className={`text-sm font-medium ${pathname.startsWith('/dashboard/suppliers') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                    Rifornitori
+                  </Link>
+                </>
+              )}
+            </div>
           </div>
           
           <div className="flex items-center gap-6">

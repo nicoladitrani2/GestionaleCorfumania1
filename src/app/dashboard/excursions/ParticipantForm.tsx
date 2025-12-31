@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Save, X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, UserPlus } from 'lucide-react'
+import { Save, X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, UserPlus, Map as MapIcon } from 'lucide-react'
 
 import { generateParticipantPDF } from '@/lib/pdf-generator'
 
@@ -9,9 +9,19 @@ interface ParticipantFormProps {
   onSuccess: () => void
   onCancel: () => void
   initialData?: any
-  excursionId: string
+  excursionId?: string
+  transferId?: string
   excursionName?: string
   excursionDate?: string | Date
+  type?: 'EXCURSION' | 'TRANSFER'
+  defaultValues?: {
+    pickupLocation?: string
+    dropoffLocation?: string
+    pickupTime?: string
+    returnDate?: string
+    returnTime?: string
+    returnPickupLocation?: string
+  }
 }
 
 const NATIONALITIES = [
@@ -33,7 +43,17 @@ const NATIONALITIES = [
   { code: 'OTHER', name: 'Altro' }
 ]
 
-export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId, excursionName, excursionDate }: ParticipantFormProps) {
+export function ParticipantForm({ 
+  onSuccess, 
+  onCancel, 
+  initialData, 
+  excursionId, 
+  transferId,
+  excursionName, 
+  excursionDate,
+  type = 'EXCURSION',
+  defaultValues
+}: ParticipantFormProps) {
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -48,9 +68,17 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
     isOption: false,
     paymentType: 'DEPOSIT',
     paymentMethod: 'CASH',
+    depositPaymentMethod: 'CASH',
+    balancePaymentMethod: '',
     groupSize: 1,
     price: 0,
     deposit: 0,
+    pickupLocation: defaultValues?.pickupLocation || '',
+    dropoffLocation: defaultValues?.dropoffLocation || '',
+    pickupTime: defaultValues?.pickupTime || '',
+    returnPickupLocation: defaultValues?.returnPickupLocation || '',
+    returnDate: defaultValues?.returnDate || '',
+    returnTime: defaultValues?.returnTime || '',
   })
   const [customNationality, setCustomNationality] = useState('')
   const [error, setError] = useState('')
@@ -111,9 +139,18 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
         isOption: initialData.isOption,
         paymentType: initialData.paymentType,
         paymentMethod: initialData.paymentMethod,
+        depositPaymentMethod: initialData.depositPaymentMethod || initialData.paymentMethod || 'CASH',
+        balancePaymentMethod: initialData.balancePaymentMethod || '',
         groupSize: initialData.groupSize || 1,
         price: initialData.price || 0,
         deposit: initialData.deposit || 0,
+        
+        pickupLocation: initialData.pickupLocation || '',
+        dropoffLocation: initialData.dropoffLocation || '',
+        pickupTime: initialData.pickupTime || '',
+        returnPickupLocation: initialData.returnPickupLocation || '',
+        returnDate: initialData.returnDate ? new Date(initialData.returnDate).toISOString().split('T')[0] : '',
+        returnTime: initialData.returnTime || '',
       })
       if (!isStandard) {
         setCustomNationality(initialData.nationality)
@@ -217,16 +254,37 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
         nationality: formData.nationality === 'OTHER' ? customNationality : formData.nationality,
         price: parseFloat(String(formData.price)) || 0,
         deposit: parseFloat(String(formData.deposit)) || 0,
-        excursionId
+        excursionId: type === 'EXCURSION' ? excursionId : undefined,
+        transferId: type === 'TRANSFER' ? transferId : undefined,
+        paymentMethod: formData.depositPaymentMethod, // Legacy sync
       }
 
       // Se c'è un'email, genera il PDF (sia per creazione che per modifica)
       if (formData.email) {
-        // Se mancano i dati escursione, logghiamo l'errore ma procediamo senza PDF
-        if (!excursionName || !excursionDate) {
-          console.error("Dati escursione mancanti per generazione PDF", { excursionName, excursionDate });
+        const entityName = excursionName
+        const entityDate = excursionDate
+
+        // Se mancano i dati, logghiamo l'errore ma procediamo senza PDF
+        if (!entityName || !entityDate) {
+          console.error("Dati evento mancanti per generazione PDF", { entityName, entityDate });
           await sendData(payload);
           return;
+        }
+
+        const eventData = type === 'TRANSFER' ? {
+            type: 'TRANSFER',
+            name: entityName,
+            date: entityDate,
+            pickupLocation: formData.pickupLocation,
+            dropoffLocation: formData.dropoffLocation,
+            pickupTime: formData.pickupTime,
+            returnDate: formData.returnDate,
+            returnTime: formData.returnTime,
+            returnPickupLocation: formData.returnPickupLocation
+        } : {
+            type: 'EXCURSION',
+            name: entityName,
+            date: entityDate
         }
 
         const doc = generateParticipantPDF(
@@ -235,10 +293,7 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
             firstName: formData.firstName,
             lastName: formData.lastName
           }, 
-          { 
-            name: excursionName,
-            date: excursionDate 
-          }
+          eventData as any
         )
         const pdfBlob = doc.output('blob')
         
@@ -392,6 +447,21 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
               </div>
 
               <div>
+                <label className={labelClassName}>Numero Persone</label>
+                <div className="relative">
+                  <input
+                    type="number"
+                    name="groupSize"
+                    value={formData.groupSize}
+                    onChange={handleChange}
+                    min="1"
+                    className={`${inputClassName} pl-10`}
+                  />
+                  <UserPlus className="w-4 h-4 text-gray-400 absolute left-3 top-[38px] -translate-y-1/2" />
+                </div>
+              </div>
+
+              <div>
                 <label className={labelClassName}>Nazionalità</label>
                 <div className="flex gap-2">
                   <select
@@ -508,20 +578,84 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
                 </div>
               </div>
 
-              <div>
-                <label className={labelClassName}>Numero Persone</label>
-                <div className="relative">
-                  <input
-                    type="number"
-                    name="groupSize"
-                    value={formData.groupSize}
-                    onChange={handleChange}
-                    min="1"
-                    className={`${inputClassName} pl-10`}
-                  />
-                  <UserPlus className="w-4 h-4 text-gray-400 absolute left-3 top-[38px] -translate-y-1/2" />
+              {type === 'TRANSFER' && (
+                <div className="col-span-1 md:col-span-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-b border-gray-100 py-4 my-2">
+                  <h4 className="md:col-span-2 font-medium text-gray-700 mb-2 flex items-center gap-2">
+                    <MapIcon className="w-4 h-4" />
+                    Dettagli Trasferimento
+                  </h4>
+                  
+                  <div>
+                    <label className={labelClassName}>Luogo Ritiro</label>
+                    <input
+                      type="text"
+                      name="pickupLocation"
+                      value={formData.pickupLocation}
+                      onChange={handleChange}
+                      className={inputClassName}
+                      placeholder="Hotel, Aeroporto, ecc."
+                    />
+                  </div>
+                  
+                  <div>
+                    <label className={labelClassName}>Ora Ritiro</label>
+                    <input
+                      type="time"
+                      name="pickupTime"
+                      value={formData.pickupTime}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelClassName}>Luogo Deposito (Opzionale)</label>
+                    <input
+                      type="text"
+                      name="dropoffLocation"
+                      value={formData.dropoffLocation}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    />
+                  </div>
+
+                  <div>
+                    <label className={labelClassName}>Data Ritorno (Opzionale)</label>
+                    <input
+                      type="date"
+                      name="returnDate"
+                      value={formData.returnDate}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    />
+                  </div>
+
+                  {formData.returnDate && (
+                    <>
+                        <div>
+                        <label className={labelClassName}>Ora Ritorno</label>
+                        <input
+                            type="time"
+                            name="returnTime"
+                            value={formData.returnTime}
+                            onChange={handleChange}
+                            className={inputClassName}
+                        />
+                        </div>
+                        <div>
+                        <label className={labelClassName}>Luogo Ritiro Ritorno</label>
+                        <input
+                            type="text"
+                            name="returnPickupLocation"
+                            value={formData.returnPickupLocation}
+                            onChange={handleChange}
+                            className={inputClassName}
+                        />
+                        </div>
+                    </>
+                  )}
                 </div>
-              </div>
+              )}
             </div>
           </div>
 
@@ -560,23 +694,48 @@ export function ParticipantForm({ onSuccess, onCancel, initialData, excursionId,
                     className={`${inputClassName} disabled:bg-gray-100 disabled:text-gray-400`}
                   >
                     <option value="DEPOSIT">Acconto</option>
-                    <option value="BALANCE">Saldo / Pagamento Completo</option>
+                    <option value="BALANCE">Saldo (Pagato)</option>
                   </select>
                 </div>
-                <div>
+
+                <div className="col-span-2">
                   <label className={labelClassName}>Metodo Pagamento</label>
-                  <select
-                    name="paymentMethod"
-                    value={formData.paymentMethod}
-                    onChange={handleChange}
-                    disabled={formData.isOption}
-                    className={`${inputClassName} disabled:bg-gray-100 disabled:text-gray-400`}
-                  >
-                    <option value="CASH">Contanti</option>
-                    <option value="TRANSFER">Bonifico</option>
-                    <option value="CARD">Carta</option>
-                  </select>
+                  <div className="flex gap-4">
+                      <div className="flex-1">
+                          <span className="text-[10px] text-gray-500 mb-1 block uppercase">
+                              {formData.paymentType === 'BALANCE' ? 'Acconto / Unico' : 'Acconto'}
+                          </span>
+                          <select
+                              name="depositPaymentMethod"
+                              value={formData.depositPaymentMethod}
+                              onChange={handleChange}
+                              className={inputClassName}
+                          >
+                              <option value="CASH">Contanti</option>
+                              <option value="CARD">Carta</option>
+                              <option value="TRANSFER">Bonifico</option>
+                          </select>
+                      </div>
+
+                      {formData.paymentType === 'BALANCE' && (
+                          <div className="flex-1">
+                              <span className="text-[10px] text-gray-500 mb-1 block uppercase">Saldo</span>
+                              <select
+                                  name="balancePaymentMethod"
+                                  value={formData.balancePaymentMethod}
+                                  onChange={handleChange}
+                                  className={inputClassName}
+                              >
+                                  <option value="">-- Stesso --</option>
+                                  <option value="CASH">Contanti</option>
+                                  <option value="CARD">Carta</option>
+                                  <option value="TRANSFER">Bonifico</option>
+                              </select>
+                          </div>
+                      )}
+                  </div>
                 </div>
+
                 <div>
                   <label className={labelClassName}>Prezzo Totale (€)</label>
                   <div className="relative">

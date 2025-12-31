@@ -37,6 +37,20 @@ model Excursion {
   auditLogs            AuditLog[]
 }
 
+model Transfer {
+  id              String   @id @default(cuid())
+  name            String
+  date            DateTime
+  endDate         DateTime?
+  pickupLocation  String?
+  dropoffLocation String?
+  supplier        String
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  participants    Participant[]
+  auditLogs       AuditLog[]
+}
+
 model ExcursionTemplate {
   id        String   @id @default(cuid())
   name      String   @unique
@@ -52,8 +66,11 @@ model AuditLog {
   user        User      @relation(fields: [userId], references: [id])
   userId      String
 
-  excursion   Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
-  excursionId String
+  excursion   Excursion? @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  excursionId String?
+
+  transfer    Transfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  transferId  String?
 
   createdAt   DateTime  @default(now())
 }
@@ -73,17 +90,32 @@ model Participant {
   isOption      Boolean   @default(false)
   supplier      String
   paymentType   String
-  paymentMethod String
+  paymentMethod String // Kept for backward compatibility, will map to depositPaymentMethod
   
+  depositPaymentMethod String?
+  balancePaymentMethod String?
+
   price         Float     @default(0)
   deposit       Float     @default(0)
 
   isExpired     Boolean   @default(false)
 
+  // Transfer specific fields
+  pickupLocation       String?
+  dropoffLocation      String?
+  pickupTime           String?
+  returnPickupLocation String?
+  returnDate           DateTime?
+  returnTime           String?
+
   createdBy     User      @relation(fields: [createdById], references: [id])
   createdById   String
-  excursion     Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
-  excursionId   String
+  
+  excursion     Excursion? @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  excursionId   String?
+
+  transfer      Transfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  transferId    String?
 
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt

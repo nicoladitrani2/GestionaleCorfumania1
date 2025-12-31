@@ -29,26 +29,40 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
   }
 
   const exportToPDF = () => {
-    // Se abbiamo i dati dell'escursione, usiamo la nuova funzione
+    // Se abbiamo i dati dell'escursione/trasferimento
     if (excursion) {
+      // Determina se è un trasferimento controllando se il partecipante ha un transferId o se l'oggetto excursion ha campi da trasferimento
+      const isTransfer = participant.transferId || 'pickupLocation' in excursion
+
+      const eventData = isTransfer ? {
+        type: 'TRANSFER',
+        name: excursion.name,
+        date: excursion.date,
+        pickupLocation: participant.pickupLocation || excursion.pickupLocation,
+        dropoffLocation: participant.dropoffLocation || excursion.dropoffLocation,
+        pickupTime: participant.pickupTime,
+        returnDate: participant.returnDate,
+        returnTime: participant.returnTime,
+        returnPickupLocation: participant.returnPickupLocation
+      } : {
+        type: 'EXCURSION',
+        name: excursion.name,
+        date: excursion.date || excursion.startDate
+      }
+
       const doc = generateParticipantPDF(
         participant, 
-        {
-          name: excursion.name,
-          date: excursion.date
-        }
+        eventData as any
       )
       doc.save(`scheda-partecipante-${participant.firstName}-${participant.lastName}.pdf`)
       return
     }
     
-    // Fallback se non ci sono dati escursione (non dovrebbe accadere se passati correttamente)
-    const { jsPDF } = require("jspdf"); // Import dinamico per fallback
+    // Fallback se non ci sono dati escursione
+    const { jsPDF } = require("jspdf");
     const doc = new jsPDF()
-    // ... vecchia logica rimossa per brevità, o mantenuta come fallback semplice
     doc.text('Dettagli Partecipante', 14, 20)
     doc.text(`${participant.firstName} ${participant.lastName}`, 14, 30)
-    // ... minimal fallback
     doc.save(`scheda-partecipante-${participant.firstName}-${participant.lastName}.pdf`)
   }
 

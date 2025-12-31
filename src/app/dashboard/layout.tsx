@@ -1,6 +1,7 @@
 import { getSession } from '@/lib/auth'
 import { DashboardNavbar } from './DashboardNavbar'
 import { redirect } from 'next/navigation'
+import { AutoLogout } from './AutoLogout'
 
 export default async function DashboardLayout({
   children,
@@ -15,6 +16,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <AutoLogout />
       <DashboardNavbar user={session.user} />
 
       <main className="max-w-7xl mx-auto py-8 px-4 sm:px-6 lg:px-8">

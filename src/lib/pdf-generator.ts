@@ -22,14 +22,27 @@ interface ParticipantData {
   }
 }
 
+interface TransferData {
+  type: 'TRANSFER'
+  name: string
+  date: string | Date
+  pickupLocation?: string
+  dropoffLocation?: string
+  pickupTime?: string
+  returnDate?: string | Date
+  returnTime?: string
+  returnPickupLocation?: string
+}
+
 interface ExcursionData {
+  type?: 'EXCURSION' // Optional for backward compatibility, defaults to EXCURSION if undefined
   name: string
   date: string | Date
   departureTime?: string
   meetingPoint?: string
 }
 
-export const generateParticipantPDF = (participant: ParticipantData, excursion: ExcursionData): jsPDF => {
+export const generateParticipantPDF = (participant: ParticipantData, event: ExcursionData | TransferData): jsPDF => {
   const doc = new jsPDF()
 
   // --- Header ---
@@ -41,7 +54,7 @@ export const generateParticipantPDF = (participant: ParticipantData, excursion: 
   doc.setTextColor(31, 41, 55) // gray-800
   doc.setFontSize(22)
   doc.setFont('helvetica', 'bold')
-  doc.text('Dettagli Partecipante', 20, 20)
+  doc.text('Dettagli Prenotazione', 20, 20)
   
   // Subtitle
   doc.setFontSize(10)
@@ -76,20 +89,72 @@ export const generateParticipantPDF = (participant: ParticipantData, excursion: 
 
   let yPos = 50
 
-  // --- Excursion Section ---
+  // --- Event Section ---
   doc.setDrawColor(229, 231, 235) // gray-200
   doc.setFillColor(243, 244, 246) // gray-100
-  doc.roundedRect(20, yPos, 170, 35, 3, 3, 'FD')
   
-  doc.setTextColor(55, 65, 81) // gray-700
-  doc.setFontSize(14)
-  doc.setFont('helvetica', 'bold')
-  doc.text(excursion.name, 30, yPos + 12)
+  // Determine if it's a Transfer or Excursion
+  const isTransfer = (event as TransferData).type === 'TRANSFER'
 
-  doc.setFontSize(10)
-  doc.setFont('helvetica', 'normal')
-  const excDate = new Date(excursion.date).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  doc.text(excDate.charAt(0).toUpperCase() + excDate.slice(1), 30, yPos + 20)
+  if (isTransfer) {
+    const transfer = event as TransferData
+    // Taller box for transfer details
+    doc.roundedRect(20, yPos, 170, 50, 3, 3, 'FD') 
+    
+    doc.setTextColor(55, 65, 81) // gray-700
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text(transfer.name, 30, yPos + 12)
+
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    
+    const transferDate = new Date(transfer.date).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    doc.text(`Data: ${transferDate.charAt(0).toUpperCase() + transferDate.slice(1)}`, 30, yPos + 20)
+    
+    if (transfer.pickupTime) {
+      doc.text(`Ora Ritiro: ${transfer.pickupTime}`, 120, yPos + 20)
+    }
+
+    // Pickup / Dropoff details
+    doc.setFont('helvetica', 'bold')
+    doc.text('Ritiro:', 30, yPos + 30)
+    doc.text('Destinazione:', 30, yPos + 38)
+    
+    doc.setFont('helvetica', 'normal')
+    doc.text(transfer.pickupLocation || '-', 50, yPos + 30)
+    doc.text(transfer.dropoffLocation || '-', 60, yPos + 38)
+    
+    // Return Info if present
+    if (transfer.returnDate) {
+       const retDate = new Date(transfer.returnDate).toLocaleDateString('it-IT', { day: 'numeric', month: 'numeric' })
+       let retText = `Ritorno: ${retDate}`
+       if (transfer.returnTime) retText += ` ore ${transfer.returnTime}`
+       if (transfer.returnPickupLocation) retText += ` da ${transfer.returnPickupLocation}`
+       
+       doc.text(retText, 30, yPos + 46)
+    }
+
+    yPos += 15 // Adjust yPos for next section
+  } else {
+    // Excursion Logic (Standard)
+    const excursion = event as ExcursionData
+    doc.roundedRect(20, yPos, 170, 35, 3, 3, 'FD')
+    
+    doc.setTextColor(55, 65, 81) // gray-700
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text(excursion.name, 30, yPos + 12)
+
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    const excDate = new Date(excursion.date).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    doc.text(excDate.charAt(0).toUpperCase() + excDate.slice(1), 30, yPos + 20)
+    
+    if (excursion.meetingPoint) {
+        doc.text(`Punto di incontro: ${excursion.meetingPoint}`, 30, yPos + 28)
+    }
+  }
 
   // --- Participant Details ---
   yPos += 45

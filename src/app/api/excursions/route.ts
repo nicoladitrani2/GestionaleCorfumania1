@@ -198,9 +198,9 @@ export async function PUT(request: Request) {
 
   await createAuditLog(
     session.user.id,
-    excursion.id,
     'UPDATE_EXCURSION',
-    `Modificata escursione "${name}"`
+    `Modificata escursione "${name}"`,
+    excursion.id
   )
 
   return NextResponse.json(excursion)
@@ -239,16 +239,9 @@ export async function DELETE(request: Request) {
 
     await createAuditLog(
       session.user.id,
-      id, // This might refer to a deleted entity, but audit logs are usually kept. 
-          // However, if audit logs are cascaded, they are gone. 
-          // Ideally audit logs for the SYSTEM should persist, but here we link to excursionId.
-          // If we delete the excursion, we might lose the logs if they are linked with foreign key.
-          // Let's assume we want to log the ACTION of deletion.
-          // If we can't link to the excursion anymore, maybe we log with a null excursionId or just generic log?
-          // The createAuditLog function likely requires excursionId.
-          // Let's look at createAuditLog signature.
       'DELETE_EXCURSION',
-      `Eliminata escursione "${excursion.name}"`
+      `Eliminata escursione "${excursion.name}"`,
+      id
     )
 
     return NextResponse.json({ success: true })

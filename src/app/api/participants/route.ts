@@ -10,11 +10,16 @@ export async function GET(request: Request) {
 
   const { searchParams } = new URL(request.url)
   const excursionId = searchParams.get('excursionId')
+  const transferId = searchParams.get('transferId')
 
-  if (!excursionId) return NextResponse.json({ error: 'Excursion ID required' }, { status: 400 })
+  if (!excursionId && !transferId) return NextResponse.json({ error: 'Excursion ID or Transfer ID required' }, { status: 400 })
+
+  const whereClause: any = {}
+  if (excursionId) whereClause.excursionId = excursionId
+  if (transferId) whereClause.transferId = transferId
 
   const participants = await prisma.participant.findMany({
-    where: { excursionId },
+    where: whereClause,
     orderBy: { createdAt: 'desc' },
     include: { createdBy: { select: { firstName: true, lastName: true, email: true, code: true } } }
   })
@@ -46,34 +51,56 @@ export async function POST(request: Request) {
     if (body.groupSize !== undefined && (parseInt(body.groupSize) < 1)) {
       return NextResponse.json({ error: 'Il numero di partecipanti deve essere almeno 1.' }, { status: 400 })
     }
-    if (!body.excursionId) {
-      return NextResponse.json({ error: 'ID escursione mancante.' }, { status: 400 })
+    if (!body.excursionId && !body.transferId) {
+      return NextResponse.json({ error: 'ID escursione o trasferimento mancante.' }, { status: 400 })
     }
 
     const { 
-      excursionId, firstName, lastName, nationality, dateOfBirth, 
+      excursionId, transferId, firstName, lastName, nationality, dateOfBirth, 
       docNumber, docType, phoneNumber, email, notes, supplier, isOption,
-      paymentType, paymentMethod, groupSize, price, deposit, pdfAttachment
+      paymentType, paymentMethod, depositPaymentMethod, balancePaymentMethod,
+      groupSize, price, deposit, pdfAttachment,
+      pickupLocation, dropoffLocation, pickupTime, returnPickupLocation, returnDate, returnTime
     } = body
 
     // Check expiration logic
     let isExpired = false
-    const excursion = await prisma.excursion.findUnique({
-      where: { id: excursionId },
-      select: { confirmationDeadline: true }
-    })
+    if (excursionId) {
+        const excursion = await prisma.excursion.findUnique({
+          where: { id: excursionId },
+          select: { confirmationDeadline: true }
+        })
 
-    if (excursion?.confirmationDeadline) {
-      const now = new Date()
-      const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
-      if (isDeadlinePassed && (isOption || paymentType === 'DEPOSIT')) {
-        isExpired = true
-      }
+        if (excursion?.confirmationDeadline) {
+          const now = new Date()
+          const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
+          if (isDeadlinePassed && (isOption || paymentType === 'DEPOSIT')) {
+            isExpired = true
+          }
+        }
+    } else if (transferId) {
+        const transfer = await prisma.transfer.findUnique({
+          where: { id: transferId },
+          select: { date: true }
+        })
+
+        if (transfer) {
+          const startOfToday = new Date()
+          startOfToday.setHours(0, 0, 0, 0)
+          
+          // If transfer date is in the past (before today)
+          const isTransferPassed = new Date(transfer.date) < startOfToday
+          
+          if (isTransferPassed && (isOption || paymentType === 'DEPOSIT')) {
+            isExpired = true
+          }
+        }
     }
 
     const participant = await prisma.participant.create({
       data: {
-        excursionId,
+        excursionId: excursionId || null,
+        transferId: transferId || null,
         firstName,
         lastName,
         nationality,
@@ -84,9 +111,20 @@ export async function POST(request: Request) {
         email,
         notes,
         supplier,
-        isOption,
+        isOption: isOption || false,
         paymentType,
-        paymentMethod,
+        paymentMethod: paymentMethod || 'CASH', // Legacy required field
+        depositPaymentMethod,
+        balancePaymentMethod,
+        
+        // Transfer fields
+        pickupLocation,
+        dropoffLocation,
+        pickupTime,
+        returnPickupLocation,
+        returnDate: returnDate ? new Date(returnDate) : null,
+        returnTime,
+
         groupSize: parseInt(groupSize) || 1,
         price: price || 0,
         deposit: deposit || 0,
@@ -101,14 +139,23 @@ export async function POST(request: Request) {
       'CARD': 'Carta'
     }
 
-    const methodLabel = paymentMethodMap[paymentMethod] || paymentMethod
+    // For log details, we might want to show split payments
+    let methodLabel = paymentMethodMap[paymentMethod] || paymentMethod
+    if (depositPaymentMethod) {
+        methodLabel = `Acconto: ${paymentMethodMap[depositPaymentMethod] || depositPaymentMethod}`
+        if (balancePaymentMethod) {
+            methodLabel += `, Saldo: ${paymentMethodMap[balancePaymentMethod] || balancePaymentMethod}`
+        }
+    }
+
     const details = `Aggiunto partecipante ${firstName} ${lastName} (Gruppo: ${groupSize}, Prezzo: €${price}, Acconto: €${deposit}, Metodo: ${methodLabel})`
 
     await createAuditLog(
       session.user.id,
-      excursionId,
       'CREATE_PARTICIPANT',
-      details
+      details,
+      excursionId || null,
+      transferId || null
     )
 
     // Send Email if email and PDF are provided
@@ -146,7 +193,7 @@ export async function POST(request: Request) {
         const info = await transporter.sendMail({
             from: `"Corfumania" <${process.env.EMAIL_USER}>`,
             to: email,
-            subject: 'Conferma Prenotazione Escursione - Corfumania',
+            subject: 'Conferma Prenotazione - Corfumania',
             text: `Gentile ${firstName} ${lastName},\n\nIn allegato trovi il riepilogo della tua prenotazione.\n\nCordiali saluti,\nTeam Corfumania`,
             attachments: [
                 {
@@ -175,7 +222,7 @@ export async function POST(request: Request) {
     // Gestione errori Prisma
     if (error.code === 'P2003') {
         return NextResponse.json(
-            { error: 'Errore di validazione: L\'escursione o l\'utente non esistono più. Prova ad aggiornare la pagina.' },
+            { error: 'Errore di validazione: L\'escursione, il trasferimento o l\'utente non esistono più. Prova ad aggiornare la pagina.' },
             { status: 400 }
         )
     }
