@@ -500,9 +500,8 @@ export function ParticipantsList({
         <RefundModal
           isOpen={showRefund}
           onClose={() => setShowRefund(false)}
+          participant={participantToRefund}
           onConfirm={handleRefund}
-          participantName={`${participantToRefund.firstName} ${participantToRefund.lastName}`}
-          maxRefundAmount={participantToRefund.deposit || 0}
         />
       )}
     </div>
