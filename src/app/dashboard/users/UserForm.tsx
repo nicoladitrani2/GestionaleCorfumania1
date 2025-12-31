@@ -75,9 +75,9 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
       <div className="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden transform transition-all animate-in zoom-in-95 duration-200">
         
         {/* Header */}
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            {user ? <User className="w-6 h-6" /> : <User className="w-6 h-6" />}
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-6 py-4 flex justify-between items-center">
+          <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+            {user ? <User className="w-5 h-5 sm:w-6 sm:h-6" /> : <User className="w-5 h-5 sm:w-6 sm:h-6" />}
             {user ? 'Modifica Profilo' : 'Nuovo Assistente'}
           </h2>
           <button 
@@ -88,21 +88,21 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
           </button>
         </div>
 
-        <div className="p-8">
+        <div className="p-4 sm:p-8">
           <form onSubmit={handleSubmit} className="space-y-6">
             
             {/* Nome e Cognome */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-gray-700">Nome</label>
+                <label className="text-sm font-bold text-gray-900">Nome</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-gray-400" />
+                    <User className="h-5 w-5 text-gray-500" />
                   </div>
                   <input
                     type="text"
                     required
-                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white text-base md:text-sm text-gray-900 placeholder-gray-500"
                     placeholder="Mario"
                     value={formData.firstName}
                     onChange={(e) => setFormData({ ...formData, firstName: e.target.value })}
@@ -110,15 +110,15 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
                 </div>
               </div>
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-gray-700">Cognome</label>
+                <label className="text-sm font-bold text-gray-900">Cognome</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <User className="h-5 w-5 text-gray-400" />
+                    <User className="h-5 w-5 text-gray-500" />
                   </div>
                   <input
                     type="text"
                     required
-                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white"
+                    className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white text-base md:text-sm text-gray-900 placeholder-gray-500"
                     placeholder="Rossi"
                     value={formData.lastName}
                     onChange={(e) => setFormData({ ...formData, lastName: e.target.value })}

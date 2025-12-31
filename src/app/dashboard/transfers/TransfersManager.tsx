@@ -261,9 +261,9 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
       {isCreating && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                {editingTransferId ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-6 py-4 flex justify-between items-center">
+              <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                {editingTransferId ? <Edit className="w-5 h-5 sm:w-6 sm:h-6" /> : <Plus className="w-5 h-5 sm:w-6 sm:h-6" />}
                 {editingTransferId ? 'Modifica Trasferimento' : 'Nuovo Trasferimento'}
               </h3>
               <button 
@@ -274,7 +274,7 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
               </button>
             </div>
             
-            <form onSubmit={handleSaveTransfer} className="p-6 space-y-5">
+            <form onSubmit={handleSaveTransfer} className="p-4 sm:p-6 space-y-5">
               {error && (
                 <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
                    <AlertCircle className="w-4 h-4 shrink-0" />
@@ -283,15 +283,15 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
               )}
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Fornitore</label>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Fornitore</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <Briefcase className="h-5 w-5 text-gray-400" />
+                    <Briefcase className="h-5 w-5 text-gray-500" />
                   </div>
                   <select
                     value={newSupplier}
                     onChange={(e) => setNewSupplier(e.target.value)}
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none bg-white"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none bg-white text-base md:text-sm text-gray-900"
                   >
                     {suppliers.map(s => (
                       <option key={s.id} value={s.name}>{s.name}</option>
@@ -304,24 +304,24 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Luogo Ritiro</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Luogo Ritiro</label>
                   <input
                     type="text"
                     value={newPickupLocation}
                     onChange={(e) => setNewPickupLocation(e.target.value)}
                     required
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
                     placeholder="Es. Aeroporto"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Luogo Deposito</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Luogo Deposito</label>
                   <input
                     type="text"
                     value={newDropoffLocation}
                     onChange={(e) => setNewDropoffLocation(e.target.value)}
                     required
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
                     placeholder="Es. Hotel X"
                   />
                 </div>
@@ -329,22 +329,22 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Data e Ora Partenza</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Data e Ora Partenza</label>
                   <input
                     type="datetime-local"
                     value={newDate}
                     onChange={(e) => setNewDate(e.target.value)}
                     required
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Data e Ora Arrivo (Opz.)</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Data e Ora Arrivo (Opz.)</label>
                   <input
                     type="datetime-local"
                     value={newEndDate}
                     onChange={(e) => setNewEndDate(e.target.value)}
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                   />
                 </div>
               </div>

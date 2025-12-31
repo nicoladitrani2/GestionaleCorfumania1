@@ -202,7 +202,7 @@ export default function SuppliersPage() {
               </button>
             </div>
             
-            <form onSubmit={handleSubmit} className="p-6 space-y-5">
+            <form onSubmit={handleSubmit} className="p-4 sm:p-6 space-y-5">
               {error && (
                 <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
                    <AlertCircle className="w-4 h-4 shrink-0" />
@@ -211,13 +211,13 @@ export default function SuppliersPage() {
               )}
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nome Rifornitore</label>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Nome Rifornitore</label>
                 <input
                   type="text"
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   required
-                  className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
                   placeholder="Es. Go4Sea"
                 />
               </div>

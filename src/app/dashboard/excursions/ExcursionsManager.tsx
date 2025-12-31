@@ -314,9 +314,9 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
       {isCreating && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
-              <h3 className="text-xl font-bold text-white flex items-center gap-2">
-                {editingExcursionId ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-6 py-4 flex justify-between items-center">
+              <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
+                {editingExcursionId ? <Edit className="w-5 h-5 sm:w-6 sm:h-6" /> : <Plus className="w-5 h-5 sm:w-6 sm:h-6" />}
                 {editingExcursionId ? 'Modifica Escursione' : 'Nuova Escursione'}
               </h3>
               <button 
@@ -327,7 +327,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
               </button>
             </div>
             
-            <form onSubmit={handleSaveExcursion} className="p-6 space-y-5">
+            <form onSubmit={handleSaveExcursion} className="p-4 sm:p-6 space-y-5">
               {error && (
                 <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
                    <AlertCircle className="w-4 h-4 shrink-0" />
@@ -336,12 +336,12 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
               )}
               {!editingExcursionId && (
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Template</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Template</label>
                   <div className="relative">
                     <button
                       type="button"
                       onClick={() => setIsTemplateDropdownOpen(!isTemplateDropdownOpen)}
-                      className="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 text-left flex justify-between items-center transition-all"
+                      className="w-full bg-gray-50 border border-gray-300 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 p-2.5 text-left flex justify-between items-center transition-all text-base md:text-sm"
                     >
                       <span className="truncate">
                         {selectedTemplateId === 'OTHER' 
@@ -358,7 +358,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                           onClick={() => setIsTemplateDropdownOpen(false)} 
                         />
                         <div className="absolute z-20 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-60 overflow-y-auto animate-in fade-in zoom-in-95 duration-100">
-                          <ul className="py-1 text-sm text-gray-700">
+                          <ul className="py-1 text-sm text-gray-900">
                             <li 
                               className="px-4 py-2 hover:bg-gray-50 cursor-pointer text-gray-400 italic"
                               onClick={() => {
@@ -414,17 +414,17 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
               )}
               
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Nome Escursione</label>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Nome Escursione</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <MapIcon className="h-5 w-5 text-gray-400" />
+                    <MapIcon className="h-5 w-5 text-gray-500" />
                   </div>
                   <input
                     type="text"
                     value={newExcursionName}
                     onChange={(e) => setNewExcursionName(e.target.value)}
                     required
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
                     placeholder="Es. Tour dell'Isola"
                   />
                 </div>
@@ -432,34 +432,34 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
 
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Inizio</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Inizio</label>
                   <input
                     type="datetime-local"
                     value={newStartDate}
                     onChange={(e) => setNewStartDate(e.target.value)}
                     required
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">Fine</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Fine</label>
                   <input
                     type="datetime-local"
                     value={newEndDate}
                     onChange={(e) => setNewEndDate(e.target.value)}
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">Data Limite Conferma</label>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Data Limite Conferma</label>
                 <input
                   type="datetime-local"
                   value={newConfirmationDeadline}
                   onChange={(e) => setNewConfirmationDeadline(e.target.value)}
-                  className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                  className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                 />
                 <p className="text-xs text-gray-500 mt-1 flex items-center gap-1">
                   <Clock className="w-3 h-3" />

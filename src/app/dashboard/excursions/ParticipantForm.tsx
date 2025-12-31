@@ -381,16 +381,16 @@ export function ParticipantForm({
 
   const paymentStyle = getPaymentSectionStyle()
 
-  const inputClassName = "w-full px-3 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
-  const labelClassName = "block text-xs font-medium text-gray-700 mb-1 uppercase tracking-wide"
+  const inputClassName = "w-full px-3 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+  const labelClassName = "block text-xs font-bold text-gray-900 mb-1 uppercase tracking-wide"
 
   return (
     <div className="bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col max-h-[95vh] w-full max-w-5xl">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-6 flex justify-between items-center shrink-0">
-        <h2 className="text-xl font-bold text-white flex items-center gap-3">
+      <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-4 sm:p-6 flex justify-between items-center shrink-0">
+        <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-3">
           <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
-            {initialData ? <User className="w-6 h-6" /> : <UserPlus className="w-6 h-6" />}
+            {initialData ? <User className="w-5 h-5 sm:w-6 sm:h-6" /> : <UserPlus className="w-5 h-5 sm:w-6 sm:h-6" />}
           </div>
           {initialData ? 'Modifica Partecipante' : 'Nuovo Partecipante'}
         </h2>
@@ -402,7 +402,7 @@ export function ParticipantForm({
         </button>
       </div>
 
-      <div className="overflow-y-auto p-6 custom-scrollbar">
+      <div className="overflow-y-auto p-4 sm:p-6 custom-scrollbar">
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3">
             <div className="p-2 bg-red-100 rounded-full">
@@ -791,18 +791,18 @@ export function ParticipantForm({
       </div>
 
       {/* Footer */}
-      <div className="p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 shrink-0">
+      <div className="p-4 sm:p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 shrink-0">
         <button
           type="button"
           onClick={onCancel}
-          className="px-6 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none transition-all"
+          className="px-4 sm:px-6 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none transition-all"
         >
           Annulla
         </button>
         <button
           onClick={handleSubmit}
           disabled={loading}
-          className="px-6 py-2.5 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none flex items-center gap-2 transition-all hover:shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
+          className="px-4 sm:px-6 py-2.5 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none flex items-center gap-2 transition-all hover:shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
         >
           {loading ? 'Salvataggio...' : (
             <>
