@@ -2,6 +2,7 @@
   "name": "Gestionale Corfumania",
   "short_name": "Corfumania",
   "description": "Gestionale per escursioni e trasferimenti",
+  "scope": "/",
   "start_url": "/dashboard",
   "display": "standalone",
   "background_color": "#ffffff",
