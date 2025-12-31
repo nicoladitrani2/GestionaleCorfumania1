@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import PWAInstallPrompt from "./dashboard/PWAInstallPrompt";
 import PWALifecycle from "./PWALifecycle";
+import Script from "next/script";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -42,6 +43,17 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
+        <Script id="pwa-prompt-handler" strategy="beforeInteractive">
+          {`
+            window.deferredPrompt = null;
+            window.addEventListener('beforeinstallprompt', (e) => {
+              e.preventDefault();
+              window.deferredPrompt = e;
+              console.log('beforeinstallprompt captured by script');
+              window.dispatchEvent(new Event('pwa-prompt-ready'));
+            });
+          `}
+        </Script>
         <PWALifecycle />
         <PWAInstallPrompt />
         {children}

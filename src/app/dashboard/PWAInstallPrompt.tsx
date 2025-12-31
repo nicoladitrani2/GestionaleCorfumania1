@@ -66,10 +66,15 @@ export default function PWAInstallPrompt() {
   }, [isStandalone])
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return
+    const prompt = deferredPrompt || (window as any).deferredPrompt
+    
+    if (!prompt) {
+      setShowManualInstructions(true)
+      return
+    }
 
-    deferredPrompt.prompt()
-    const { outcome } = await deferredPrompt.userChoice
+    prompt.prompt()
+    const { outcome } = await prompt.userChoice
     
     if (outcome === 'accepted') {
       setDeferredPrompt(null)
@@ -128,20 +133,15 @@ export default function PWAInstallPrompt() {
           ) : (
              !showManualInstructions ? (
                 <button
-                onClick={() => {
-                    if (deferredPrompt) {
-                        handleInstallClick()
-                    } else {
-                        setShowManualInstructions(true)
-                    }
-                }}
+                onClick={handleInstallClick}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-all duration-200"
                 >
                 Installa App
                 </button>
              ) : (
                 <div className="w-full bg-gray-50 rounded-xl p-4 text-left space-y-3 border border-gray-100 animate-in fade-in slide-in-from-top-2 duration-300">
-                    <p className="text-sm text-gray-600 mb-2 font-medium">Installa dal menu del browser:</p>
+                    <p className="text-sm text-amber-600 mb-2 font-medium">Installazione automatica non disponibile.</p>
+                    <p className="text-sm text-gray-600 mb-2 font-medium">Segui questi passaggi:</p>
                     <div className="flex items-center gap-3 text-gray-700">
                         <span className="flex items-center justify-center w-8 h-8 bg-white rounded-lg shadow-sm text-gray-600">
                         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="12" cy="5" r="1"/><circle cx="12" cy="19" r="1"/></svg>
