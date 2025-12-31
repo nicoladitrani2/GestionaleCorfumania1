@@ -238,7 +238,7 @@ export function ParticipantsList({
     exportListToPDF(activeParticipants, 'Lista Partecipanti Attivi', 'partecipanti-attivi')
   }
 
-  const thClassName = "px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
+  const thClassName = "px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider"
 
   const ParticipantsTable = ({ data, emptyMessage }: { data: any[], emptyMessage: string }) => (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -286,7 +286,7 @@ export function ParticipantsList({
                   <CheckCircle className="w-4 h-4" /> Stato
                 </div>
               </th>
-              <th className="px-6 py-4 text-right text-xs font-semibold text-gray-500 uppercase tracking-wider">
+              <th className="px-6 py-4 text-right text-xs font-bold text-gray-700 uppercase tracking-wider">
                 Azioni
               </th>
             </tr>
@@ -300,33 +300,33 @@ export function ParticipantsList({
                   key={p.id} 
                   className={`transition-colors border-b border-gray-100 last:border-0 ${getRowBackground(p)}`}
                 >
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-bold text-gray-900">
                     <div className="flex flex-col">
                       <span>{p.firstName} {p.lastName}</span>
-                      <span className="text-xs text-gray-500">{p.phoneNumber}</span>
+                      <span className="text-xs text-gray-600">{p.phoneNumber}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
+                    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
                       {p.groupSize || 1}
                     </span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
                       <div className="flex flex-col">
                           <span>{p.pickupLocation || '-'}</span>
-                          <span className="text-xs text-gray-400">{p.pickupTime || '-'}</span>
+                          <span className="text-xs text-gray-500">{p.pickupTime || '-'}</span>
                       </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
                       <span>{p.dropoffLocation || '-'}</span>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     <div className="flex flex-col">
-                      <span className="font-medium text-gray-900">{p.createdBy?.code || '-'}</span>
+                      <span className="font-bold text-gray-900">{p.createdBy?.code || '-'}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">€ {p.price?.toFixed(2) || '0.00'}</td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">€ {p.deposit?.toFixed(2) || '0.00'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">€ {p.price?.toFixed(2) || '0.00'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">€ {p.deposit?.toFixed(2) || '0.00'}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     <span className={`px-2.5 py-1 inline-flex items-center text-xs font-medium rounded-full border ${getStatusColor(p)}`}>
                       {getStatusIcon(p)}

@@ -111,79 +111,79 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
             
             {/* Personal Info */}
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Informazioni Personali</h3>
+              <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Informazioni Personali</h3>
               
               <div className="flex items-start gap-3">
-                <Globe className="w-5 h-5 text-gray-400 mt-0.5" />
+                <Globe className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-500">Nazionalità</p>
-                  <p className="font-medium text-gray-900">{participant.nationality || '-'}</p>
+                  <p className="text-sm font-bold text-gray-700">Nazionalità</p>
+                  <p className="font-bold text-gray-900">{participant.nationality || '-'}</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <Calendar className="w-5 h-5 text-gray-400 mt-0.5" />
+                <Calendar className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-500">Data di Nascita</p>
-                  <p className="font-medium text-gray-900">{formatDate(participant.dateOfBirth)}</p>
+                  <p className="text-sm font-bold text-gray-700">Data di Nascita</p>
+                  <p className="font-bold text-gray-900">{formatDate(participant.dateOfBirth)}</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <FileText className="w-5 h-5 text-gray-400 mt-0.5" />
+                <FileText className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-500">Documento</p>
-                  <p className="font-medium text-gray-900">{participant.docType} - {participant.docNumber}</p>
+                  <p className="text-sm font-bold text-gray-700">Documento</p>
+                  <p className="font-bold text-gray-900">{participant.docType} - {participant.docNumber}</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <Phone className="w-5 h-5 text-gray-400 mt-0.5" />
+                <Phone className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-500">Telefono</p>
-                  <p className="font-medium text-gray-900">{participant.phoneNumber || '-'}</p>
+                  <p className="text-sm font-bold text-gray-700">Telefono</p>
+                  <p className="font-bold text-gray-900">{participant.phoneNumber || '-'}</p>
                 </div>
               </div>
             </div>
 
             {/* Booking & Payment Info */}
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">Prenotazione e Pagamento</h3>
+              <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider">Prenotazione e Pagamento</h3>
 
               <div className="flex items-start gap-3">
-                <Users className="w-5 h-5 text-gray-400 mt-0.5" />
+                <Users className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-500">Numero Persone</p>
-                  <p className="font-medium text-gray-900">{participant.groupSize || 1}</p>
+                  <p className="text-sm font-bold text-gray-700">Numero Persone</p>
+                  <p className="font-bold text-gray-900">{participant.groupSize || 1}</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <Briefcase className="w-5 h-5 text-gray-400 mt-0.5" />
+                <Briefcase className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
-                  <p className="text-sm text-gray-500">Fornitore</p>
-                  <p className="font-medium text-gray-900">{participant.supplier}</p>
+                  <p className="text-sm font-bold text-gray-700">Fornitore</p>
+                  <p className="font-bold text-gray-900">{participant.supplier}</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
-                <CreditCard className="w-5 h-5 text-gray-400 mt-0.5" />
+                <CreditCard className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div className="w-full">
                   <div className="flex justify-between mb-1">
-                    <span className="text-sm text-gray-500">Prezzo Totale</span>
-                    <span className="font-medium text-gray-900">{formatCurrency(participant.price)}</span>
+                    <span className="text-sm font-bold text-gray-700">Prezzo Totale</span>
+                    <span className="font-bold text-gray-900">{formatCurrency(participant.price)}</span>
                   </div>
                   <div className="flex justify-between mb-1">
-                    <span className="text-sm text-gray-500">Acconto Versato</span>
-                    <span className="font-medium text-green-600">{formatCurrency(participant.deposit)}</span>
+                    <span className="text-sm font-bold text-gray-700">Acconto Versato</span>
+                    <span className="font-bold text-green-700">{formatCurrency(participant.deposit)}</span>
                   </div>
                   <div className="flex justify-between pt-2 border-t border-gray-100">
-                    <span className="text-sm font-medium text-gray-700">Da Saldare</span>
+                    <span className="text-sm font-bold text-gray-900">Da Saldare</span>
                     <span className="font-bold text-gray-900">
                       {formatCurrency((participant.price || 0) - (participant.deposit || 0))}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">
+                  <p className="text-xs text-gray-500 mt-2 font-medium">
                     Metodo: {participant.paymentMethod === 'CASH' ? 'Contanti' : 'Carta/POS'}
                   </p>
                 </div>
@@ -193,7 +193,7 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
 
           {/* Additional Info */}
           <div className="mt-8 pt-6 border-t border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-4">Altre Info</h3>
+            <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Altre Info</h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                <div className="flex items-start gap-3">
