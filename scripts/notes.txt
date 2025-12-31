@@ -1,0 +1,71 @@
+const fs = require('fs');
+const path = require('path');
+
+function createPNG(width, height, color) {
+  // Minimal PNG header
+  const header = Buffer.from([
+    0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a
+  ]);
+
+  // IHDR chunk
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0); // Length
+  ihdr.write('IHDR', 4); // Type
+  ihdr.writeUInt32BE(width, 8); // Width
+  ihdr.writeUInt32BE(height, 12); // Height
+  ihdr.writeUInt8(8, 16); // Bit depth
+  ihdr.writeUInt8(2, 17); // Color type (2=Truecolor)
+  ihdr.writeUInt8(0, 18); // Compression
+  ihdr.writeUInt8(0, 19); // Filter
+  ihdr.writeUInt8(0, 20); // Interlace
+  
+  // CRC for IHDR
+  // (Skipping proper CRC calculation for this dummy implementation, 
+  // relying on browsers being lenient or just creating a very simple valid structure if possible. 
+  // Actually, creating a valid PNG manually is hard. 
+  // Let's use a base64 string of a valid 1x1 pixel PNG and just stretch it or use it as is? 
+  // No, PWA needs specific sizes.
+  // Plan B: Use a simple valid base64 string for a generic blue square PNG found online/known.)
+}
+
+// Simple valid blue 1x1 PNG
+const bluePixelBase64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+const bluePixelBuffer = Buffer.from(bluePixelBase64, 'base64');
+
+// We will just write this 1x1 pixel to the files. 
+// Browsers might complain about size mismatch but often it works for testing.
+// BETTER: Let's try to make a slightly better fake or just use the 1x1.
+// ACTUALLY: The user wants it to work. 1x1 might be rejected.
+
+// Let's look for a tool or just write a known 192x192 generic PNG structure? 
+// Too risky to byte-patch. 
+
+// ALTERNATIVE: Use the existing SVGs but ensure the manifest is perfect.
+// Wait, the user said "non compare".
+// Chrome Android DOES support SVG icons in manifest, but they must be declared correctly.
+// I declared them as type: "image/svg+xml".
+// Maybe the "sizes" attribute "192x192" for an SVG (which is vector) is confusing it?
+// Usually for SVG we use "sizes": "any".
+
+// Let's try updating the manifest to use "sizes": "any" for the SVG icons.
+// AND let's add a "purpose": "any maskable" to be safe.
+
+const manifestUpdate = {
+    "icons": [
+    {
+      "src": "/icons/icon-192x192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512x512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+};
+
+// Also, let's add a custom install button component. This is the most robust way to ensure the user can install.
+// Browsers don't always auto-prompt.
