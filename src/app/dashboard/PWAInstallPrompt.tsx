@@ -8,6 +8,7 @@ export default function PWAInstallPrompt() {
   const [showPrompt, setShowPrompt] = useState(false)
   const [isIOS, setIsIOS] = useState(false)
   const [isStandalone, setIsStandalone] = useState(false)
+  const [showManualInstructions, setShowManualInstructions] = useState(false)
 
   useEffect(() => {
     // Check if already installed
@@ -125,15 +126,21 @@ export default function PWAInstallPrompt() {
               </div>
             </div>
           ) : (
-             deferredPrompt ? (
+             !showManualInstructions ? (
                 <button
-                onClick={handleInstallClick}
+                onClick={() => {
+                    if (deferredPrompt) {
+                        handleInstallClick()
+                    } else {
+                        setShowManualInstructions(true)
+                    }
+                }}
                 className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl shadow-lg shadow-blue-600/20 active:scale-95 transition-all duration-200"
                 >
                 Installa App
                 </button>
              ) : (
-                <div className="w-full bg-gray-50 rounded-xl p-4 text-left space-y-3 border border-gray-100">
+                <div className="w-full bg-gray-50 rounded-xl p-4 text-left space-y-3 border border-gray-100 animate-in fade-in slide-in-from-top-2 duration-300">
                     <p className="text-sm text-gray-600 mb-2 font-medium">Installa dal menu del browser:</p>
                     <div className="flex items-center gap-3 text-gray-700">
                         <span className="flex items-center justify-center w-8 h-8 bg-white rounded-lg shadow-sm text-gray-600">
