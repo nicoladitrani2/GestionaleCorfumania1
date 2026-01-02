@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Save, X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, UserPlus, Map as MapIcon } from 'lucide-react'
+import { Save, X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, UserPlus, Map as MapIcon, Plus, Trash2 } from 'lucide-react'
 
 import { generateParticipantPDF } from '@/lib/pdf-generator'
 
@@ -597,89 +597,114 @@ export function ParticipantForm({
               </div>
 
               {type === 'TRANSFER' && (
-                <div className="col-span-1 sm:col-span-2 md:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-b border-gray-100 py-4 my-2">
-                  <h4 className="sm:col-span-2 font-medium text-gray-700 mb-2 flex items-center gap-2">
-                    <MapIcon className="w-4 h-4" />
-                    Dettagli Trasferimento
-                  </h4>
-                  
-                  <div>
-                    <label className={labelClassName}>Luogo Ritiro</label>
-                    <input
-                      type="text"
-                      name="pickupLocation"
-                      value={formData.pickupLocation}
-                      onChange={handleChange}
-                      className={inputClassName}
-                      placeholder="Hotel, Aeroporto, ecc."
-                    />
+                <div className="col-span-1 sm:col-span-2 md:col-span-4 space-y-6 border-t border-b border-gray-100 py-6 my-2">
+                  <div className="flex items-center gap-2 text-gray-800">
+                    <MapIcon className="w-5 h-5 text-blue-600" />
+                    <h4 className="font-semibold text-lg">Dettagli Trasferimento</h4>
                   </div>
                   
-                  <div>
-                    <label className={labelClassName}>Ora Ritiro</label>
-                    <input
-                      type="time"
-                      name="pickupTime"
-                      value={formData.pickupTime}
-                      onChange={handleChange}
-                      className={inputClassName}
-                    />
+                  {/* Andata */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className={labelClassName}>Luogo Ritiro</label>
+                      <input
+                        type="text"
+                        name="pickupLocation"
+                        value={formData.pickupLocation}
+                        onChange={handleChange}
+                        className={inputClassName}
+                        placeholder="Hotel, Aeroporto, ecc."
+                      />
+                    </div>
+                    
+                    <div>
+                      <label className={labelClassName}>Ora Ritiro</label>
+                      <input
+                        type="time"
+                        name="pickupTime"
+                        value={formData.pickupTime}
+                        onChange={handleChange}
+                        className={inputClassName}
+                      />
+                    </div>
+
+                    <div className="sm:col-span-2">
+                      <label className={labelClassName}>Luogo Deposito (Opzionale)</label>
+                      <input
+                        type="text"
+                        name="dropoffLocation"
+                        value={formData.dropoffLocation}
+                        onChange={handleChange}
+                        className={inputClassName}
+                        placeholder="Destinazione finale (se diversa dal ritorno)"
+                      />
+                    </div>
                   </div>
 
-                  <div>
-                    <label className={labelClassName}>Luogo Deposito (Opzionale)</label>
-                    <input
-                      type="text"
-                      name="dropoffLocation"
-                      value={formData.dropoffLocation}
-                      onChange={handleChange}
-                      className={inputClassName}
-                    />
-                  </div>
+                  {/* Ritorno */}
+                  {formData.returnDate ? (
+                    <div className="bg-blue-50/50 p-4 rounded-xl border border-blue-100 relative transition-all animate-in fade-in slide-in-from-top-2">
+                      <div className="flex justify-between items-center mb-4">
+                         <h5 className="text-sm font-bold text-blue-800 uppercase tracking-wide flex items-center gap-2">
+                            <Calendar className="w-4 h-4" />
+                            Dettagli Ritorno
+                         </h5>
+                         <button 
+                           type="button" 
+                           onClick={() => setFormData(prev => ({...prev, returnDate: '', returnTime: '', returnPickupLocation: ''}))}
+                           className="text-red-500 hover:text-red-700 hover:bg-red-50 p-1.5 rounded-lg transition-colors flex items-center gap-1 text-xs font-medium"
+                           title="Rimuovi Ritorno"
+                        >
+                           <Trash2 className="w-3.5 h-3.5" />
+                           Rimuovi
+                        </button>
+                      </div>
 
-                  {formData.returnDate && (
-                    <>
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                         <div>
-                        <label className={labelClassName}>Data Ritorno</label>
-                        <input
+                          <label className={labelClassName}>Data Ritorno</label>
+                          <input
                             type="date"
                             name="returnDate"
                             value={formData.returnDate}
                             onChange={handleChange}
                             className={inputClassName}
-                        />
+                          />
                         </div>
                         <div>
-                        <label className={labelClassName}>Ora Ritorno</label>
-                        <input
+                          <label className={labelClassName}>Ora Ritorno</label>
+                          <input
                             type="time"
                             name="returnTime"
                             value={formData.returnTime}
                             onChange={handleChange}
                             className={inputClassName}
-                        />
+                          />
                         </div>
                         <div>
-                        <label className={labelClassName}>Luogo Ritiro Ritorno</label>
-                        <input
+                          <label className={labelClassName}>Luogo Ritiro Ritorno</label>
+                          <input
                             type="text"
                             name="returnPickupLocation"
                             value={formData.returnPickupLocation}
                             onChange={handleChange}
                             className={inputClassName}
-                        />
+                            placeholder="Da dove si riparte?"
+                          />
                         </div>
-                    </>
-                  )}
-
-                  {!formData.returnDate && (
-                    <div className="sm:col-span-2">
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="flex justify-center sm:justify-start">
                        <button 
                          type="button"
                          onClick={() => setFormData(prev => ({...prev, returnDate: new Date().toISOString().split('T')[0] }))}
-                         className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                         className="group flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 hover:text-blue-700 transition-all text-sm font-medium border border-blue-200 border-dashed"
                        >
-                         <Plus className="w-4 h-4" /> Aggiungi Ritorno
+                         <div className="bg-blue-200 text-blue-700 rounded-full p-0.5 group-hover:bg-blue-300 transition-colors">
+                            <Plus className="w-3 h-3" />
+                         </div>
+                         Aggiungi Ritorno
                        </button>
                     </div>
                   )}
