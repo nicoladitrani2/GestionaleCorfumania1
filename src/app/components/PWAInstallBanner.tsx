@@ -1,20 +1,20 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Download, X } from 'lucide-react'
 
-export default function PWAInstallButton() {
-  const [isVisible, setIsVisible] = useState(false)
-  const [mounted, setMounted] = useState(false)
+export default function PWAInstallBanner() {
+  const [showBanner, setShowBanner] = useState(false)
+  const [isMounted, setIsMounted] = useState(false)
   const deferredPromptRef = useRef<any>(null)
 
   useEffect(() => {
-    setMounted(true)
+    setIsMounted(true)
 
     const checkPrompt = () => {
       if ((window as any).deferredPrompt) {
         deferredPromptRef.current = (window as any).deferredPrompt
-        setIsVisible(true)
+        setShowBanner(true)
       }
     }
     
@@ -29,10 +29,10 @@ export default function PWAInstallButton() {
     }
   }, [])
 
-  const handleInstallClick = async () => {
+  const handleInstallClick = useCallback(async () => {
     const promptEvent = deferredPromptRef.current
     if (!promptEvent) {
-      setIsVisible(false)
+      setShowBanner(false)
       return
     }
 
@@ -46,20 +46,20 @@ export default function PWAInstallButton() {
 
       // We've used the prompt, and can't use it again, discard it
       deferredPromptRef.current = null
-      setIsVisible(false)
+      setShowBanner(false)
       (window as any).deferredPrompt = null
     } catch (err) {
       console.error('Error during installation:', err)
-      setIsVisible(false)
+      setShowBanner(false)
     }
-  }
+  }, [])
 
   const handleClose = () => {
-    setIsVisible(false)
+    setShowBanner(false)
   }
 
-  if (!mounted) return null
-  if (!isVisible) return null
+  if (!isMounted) return null
+  if (!showBanner) return null
 
   return (
     <div className="fixed top-4 left-4 right-4 z-[100] animate-in slide-in-from-top-5 duration-500">
