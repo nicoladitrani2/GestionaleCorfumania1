@@ -13,6 +13,7 @@ export default async function TransfersPage() {
       <TransfersManager 
         currentUserId={session.user.id} 
         currentUserRole={session.user.role} 
+        currentUserSupplierName={session.user.supplierName}
       />
     </div>
   )

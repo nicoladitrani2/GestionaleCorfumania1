@@ -10,7 +10,8 @@ export async function POST(request: Request) {
     const { email, password } = body
 
     const user = await prisma.user.findUnique({
-      where: { email }
+      where: { email },
+      include: { supplier: true }
     })
 
     if (!user) {
@@ -31,7 +32,9 @@ export async function POST(request: Request) {
         firstName: user.firstName,
         lastName: user.lastName,
         code: user.code,
-        mustChangePassword: user.mustChangePassword
+        mustChangePassword: user.mustChangePassword,
+        supplierId: user.supplierId,
+        supplierName: user.supplier?.name
       }
     })
 

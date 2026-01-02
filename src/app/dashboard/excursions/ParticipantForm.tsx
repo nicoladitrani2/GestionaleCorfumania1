@@ -22,6 +22,7 @@ interface ParticipantFormProps {
     returnTime?: string
     returnPickupLocation?: string
   }
+  defaultSupplier?: string
 }
 
 const NATIONALITIES = [
@@ -52,7 +53,8 @@ export function ParticipantForm({
   excursionName, 
   excursionDate,
   type = 'EXCURSION',
-  defaultValues
+  defaultValues,
+  defaultSupplier
 }: ParticipantFormProps) {
   const [formData, setFormData] = useState({
     firstName: '',
@@ -97,15 +99,19 @@ export function ParticipantForm({
           // Se stiamo creando un nuovo partecipante
           if (!initialData && data.length > 0) {
             setFormData(prev => {
-              // Cerca Go4Sea nella lista (case insensitive)
-              const defaultSupplier = data.find((s: any) => s.name.toLowerCase() === 'go4sea')
-              
-              // Se troviamo Go4Sea, usalo come default
+              // 1. Se c'è un fornitore di default (dall'utente loggato), usa quello
               if (defaultSupplier) {
-                return { ...prev, supplier: defaultSupplier.name }
+                const match = data.find((s: any) => s.name === defaultSupplier)
+                if (match) return { ...prev, supplier: match.name }
+              }
+
+              // 2. Altrimenti cerca Go4Sea nella lista (case insensitive)
+              const go4sea = data.find((s: any) => s.name.toLowerCase() === 'go4sea')
+              if (go4sea) {
+                return { ...prev, supplier: go4sea.name }
               }
               
-              // Altrimenti, se il valore attuale non è valido, usa il primo della lista
+              // 3. Altrimenti, se il valore attuale non è valido, usa il primo della lista
               const isCurrentInList = data.some((s: any) => s.name === prev.supplier)
               if (!isCurrentInList) {
                 return { ...prev, supplier: data[0].name }
@@ -120,7 +126,7 @@ export function ParticipantForm({
       }
     }
     fetchSuppliers()
-  }, [initialData])
+  }, [initialData, defaultSupplier])
 
   useEffect(() => {
     if (initialData) {

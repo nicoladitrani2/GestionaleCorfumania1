@@ -12,9 +12,10 @@ import Link from 'next/link'
 interface ExcursionsManagerProps {
   currentUserId: string
   currentUserRole: string
+  currentUserSupplierName?: string
 }
 
-export function ExcursionsManager({ currentUserId, currentUserRole }: ExcursionsManagerProps) {
+export function ExcursionsManager({ currentUserId, currentUserRole, currentUserSupplierName }: ExcursionsManagerProps) {
   const [excursions, setExcursions] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
@@ -692,6 +693,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                     setIsAddingParticipant(false)
                     setEditingParticipant(null)
                   }}
+                  defaultSupplier={currentUserSupplierName}
                 />
               </div>
             </div>

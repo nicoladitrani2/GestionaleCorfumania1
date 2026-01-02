@@ -10,9 +10,10 @@ import Link from 'next/link'
 interface TransfersManagerProps {
   currentUserId: string
   currentUserRole: string
+  currentUserSupplierName?: string
 }
 
-export function TransfersManager({ currentUserId, currentUserRole }: TransfersManagerProps) {
+export function TransfersManager({ currentUserId, currentUserRole, currentUserSupplierName }: TransfersManagerProps) {
   const [transfers, setTransfers] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
   const [loading, setLoading] = useState(true)
@@ -506,6 +507,7 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
                     setIsAddingParticipant(false)
                     setEditingParticipant(null)
                   }}
+                  defaultSupplier={currentUserSupplierName}
                 />
               </div>
             </div>
