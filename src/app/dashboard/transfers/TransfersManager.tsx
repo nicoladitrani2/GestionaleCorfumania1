@@ -144,7 +144,19 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
     setNewPickupLocation('')
     setNewDropoffLocation('')
     setNewEndDate('')
-    setNewSupplier(suppliers.length > 0 ? suppliers[0].name : 'GO4SEA')
+    
+    // Logica di default fornitore
+    let defaultSup = 'GO4SEA'
+    if (currentUserRole === 'ADMIN') {
+      const corfumania = suppliers.find(s => s.name.toLowerCase() === 'corfumania')
+      if (corfumania) defaultSup = corfumania.name
+    } else if (currentUserSupplierName) {
+      defaultSup = currentUserSupplierName
+    } else if (suppliers.length > 0) {
+      defaultSup = suppliers[0].name
+    }
+    
+    setNewSupplier(defaultSup)
     setIsCreating(true)
   }
 
