@@ -132,7 +132,8 @@ export function ParticipantForm({
             })
           }
         }
-      } catch (e) {
+      }
+    } catch (e) {
         console.error("Failed to fetch suppliers", e)
       }
     }
