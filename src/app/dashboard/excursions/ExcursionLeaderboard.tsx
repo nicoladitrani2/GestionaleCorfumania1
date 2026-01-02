@@ -57,6 +57,8 @@ export function ExcursionLeaderboard({ excursion, currentUserRole }: ExcursionLe
         })
       }
 
+      const stats = statsMap.get(userId)
+
       // Calculate commission based on actual payment (deposit)
       // If paymentType is BALANCE, deposit should be equal to price (full payment)
       // If paymentType is DEPOSIT, deposit is the partial amount
