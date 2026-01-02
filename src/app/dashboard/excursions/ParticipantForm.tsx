@@ -637,19 +637,18 @@ export function ParticipantForm({
                     />
                   </div>
 
-                  <div>
-                    <label className={labelClassName}>Data Ritorno (Opzionale)</label>
-                    <input
-                      type="date"
-                      name="returnDate"
-                      value={formData.returnDate}
-                      onChange={handleChange}
-                      className={inputClassName}
-                    />
-                  </div>
-
                   {formData.returnDate && (
                     <>
+                        <div>
+                        <label className={labelClassName}>Data Ritorno</label>
+                        <input
+                            type="date"
+                            name="returnDate"
+                            value={formData.returnDate}
+                            onChange={handleChange}
+                            className={inputClassName}
+                        />
+                        </div>
                         <div>
                         <label className={labelClassName}>Ora Ritorno</label>
                         <input
@@ -671,6 +670,18 @@ export function ParticipantForm({
                         />
                         </div>
                     </>
+                  )}
+
+                  {!formData.returnDate && (
+                    <div className="sm:col-span-2">
+                       <button 
+                         type="button"
+                         onClick={() => setFormData(prev => ({...prev, returnDate: new Date().toISOString().split('T')[0] }))}
+                         className="text-sm text-blue-600 hover:text-blue-800 font-medium flex items-center gap-1"
+                       >
+                         <Plus className="w-4 h-4" /> Aggiungi Ritorno
+                       </button>
+                    </div>
                   )}
                 </div>
               )}
