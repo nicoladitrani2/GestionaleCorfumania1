@@ -28,6 +28,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
   const [newTransferName, setNewTransferName] = useState('')
   const [newPickupLocation, setNewPickupLocation] = useState('')
   const [newDropoffLocation, setNewDropoffLocation] = useState('')
+  const [newReturnPickupLocation, setNewReturnPickupLocation] = useState('')
   const [newEndDate, setNewEndDate] = useState('')
   const [newSupplier, setNewSupplier] = useState('GO4SEA')
   const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
@@ -165,12 +166,19 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
   const toLocalISOString = (dateStr: string) => {
     if (!dateStr) return ''
     const date = new Date(dateStr)
-    const pad = (n: number) => n < 10 ? '0' + n : n
-    return date.getFullYear() +
-      '-' + pad(date.getMonth() + 1) +
-      '-' + pad(date.getDate()) +
-      'T' + pad(date.getHours()) +
-      ':' + pad(date.getMinutes())
+    if (isNaN(date.getTime())) return ''
+    const pad = (n: number) => (n < 10 ? '0' + n : n)
+    return (
+      date.getFullYear() +
+      '-' +
+      pad(date.getMonth() + 1) +
+      '-' +
+      pad(date.getDate()) +
+      'T' +
+      pad(date.getHours()) +
+      ':' +
+      pad(date.getMinutes())
+    )
   }
 
   const handleEditTransfer = (transfer: any, e: React.MouseEvent) => {
@@ -267,8 +275,16 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
   const formatDateDisplay = (dateStr: string) => {
     if (!dateStr) return '-'
     const date = new Date(dateStr)
-    return date.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + 
-           date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    if (isNaN(date.getTime())) return '-'
+    return (
+      date.toLocaleDateString('it-IT', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }) +
+      ' ' +
+      date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    )
   }
 
   return (
@@ -510,9 +526,10 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
                   type="TRANSFER"
                   initialData={editingParticipant}
                   defaultValues={{
-                    pickupLocation: selectedTransfer.pickupLocation,
-                    dropoffLocation: selectedTransfer.dropoffLocation,
-                    pickupTime: selectedTransfer.date ? new Date(selectedTransfer.date).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
+            pickupLocation: selectedTransfer.pickupLocation,
+            dropoffLocation: selectedTransfer.dropoffLocation,
+            returnPickupLocation: selectedTransfer.returnPickupLocation || selectedTransfer.dropoffLocation,
+            pickupTime: selectedTransfer.date ? new Date(selectedTransfer.date).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
                     returnDate: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toISOString().split('T')[0] : '',
                     returnTime: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
                   }}

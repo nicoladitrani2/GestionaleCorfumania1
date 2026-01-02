@@ -191,7 +191,7 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const { id, name, date, supplier, pickupLocation, dropoffLocation, endDate } = body
+    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
