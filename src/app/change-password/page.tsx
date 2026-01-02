@@ -81,7 +81,7 @@ export default function ChangePasswordPage() {
                   type={showPassword ? 'text' : 'password'}
                   value={newPassword}
                   onChange={(e) => setNewPassword(e.target.value)}
-                  className="block w-full border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition-all"
+                  className="block w-full border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition-all text-gray-900 placeholder-gray-500 bg-white"
                   placeholder="Inserisci nuova password"
                   required
                   minLength={6}
@@ -104,7 +104,7 @@ export default function ChangePasswordPage() {
                   type={showConfirmPassword ? 'text' : 'password'}
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="block w-full border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition-all"
+                  className="block w-full border border-gray-300 rounded-lg pl-10 pr-10 py-2.5 focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition-all text-gray-900 placeholder-gray-500 bg-white"
                   placeholder="Ripeti nuova password"
                   required
                   minLength={6}
