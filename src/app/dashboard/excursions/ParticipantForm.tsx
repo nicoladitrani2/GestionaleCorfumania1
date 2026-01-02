@@ -147,7 +147,9 @@ export function ParticipantForm({
         firstName: initialData.firstName,
         lastName: initialData.lastName,
         nationality: isStandard ? initialData.nationality : 'OTHER',
-        dateOfBirth: new Date(initialData.dateOfBirth).toISOString().split('T')[0],
+        dateOfBirth: !isNaN(new Date(initialData.dateOfBirth).getTime()) 
+          ? new Date(initialData.dateOfBirth).toISOString().split('T')[0] 
+          : '',
         docNumber: initialData.docNumber,
         docType: initialData.docType,
         phoneNumber: initialData.phoneNumber,
@@ -629,7 +631,7 @@ export function ParticipantForm({
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className={labelClassName}>Luogo Deposito / Ritiro Ritorno (Opzionale)</label>
+                      <label className={labelClassName}>Luogo Deposito</label>
                       <input
                         type="text"
                         name="dropoffLocation"

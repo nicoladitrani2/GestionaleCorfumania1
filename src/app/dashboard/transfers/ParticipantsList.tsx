@@ -176,16 +176,21 @@ export function ParticipantsList({
     // Date
     doc.setFontSize(10)
     if (transferDate) {
-      const dateStr = new Date(transferDate).toLocaleDateString('it-IT', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-      const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
-      doc.text(formattedDate, 14, 34)
+      const date = new Date(transferDate)
+      if (!isNaN(date.getTime())) {
+        const dateStr = date.toLocaleDateString('it-IT', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+        const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
+        doc.text(formattedDate, 14, 34)
+      } else {
+        doc.text('Data non valida', 14, 34)
+      }
     }
 
     // Columns: Nome, Posti, Nazionalità, Ritiro, Deposito, Telefono, Note

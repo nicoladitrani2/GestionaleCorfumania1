@@ -148,8 +148,17 @@ export const generateParticipantPDF = (participant: ParticipantData, event: Excu
 
     doc.setFontSize(10)
     doc.setFont('helvetica', 'normal')
-    const excDate = new Date(excursion.date).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-    doc.text(excDate.charAt(0).toUpperCase() + excDate.slice(1), 30, yPos + 20)
+    
+    let excDate = '-'
+    try {
+      if (excursion.date && !isNaN(new Date(excursion.date).getTime())) {
+        const date = new Date(excursion.date)
+        const dateStr = date.toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+        excDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
+      }
+    } catch (e) { console.error('Excursion date parsing error', e) }
+    
+    doc.text(excDate, 30, yPos + 20)
     
     if (excursion.meetingPoint) {
         doc.text(`Punto di incontro: ${excursion.meetingPoint}`, 30, yPos + 28)

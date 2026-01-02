@@ -513,17 +513,22 @@ export function ParticipantsList({
     // Date (White, smaller)
     doc.setFontSize(10)
     if (excursionDate) {
-      const dateStr = new Date(excursionDate).toLocaleDateString('it-IT', { 
-        weekday: 'long', 
-        year: 'numeric', 
-        month: 'long', 
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-      // Capitalize first letter
-      const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
-      doc.text(formattedDate, 14, 34)
+      const date = new Date(excursionDate)
+      if (!isNaN(date.getTime())) {
+        const dateStr = date.toLocaleDateString('it-IT', { 
+          weekday: 'long', 
+          year: 'numeric', 
+          month: 'long', 
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+        // Capitalize first letter
+        const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
+        doc.text(formattedDate, 14, 34)
+      } else {
+        doc.text('Data non valida', 14, 34)
+      }
     }
 
     // Prepare table data
