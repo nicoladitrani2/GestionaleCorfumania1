@@ -148,7 +148,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
     // Logica di default fornitore
     let defaultSup = 'GO4SEA'
     if (currentUserRole === 'ADMIN') {
-      const corfumania = suppliers.find(s => s.name.toLowerCase() === 'corfumania')
+      const corfumania = suppliers.find(s => s?.name?.toLowerCase() === 'corfumania')
       if (corfumania) defaultSup = corfumania.name
     } else if (currentUserSupplierName) {
       defaultSup = currentUserSupplierName
