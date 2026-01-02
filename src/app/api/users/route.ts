@@ -13,7 +13,13 @@ export async function GET() {
         lastName: true,
         role: true,
         code: true,
-        createdAt: true
+        createdAt: true,
+        supplier: {
+          select: {
+            id: true,
+            name: true
+          }
+        }
       }
     })
     return NextResponse.json(users)
@@ -25,7 +31,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { email, password, firstName, lastName, role, code } = body
+    const { email, password, firstName, lastName, role, code, supplierId } = body
 
     const existingUser = await prisma.user.findUnique({
       where: { email }
@@ -45,6 +51,7 @@ export async function POST(request: Request) {
         lastName,
         role: role || 'USER',
         code: code || undefined, // Let Prisma generate if undefined, or use provided
+        supplierId: supplierId || null,
         mustChangePassword: true
       }
     })

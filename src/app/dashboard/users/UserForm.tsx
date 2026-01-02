@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { X, Eye, EyeOff, User, Mail, Lock, Shield, Hash, Save } from 'lucide-react'
+import { X, Eye, EyeOff, User, Mail, Lock, Shield, Hash, Save, Briefcase } from 'lucide-react'
 import type { User as UserType } from './UsersManager'
 
 interface UserFormProps {
@@ -17,11 +17,20 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
     firstName: '',
     lastName: '',
     role: 'USER',
-    code: ''
+    code: '',
+    supplierId: ''
   })
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
+
+  useEffect(() => {
+    fetch('/api/suppliers')
+      .then(res => res.json())
+      .then(data => setSuppliers(data))
+      .catch(console.error)
+  }, [])
 
   useEffect(() => {
     if (user) {
@@ -31,7 +40,19 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
         firstName: user.firstName || '',
         lastName: user.lastName || '',
         role: user.role,
-        code: user.code
+        code: user.code,
+        supplierId: user.supplier?.id || ''
+      })
+    } else {
+      // Explicitly reset form when user is null (creation mode)
+      setFormData({
+        email: '',
+        password: '',
+        firstName: '',
+        lastName: '',
+        role: 'USER',
+        code: '',
+        supplierId: ''
       })
     }
   }, [user])
@@ -46,9 +67,9 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
       const method = user ? 'PUT' : 'POST'
 
       // Filter out empty password for updates
-      const dataToSend = { ...formData }
+      const dataToSend: Partial<typeof formData> = { ...formData }
       if (user && !dataToSend.password) {
-        delete (dataToSend as any).password
+        delete dataToSend.password
       }
 
       const res = await fetch(url, {
@@ -63,7 +84,7 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
         const data = await res.json()
         setError(data.error || 'Errore nel salvataggio')
       }
-    } catch (err) {
+    } catch {
       setError('Errore di connessione')
     } finally {
       setLoading(false)
@@ -137,6 +158,7 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
                 <input
                   type="email"
                   required
+                  autoComplete={user ? "email" : "off"}
                   className="block w-full pl-10 pr-3 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white"
                   placeholder="mario.rossi@example.com"
                   value={formData.email}
@@ -157,6 +179,7 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
                 <input
                   type={showPassword ? 'text' : 'password'}
                   required={!user}
+                  autoComplete={user ? "current-password" : "new-password"}
                   className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white"
                   placeholder={user ? '••••••••' : 'Inserisci password'}
                   value={formData.password}
@@ -191,6 +214,31 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
                   <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
                     <svg className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                       <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+                </div>
+              </div>
+
+              {/* Fornitore */}
+              <div className="space-y-2">
+                <label className="text-sm font-semibold text-gray-700">Fornitore</label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Briefcase className="h-5 w-5 text-gray-400" />
+                  </div>
+                  <select
+                    className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white appearance-none"
+                    value={formData.supplierId}
+                    onChange={(e) => setFormData({ ...formData, supplierId: e.target.value })}
+                  >
+                    <option value="">Nessun Fornitore</option>
+                    {suppliers.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                  <div className="absolute inset-y-0 right-0 pr-3 flex items-center pointer-events-none">
+                    <svg className="h-5 w-5 text-gray-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                      <path fillRule="evenodd" d="M5.293 7.293a1 1 0 011.414 0L10 10.586l3.293-3.293a1 1 0 111.414 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 010-1.414z" clipRule="evenodd" />
                     </svg>
                   </div>
                 </div>

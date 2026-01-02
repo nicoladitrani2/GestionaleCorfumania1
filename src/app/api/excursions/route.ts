@@ -14,6 +14,15 @@ export async function GET(request: Request) {
   const archived = searchParams.get('archived') === 'true'
   const now = new Date()
 
+  let currentUserSupplierId: string | null = null
+  if (session.user.role !== 'ADMIN') {
+    const user = await prisma.user.findUnique({
+      where: { id: session.user.id },
+      select: { supplierId: true }
+    })
+    currentUserSupplierId = user?.supplierId || null
+  }
+
   // Check for expired deadlines and update participants
   const expiredExcursions = await prisma.excursion.findMany({
     where: {
@@ -56,6 +65,11 @@ export async function GET(request: Request) {
     where: whereClause,
     orderBy: { startDate: 'asc' },
     include: {
+      commissions: {
+        include: {
+          supplier: true
+        }
+      },
       participants: {
         where: { paymentType: { not: 'REFUNDED' } },
         select: { 
@@ -91,8 +105,15 @@ export async function GET(request: Request) {
     // Only include totalCollected if user is ADMIN
     if (session.user.role === 'ADMIN') {
       result.totalCollected = totalCollected
+    } else {
+      // Filter commissions for non-admins
+      if (currentUserSupplierId && result.commissions) {
+        result.commissions = result.commissions.filter((c: any) => c.supplierId === currentUserSupplierId)
+      } else {
+        result.commissions = []
+      }
     }
-
+    
     return result
   })
 
@@ -106,7 +127,7 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json()
-  const { name, startDate, endDate, confirmationDeadline } = body
+  const { name, startDate, endDate, confirmationDeadline, commissions } = body
 
   // Validation
   if (!startDate) {
@@ -135,7 +156,13 @@ export async function POST(request: Request) {
       name,
       startDate: new Date(startDate),
       endDate: endDate ? new Date(endDate) : null,
-      confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null
+      confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null,
+      commissions: commissions ? {
+        create: commissions.map((c: any) => ({
+          supplierId: c.supplierId,
+          commissionPercentage: parseFloat(c.percentage)
+        }))
+      } : undefined
     }
   })
 
@@ -167,7 +194,7 @@ export async function PUT(request: Request) {
   }
 
   const body = await request.json()
-  const { id, name, startDate, endDate, confirmationDeadline } = body
+  const { id, name, startDate, endDate, confirmationDeadline, commissions } = body
 
   // Validation
   if (startDate) {
@@ -186,7 +213,14 @@ export async function PUT(request: Request) {
       name,
       startDate: startDate ? new Date(startDate) : undefined,
       endDate: endDate ? new Date(endDate) : null,
-      confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null
+      confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null,
+      commissions: commissions ? {
+        deleteMany: {},
+        create: commissions.map((c: any) => ({
+          supplierId: c.supplierId,
+          commissionPercentage: parseFloat(c.percentage)
+        }))
+      } : undefined
     }
   })
 

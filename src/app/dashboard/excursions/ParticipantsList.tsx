@@ -6,6 +6,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ParticipantDetailsModal } from './ParticipantDetailsModal'
 import { RefundModal } from './RefundModal'
+import { DeleteChoiceModal } from './DeleteChoiceModal'
 
 // --- Helpers ---
 
@@ -378,6 +379,8 @@ export function ParticipantsList({
   const [showDetails, setShowDetails] = useState(false)
   const [showRefund, setShowRefund] = useState(false)
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
+  const [showDeleteChoice, setShowDeleteChoice] = useState(false)
+  const [participantToDelete, setParticipantToDelete] = useState<any>(null)
 
   const fetchParticipants = async () => {
     try {
@@ -406,19 +409,37 @@ export function ParticipantsList({
     fetchParticipants()
   }, [excursionId, refreshTrigger])
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Sei sicuro di voler eliminare questo partecipante?')) return
+  const handleDelete = (id: string) => {
+    const p = participants.find(p => p.id === id)
+    if (p) {
+      setParticipantToDelete(p)
+      setShowDeleteChoice(true)
+    }
+  }
+
+  const executeDelete = async () => {
+    if (!participantToDelete) return
 
     try {
-      const res = await fetch(`/api/participants/${id}`, {
+      const res = await fetch(`/api/participants/${participantToDelete.id}`, {
         method: 'DELETE',
       })
       if (res.ok) {
+        setShowDeleteChoice(false)
+        setParticipantToDelete(null)
         fetchParticipants()
         if (onUpdate) onUpdate()
       }
     } catch (error) {
       console.error('Error deleting participant:', error)
+    }
+  }
+
+  const handleRequestRefund = () => {
+    if (participantToDelete) {
+      setParticipantToRefund(participantToDelete)
+      setShowDeleteChoice(false)
+      setTimeout(() => setShowRefund(true), 150)
     }
   }
 
@@ -678,6 +699,17 @@ export function ParticipantsList({
           excursion={excursion}
         />
       )}
+
+      <DeleteChoiceModal
+        isOpen={showDeleteChoice}
+        onClose={() => {
+          setShowDeleteChoice(false)
+          setParticipantToDelete(null)
+        }}
+        onConfirmDelete={executeDelete}
+        onRequestRefund={handleRequestRefund}
+        participantName={participantToDelete ? `${participantToDelete.firstName} ${participantToDelete.lastName}` : ''}
+      />
 
       <RefundModal
         isOpen={showRefund}

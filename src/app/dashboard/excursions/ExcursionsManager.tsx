@@ -36,12 +36,33 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
 
   const [refreshParticipantsTrigger, setRefreshParticipantsTrigger] = useState(0)
 
+  // State for suppliers and commissions
+  const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
+  const [commissions, setCommissions] = useState<{ supplierId: string, percentage: string }[]>([])
+
   const searchParams = useSearchParams()
   const router = useRouter()
 
   useEffect(() => {
     fetchTemplates()
+    fetchSuppliers()
   }, [])
+
+  const fetchSuppliers = async () => {
+    try {
+      const res = await fetch('/api/suppliers')
+      if (res.ok) {
+        const data = await res.json()
+        setSuppliers(data)
+        // Initialize commissions empty, we'll fill it if editing or leave empty
+        if (!editingExcursionId) {
+             setCommissions(data.map((s: any) => ({ supplierId: s.id, percentage: '' })))
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching suppliers:', e)
+    }
+  }
 
   useEffect(() => {
     fetchExcursions()
@@ -171,6 +192,8 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
     setNewEndDate('')
     setNewConfirmationDeadline('')
     setSelectedTemplateId('')
+    // Reset commissions
+    setCommissions(suppliers.map(s => ({ supplierId: s.id, percentage: '' })))
     setIsCreating(true)
   }
 
@@ -193,6 +216,20 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
     setNewEndDate(toLocalISOString(excursion.endDate))
     setNewConfirmationDeadline(toLocalISOString(excursion.confirmationDeadline))
     setSelectedTemplateId('') // Custom edit
+    
+    // Populate commissions
+    if (excursion.commissions) {
+      setCommissions(suppliers.map(s => {
+        const comm = excursion.commissions.find((c: any) => c.supplierId === s.id)
+        return {
+          supplierId: s.id,
+          percentage: comm ? comm.commissionPercentage.toString() : ''
+        }
+      }))
+    } else {
+      setCommissions(suppliers.map(s => ({ supplierId: s.id, percentage: '' })))
+    }
+    
     setIsCreating(true)
   }
 
@@ -264,7 +301,8 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
         name: newExcursionName,
         startDate: newStartDate,
         endDate: newEndDate,
-        confirmationDeadline: newConfirmationDeadline || newStartDate // Default to startDate
+        confirmationDeadline: newConfirmationDeadline || newStartDate, // Default to startDate
+        commissions // Add commissions
       }
 
       const body = editingExcursionId 
@@ -470,6 +508,36 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                 </p>
               </div>
 
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Fornitori (%)</label>
+                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
+                  {suppliers.length === 0 && <p className="text-sm text-gray-500 italic">Nessun fornitore disponibile.</p>}
+                  {suppliers.map(supplier => (
+                    <div key={supplier.id} className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-gray-700 truncate flex-1" title={supplier.name}>{supplier.name}</span>
+                      <div className="relative w-24">
+                        <input
+                          type="number"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          placeholder="0"
+                          value={commissions.find(c => c.supplierId === supplier.id)?.percentage || ''}
+                          onChange={(e) => {
+                            const val = e.target.value
+                            setCommissions(prev => prev.map(c => 
+                              c.supplierId === supplier.id ? { ...c, percentage: val } : c
+                            ))
+                          }}
+                          className="block w-full border border-gray-300 rounded-md py-1 px-2 text-right pr-6 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                        />
+                        <span className="absolute right-2 top-1.5 text-gray-400 text-xs">%</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
                   type="button"
@@ -538,6 +606,16 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                       <div className="flex flex-col">
                         <span className="text-xs text-amber-600 font-semibold uppercase tracking-wide">Scadenza</span>
                         <span className="font-medium font-mono">{formatDateDisplay(selectedExcursion.confirmationDeadline)}</span>
+                      </div>
+                    </div>
+                  )}
+                  {/* Commission Display for Assistants */}
+                  {currentUserRole !== 'ADMIN' && selectedExcursion.commissions && selectedExcursion.commissions.length > 0 && (
+                     <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg text-emerald-800 border border-emerald-100">
+                      <Euro className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-emerald-600 font-semibold uppercase tracking-wide">La tua Commissione</span>
+                        <span className="font-medium font-mono">{selectedExcursion.commissions[0].commissionPercentage}%</span>
                       </div>
                     </div>
                   )}

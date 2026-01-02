@@ -23,6 +23,8 @@ model User {
   updatedAt          DateTime      @updatedAt
   participants       Participant[]
   auditLogs          AuditLog[]
+  supplierId         String?
+  supplier           Supplier?     @relation(fields: [supplierId], references: [id])
 }
 
 model Excursion {
@@ -35,6 +37,19 @@ model Excursion {
   updatedAt            DateTime      @updatedAt
   participants         Participant[]
   auditLogs            AuditLog[]
+  commissions          ExcursionCommission[]
+}
+
+model ExcursionCommission {
+  id                   String    @id @default(cuid())
+  excursionId          String
+  supplierId           String
+  commissionPercentage Float     @default(0)
+  
+  excursion            Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  supplier             Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([excursionId, supplierId])
 }
 
 model Transfer {
@@ -126,4 +141,6 @@ model Supplier {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  users     User[]
+  commissions ExcursionCommission[]
 }

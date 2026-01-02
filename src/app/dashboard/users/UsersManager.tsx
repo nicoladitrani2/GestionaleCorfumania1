@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Plus, Home, Users } from 'lucide-react'
+import { Plus, Home } from 'lucide-react'
 import Link from 'next/link'
 import { UsersList } from './UsersList'
 import { UserForm } from './UserForm'
@@ -14,6 +14,10 @@ export type User = {
   role: string
   code: string
   createdAt: string
+  supplier?: {
+    id: string
+    name: string
+  } | null
 }
 
 export function UsersManager({ currentUserId }: { currentUserId: string }) {
