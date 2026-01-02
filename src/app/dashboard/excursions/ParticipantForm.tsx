@@ -55,7 +55,8 @@ export function ParticipantForm({
   excursionDate,
   type = 'EXCURSION',
   defaultValues,
-  defaultSupplier
+  defaultSupplier,
+  currentUserRole
 }: ParticipantFormProps) {
   const [formData, setFormData] = useState({
     firstName: '',
