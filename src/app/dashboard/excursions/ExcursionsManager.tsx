@@ -694,6 +694,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                     setEditingParticipant(null)
                   }}
                   defaultSupplier={currentUserSupplierName}
+                  currentUserRole={currentUserRole}
                 />
               </div>
             </div>

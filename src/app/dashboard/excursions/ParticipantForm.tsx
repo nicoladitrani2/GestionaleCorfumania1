@@ -99,19 +99,25 @@ export function ParticipantForm({
           // Se stiamo creando un nuovo partecipante
           if (!initialData && data.length > 0) {
             setFormData(prev => {
-              // 1. Se c'è un fornitore di default (dall'utente loggato), usa quello
+              // 1. Se Admin -> Corfumania
+              if (currentUserRole === 'ADMIN') {
+                const corfumania = data.find((s: any) => s.name.toLowerCase() === 'corfumania')
+                if (corfumania) return { ...prev, supplier: corfumania.name }
+              }
+
+              // 2. Se Assistant (o comunque c'è un defaultSupplier passato)
               if (defaultSupplier) {
                 const match = data.find((s: any) => s.name === defaultSupplier)
                 if (match) return { ...prev, supplier: match.name }
               }
 
-              // 2. Altrimenti cerca Go4Sea nella lista (case insensitive)
+              // 3. Fallback a GO4SEA
               const go4sea = data.find((s: any) => s.name.toLowerCase() === 'go4sea')
               if (go4sea) {
                 return { ...prev, supplier: go4sea.name }
               }
-              
-              // 3. Altrimenti, se il valore attuale non è valido, usa il primo della lista
+
+              // 4. Fallback al primo della lista se il corrente non è valido
               const isCurrentInList = data.some((s: any) => s.name === prev.supplier)
               if (!isCurrentInList) {
                 return { ...prev, supplier: data[0].name }

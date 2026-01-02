@@ -508,6 +508,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
                     setEditingParticipant(null)
                   }}
                   defaultSupplier={currentUserSupplierName}
+                  currentUserRole={currentUserRole}
                 />
               </div>
             </div>
