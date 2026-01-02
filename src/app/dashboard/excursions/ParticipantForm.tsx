@@ -385,14 +385,14 @@ export function ParticipantForm({
   const labelClassName = "block text-xs font-bold text-gray-900 mb-1 uppercase tracking-wide"
 
   return (
-    <div className="bg-white rounded-xl shadow-2xl border border-gray-100 overflow-hidden flex flex-col max-h-[95vh] w-full max-w-5xl">
+    <div className="bg-white flex flex-col w-full h-full">
       {/* Header */}
-      <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-4 sm:p-6 flex justify-between items-center shrink-0">
-        <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-3">
+      <div className="bg-gradient-to-r from-blue-600 to-blue-800 p-4 flex justify-between items-center shrink-0">
+        <h2 className="text-lg font-bold text-white flex items-center gap-3">
           <div className="p-2 bg-white/10 rounded-lg backdrop-blur-sm">
             {initialData ? <User className="w-5 h-5 sm:w-6 sm:h-6" /> : <UserPlus className="w-5 h-5 sm:w-6 sm:h-6" />}
           </div>
-          {initialData ? 'Modifica Partecipante' : 'Nuovo Partecipante'}
+          <span className="truncate">{initialData ? 'Modifica Partecipante' : 'Nuovo Partecipante'}</span>
         </h2>
         <button 
           onClick={onCancel} 
@@ -402,17 +402,17 @@ export function ParticipantForm({
         </button>
       </div>
 
-      <div className="overflow-y-auto p-4 sm:p-6 custom-scrollbar">
+      <div className="overflow-y-auto p-4 custom-scrollbar flex-1">
         {error && (
           <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3">
-            <div className="p-2 bg-red-100 rounded-full">
+            <div className="p-2 bg-red-100 rounded-full shrink-0">
               <X className="w-4 h-4" />
             </div>
-            {error}
+            <span className="text-sm">{error}</span>
           </div>
         )}
 
-        <form onSubmit={handleSubmit} className="space-y-8">
+        <form onSubmit={handleSubmit} className="space-y-6">
           {/* Dati Partecipante */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
@@ -420,7 +420,7 @@ export function ParticipantForm({
               <h3 className="text-lg font-semibold text-gray-800">Dati Partecipante</h3>
             </div>
             
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
               <div>
                 <label className={labelClassName}>Nome</label>
                 <input
@@ -457,13 +457,13 @@ export function ParticipantForm({
                     min="1"
                     className={`${inputClassName} pl-10`}
                   />
-                  <UserPlus className="w-4 h-4 text-gray-400 absolute left-3 top-[38px] -translate-y-1/2" />
+                  <UserPlus className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 </div>
               </div>
 
               <div>
                 <label className={labelClassName}>Nazionalità</label>
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <select
                     name="nationality"
                     value={formData.nationality}
@@ -482,7 +482,7 @@ export function ParticipantForm({
                       value={customNationality}
                       onChange={(e) => setCustomNationality(e.target.value)}
                       placeholder="Specifica..."
-                      className={inputClassName}
+                      className={`${inputClassName} mt-2 sm:mt-0`}
                     />
                   )}
                 </div>
@@ -526,7 +526,7 @@ export function ParticipantForm({
                 />
               </div>
 
-              <div className="col-span-2 grid grid-cols-2 gap-4">
+              <div className="col-span-1 sm:col-span-2 grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className={labelClassName}>Telefono</label>
                   <div className="relative">
@@ -574,13 +574,13 @@ export function ParticipantForm({
                       <option value={formData.supplier}>{formData.supplier}</option>
                     )}
                   </select>
-                  <Briefcase className="w-4 h-4 text-gray-400 absolute left-3 top-[38px] -translate-y-1/2" />
+                  <Briefcase className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 </div>
               </div>
 
               {type === 'TRANSFER' && (
-                <div className="col-span-1 md:col-span-4 grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-b border-gray-100 py-4 my-2">
-                  <h4 className="md:col-span-2 font-medium text-gray-700 mb-2 flex items-center gap-2">
+                <div className="col-span-1 sm:col-span-2 md:col-span-4 grid grid-cols-1 sm:grid-cols-2 gap-4 border-t border-b border-gray-100 py-4 my-2">
+                  <h4 className="sm:col-span-2 font-medium text-gray-700 mb-2 flex items-center gap-2">
                     <MapIcon className="w-4 h-4" />
                     Dettagli Trasferimento
                   </h4>
@@ -666,7 +666,7 @@ export function ParticipantForm({
               <h3 className={`text-lg font-semibold ${paymentStyle.header}`}>Dettagli Pagamento</h3>
             </div>
 
-            <div className={`p-6 rounded-xl border transition-colors duration-300 ${paymentStyle.container}`}>
+            <div className={`p-4 sm:p-6 rounded-xl border transition-colors duration-300 ${paymentStyle.container}`}>
               <div className="mb-6 flex items-center">
                 <label className="relative inline-flex items-center cursor-pointer">
                   <input
@@ -683,7 +683,7 @@ export function ParticipantForm({
                 </label>
               </div>
 
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                 <div>
                   <label className={labelClassName}>Tipo Pagamento</label>
                   <select
@@ -698,9 +698,9 @@ export function ParticipantForm({
                   </select>
                 </div>
 
-                <div className="col-span-2">
+                <div className="col-span-1 sm:col-span-2">
                   <label className={labelClassName}>Metodo Pagamento</label>
-                  <div className="flex gap-4">
+                  <div className="flex flex-col sm:flex-row gap-4">
                       <div className="flex-1">
                           <span className="text-[10px] text-gray-500 mb-1 block uppercase">
                               {formData.paymentType === 'BALANCE' ? 'Acconto / Unico' : 'Acconto'}
@@ -710,7 +710,7 @@ export function ParticipantForm({
                               value={formData.depositPaymentMethod}
                               onChange={handleChange}
                               className={inputClassName}
-                          >
+                            >
                               <option value="CASH">Contanti</option>
                               <option value="CARD">Carta</option>
                               <option value="TRANSFER">Bonifico</option>
@@ -749,7 +749,7 @@ export function ParticipantForm({
                       disabled={formData.isOption}
                       className={`${inputClassName} pl-8 font-mono disabled:bg-gray-100 disabled:text-gray-400`}
                     />
-                    <span className="absolute left-3 top-[38px] -translate-y-1/2 text-gray-500">€</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
                   </div>
                 </div>
                 <div>
@@ -765,7 +765,7 @@ export function ParticipantForm({
                       disabled={formData.isOption || formData.paymentType === 'BALANCE'}
                       className={`${inputClassName} pl-8 font-mono disabled:bg-gray-100 disabled:text-gray-400 ${depositError ? 'border-red-500 focus:ring-red-500' : ''}`}
                     />
-                    <span className="absolute left-3 top-[38px] -translate-y-1/2 text-gray-500">€</span>
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
                   </div>
                   {depositError && (
                     <p className="mt-1 text-sm text-red-600 font-medium animate-pulse">{depositError}</p>
@@ -791,18 +791,18 @@ export function ParticipantForm({
       </div>
 
       {/* Footer */}
-      <div className="p-4 sm:p-6 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 shrink-0">
+      <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col-reverse sm:flex-row justify-end gap-3 shrink-0">
         <button
           type="button"
           onClick={onCancel}
-          className="px-4 sm:px-6 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none transition-all"
+          className="px-4 py-2.5 border border-gray-300 rounded-lg shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50 focus:outline-none transition-all w-full sm:w-auto text-center"
         >
           Annulla
         </button>
         <button
           onClick={handleSubmit}
           disabled={loading}
-          className="px-4 sm:px-6 py-2.5 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none flex items-center gap-2 transition-all hover:shadow-md disabled:opacity-70 disabled:cursor-not-allowed"
+          className="px-4 py-2.5 border border-transparent rounded-lg shadow-sm text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 focus:outline-none flex items-center justify-center gap-2 transition-all hover:shadow-md disabled:opacity-70 disabled:cursor-not-allowed w-full sm:w-auto"
         >
           {loading ? 'Salvataggio...' : (
             <>

@@ -38,8 +38,8 @@ export function RefundModal({ isOpen, onClose, participant, onConfirm }: RefundM
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
-      <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in duration-200">
-        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-red-50">
+      <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+        <div className="p-6 border-b border-gray-100 flex justify-between items-center bg-red-50 shrink-0">
           <div className="flex items-center gap-2 text-red-700">
             <AlertTriangle className="w-5 h-5" />
             <h3 className="font-bold text-lg">Rimborso ed Eliminazione</h3>
@@ -49,7 +49,7 @@ export function RefundModal({ isOpen, onClose, participant, onConfirm }: RefundM
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6 overflow-y-auto">
           <div className="p-4 bg-red-50 text-red-800 rounded-lg text-sm border border-red-100">
             Stai per rimborsare ed eliminare <strong>{participant.firstName} {participant.lastName}</strong>.<br/>
             Questa azione è <strong>irreversibile</strong> e rimuoverà il partecipante dalla lista.

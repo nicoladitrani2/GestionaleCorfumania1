@@ -92,8 +92,8 @@ export function WeeklyCalendar({ excursions }: WeeklyCalendarProps) {
             const isCurrentDay = isToday(day)
 
             return (
-                <div key={day.toISOString()} className={`flex flex-col transition-colors duration-300 ${isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}>
-                    <div className={`p-3 text-center border-b border-gray-100 transition-colors ${isCurrentDay ? 'bg-blue-100/60' : ''}`}>
+                <div key={day.toISOString()} className={`flex flex-row md:flex-col transition-colors duration-300 ${isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}>
+                    <div className={`p-3 text-center border-r md:border-r-0 border-b-0 md:border-b border-gray-100 transition-colors shrink-0 w-24 md:w-auto flex flex-col justify-center md:block ${isCurrentDay ? 'bg-blue-100/60' : ''}`}>
                         <span className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isCurrentDay ? 'text-blue-700' : 'text-gray-500'}`}>
                             {new Intl.DateTimeFormat('it-IT', { weekday: 'short' }).format(day)}
                         </span>
@@ -101,7 +101,7 @@ export function WeeklyCalendar({ excursions }: WeeklyCalendarProps) {
                             {day.getDate()}
                         </div>
                     </div>
-                    <div className="flex-1 p-2 space-y-3">
+                    <div className="flex-1 p-2 space-y-3 min-w-0">
                         {dayExcursions.map(ex => {
                             const duration = getDuration(ex.startDate, ex.endDate)
                             const isDeadlineSoon = ex.confirmationDeadline && new Date(ex.confirmationDeadline) > new Date() && new Date(ex.confirmationDeadline).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000

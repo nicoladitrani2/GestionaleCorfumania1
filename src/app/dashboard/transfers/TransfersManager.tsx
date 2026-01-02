@@ -486,44 +486,27 @@ export function TransfersManager({ currentUserId, currentUserRole }: TransfersMa
           )}
 
           {(isAddingParticipant || editingParticipant) && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-              <div className="bg-white rounded-2xl shadow-2xl w-full max-w-4xl max-h-[90vh] overflow-y-auto animate-in zoom-in-95 duration-200">
-                <div className="sticky top-0 bg-white px-6 py-4 border-b border-gray-100 flex justify-between items-center z-10">
-                  <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2">
-                    {editingParticipant ? <Edit className="w-5 h-5 text-indigo-600" /> : <Users className="w-5 h-5 text-blue-600" />}
-                    {editingParticipant ? 'Modifica Partecipante' : 'Nuovo Partecipante'}
-                  </h3>
-                  <button 
-                    onClick={() => {
-                      setIsAddingParticipant(false)
-                      setEditingParticipant(null)
-                    }}
-                    className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
-                  >
-                    <X className="w-6 h-6" />
-                  </button>
-                </div>
-                <div className="p-6">
-                  <ParticipantForm
-                    onSuccess={handleParticipantSuccess}
-                    onCancel={() => {
-                      setIsAddingParticipant(false)
-                      setEditingParticipant(null)
-                    }}
-                    initialData={editingParticipant}
-                    type="TRANSFER"
-                    transferId={selectedTransfer.id}
-                    excursionName={selectedTransfer.name}
-                    excursionDate={selectedTransfer.date}
-                    defaultValues={{
-                      pickupLocation: selectedTransfer.pickupLocation || '',
-                      dropoffLocation: selectedTransfer.dropoffLocation || '',
-                      pickupTime: selectedTransfer.date ? new Date(selectedTransfer.date).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '',
-                      returnDate: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toISOString().split('T')[0] : '',
-                      // We don't have returnTime in Transfer model, only date.
-                    }}
-                  />
-                </div>
+            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 sm:p-4 animate-in fade-in duration-200">
+              <div className="w-full max-w-5xl h-full sm:h-auto sm:max-h-[95vh] overflow-y-auto bg-white sm:rounded-xl shadow-2xl animate-in zoom-in-95 duration-200">
+                <ParticipantForm
+                  transferId={selectedTransfer.id}
+                  excursionName={selectedTransfer.name}
+                  excursionDate={selectedTransfer.date}
+                  type="TRANSFER"
+                  initialData={editingParticipant}
+                  defaultValues={{
+                    pickupLocation: selectedTransfer.pickupLocation,
+                    dropoffLocation: selectedTransfer.dropoffLocation,
+                    pickupTime: selectedTransfer.date ? new Date(selectedTransfer.date).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
+                    returnDate: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toISOString().split('T')[0] : '',
+                    returnTime: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
+                  }}
+                  onSuccess={handleParticipantSuccess}
+                  onCancel={() => {
+                    setIsAddingParticipant(false)
+                    setEditingParticipant(null)
+                  }}
+                />
               </div>
             </div>
           )}

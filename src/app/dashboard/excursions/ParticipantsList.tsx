@@ -251,7 +251,7 @@ export function ParticipantsList({
 
   const ParticipantsTable = ({ data, emptyMessage }: { data: any[], emptyMessage: string }) => (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-      <div className="overflow-x-auto">
+      <div className="hidden md:block overflow-x-auto">
         <table className="min-w-full divide-y divide-gray-200">
           <thead className="bg-gray-50/50">
             <tr>
@@ -410,7 +410,7 @@ export function ParticipantsList({
             })}
             {data.length === 0 && (
               <tr>
-                <td colSpan={8} className="px-6 py-12 text-center text-sm text-gray-500">
+                <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
                   <div className="flex flex-col items-center gap-3">
                     <div className="p-3 bg-gray-50 rounded-full">
                       <User className="w-6 h-6 text-gray-400" />
@@ -423,6 +423,124 @@ export function ParticipantsList({
             )}
           </tbody>
         </table>
+      </div>
+
+      {/* Mobile Card View */}
+      <div className="md:hidden divide-y divide-gray-100">
+        {data.map((p) => {
+          const canEdit = currentUserRole === 'ADMIN' || p.createdById === currentUserId
+          
+          return (
+            <div 
+              key={p.id} 
+              className={`p-4 space-y-3 ${getRowBackground(p)}`}
+            >
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="font-bold text-gray-900">{p.firstName} {p.lastName}</div>
+                  <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                       <Users className="w-3 h-3 mr-1" />
+                       {p.groupSize || 1}
+                    </span>
+                    <span>{p.nationality || '-'}</span>
+                  </div>
+                </div>
+                <span className={`px-2 py-1 inline-flex items-center text-xs font-medium rounded-full border ${getStatusColor(p)}`}>
+                  {getStatusIcon(p)}
+                  {getStatusText(p)}
+                </span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
+                <div className="flex flex-col">
+                   <span className="text-xs text-gray-400">Inserito da</span>
+                   <span>{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
+                </div>
+                 <div className="flex flex-col">
+                   <span className="text-xs text-gray-400">Telefono</span>
+                   <span>{p.phoneNumber || '-'}</span>
+                </div>
+              </div>
+
+              <div className="flex justify-between items-center pt-2 border-t border-gray-100/50">
+                 <div className="flex gap-3 text-sm">
+                    <div className="flex flex-col">
+                       <span className="text-xs text-gray-400">Prezzo</span>
+                       <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
+                    </div>
+                    <div className="flex flex-col">
+                       <span className="text-xs text-gray-400">Acconto</span>
+                       <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
+                    </div>
+                 </div>
+                 
+                 <div className="flex gap-2">
+                    <button
+                        onClick={() => {
+                          setSelectedParticipant(p)
+                          setShowDetails(true)
+                        }}
+                        className="p-2 text-blue-700 bg-blue-50 rounded-lg border border-blue-200"
+                        title="Dettagli"
+                    >
+                        <Eye className="w-4 h-4" />
+                    </button>
+                    {canEdit && (
+                        <>
+                             {(p.paymentType === 'DEPOSIT' || p.isOption) && (
+                                <button
+                                  onClick={() => handleSettleBalance(p)}
+                                  className="p-2 text-green-700 bg-green-50 rounded-lg border border-green-200"
+                                  title="Saldo"
+                                >
+                                  <Euro className="w-4 h-4" />
+                                </button>
+                              )}
+                              {p.deposit > 0 && (
+                                <button
+                                  onClick={() => {
+                                    setParticipantToRefund(p)
+                                    setShowRefund(true)
+                                  }}
+                                  className="p-2 text-orange-700 bg-orange-50 rounded-lg border border-orange-200"
+                                  title="Rimborso"
+                                >
+                                  <RotateCcw className="w-4 h-4" />
+                                </button>
+                              )}
+                              <button 
+                                onClick={() => onEdit(p)} 
+                                className="p-2 text-indigo-700 bg-indigo-50 rounded-lg border border-indigo-200"
+                                title="Modifica"
+                              >
+                                <Edit className="w-4 h-4" />
+                              </button>
+                              <button 
+                                onClick={() => handleDelete(p.id)} 
+                                className="p-2 text-red-700 bg-red-50 rounded-lg border border-red-200"
+                                title="Elimina"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                        </>
+                    )}
+                 </div>
+              </div>
+            </div>
+          )
+        })}
+        {data.length === 0 && (
+          <div className="px-6 py-12 text-center text-sm text-gray-500">
+             <div className="flex flex-col items-center gap-3">
+               <div className="p-3 bg-gray-50 rounded-full">
+                 <User className="w-6 h-6 text-gray-400" />
+               </div>
+               <p className="font-medium">{emptyMessage}</p>
+               <p className="text-gray-400 text-xs">Aggiungi un nuovo partecipante per iniziare</p>
+             </div>
+          </div>
+        )}
       </div>
     </div>
   )

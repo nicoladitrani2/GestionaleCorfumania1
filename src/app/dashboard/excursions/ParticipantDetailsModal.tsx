@@ -71,10 +71,10 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         
         {/* Header */}
-        <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex items-center justify-between">
+        <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-blue-100 rounded-lg">
               <User className="w-6 h-6 text-blue-600" />
@@ -94,7 +94,7 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
           </button>
         </div>
 
-        <div className="p-6 overflow-y-auto max-h-[80vh]">
+        <div className="p-6 overflow-y-auto">
           
           {/* Status Banner */}
           <div className={`flex items-center gap-3 p-4 rounded-xl mb-6 ${status.color}`}>

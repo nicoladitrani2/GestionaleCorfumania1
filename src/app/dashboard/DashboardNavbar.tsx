@@ -1,8 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { LogOut, Home, User } from 'lucide-react'
+import { LogOut, Home, User, Menu, X } from 'lucide-react'
 import { useRouter, usePathname } from 'next/navigation'
+import { useState } from 'react'
 
 interface DashboardNavbarProps {
   user: {
@@ -16,6 +17,7 @@ interface DashboardNavbarProps {
 export function DashboardNavbar({ user }: DashboardNavbarProps) {
   const router = useRouter()
   const pathname = usePathname()
+  const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -29,6 +31,18 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           <div className="flex items-center gap-4">
+            {/* Mobile menu button */}
+            <button
+              onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
+              className="md:hidden p-2 rounded-md text-gray-500 hover:text-gray-900 hover:bg-gray-100 focus:outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500"
+            >
+              {isMobileMenuOpen ? (
+                <X className="block h-6 w-6" aria-hidden="true" />
+              ) : (
+                <Menu className="block h-6 w-6" aria-hidden="true" />
+              )}
+            </button>
+
             <Link href="/dashboard" className="flex items-center gap-2">
               <h1 className="text-xl font-bold text-gray-900 hover:text-blue-600 transition-colors">
                 Gestionale Corfumania
@@ -86,6 +100,73 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
           </div>
         </div>
       </div>
+      
+      {/* Mobile menu */}
+      {isMobileMenuOpen && (
+        <div className="md:hidden border-t border-gray-200">
+          <div className="px-2 pt-2 pb-3 space-y-1 sm:px-3 bg-white">
+            <Link
+              href="/dashboard"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`block px-3 py-2 rounded-md text-base font-medium ${
+                isDashboardRoot
+                  ? 'bg-blue-50 text-blue-600'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              Dashboard
+            </Link>
+            <Link
+              href="/dashboard/excursions"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`block px-3 py-2 rounded-md text-base font-medium ${
+                pathname.startsWith('/dashboard/excursions')
+                  ? 'bg-blue-50 text-blue-600'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              Escursioni
+            </Link>
+            <Link
+              href="/dashboard/transfers"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`block px-3 py-2 rounded-md text-base font-medium ${
+                pathname.startsWith('/dashboard/transfers')
+                  ? 'bg-blue-50 text-blue-600'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              Trasferimenti
+            </Link>
+            {user.role === 'ADMIN' && (
+              <>
+                <Link
+                  href="/dashboard/users"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${
+                    pathname.startsWith('/dashboard/users')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  Assistenti
+                </Link>
+                <Link
+                  href="/dashboard/suppliers"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${
+                    pathname.startsWith('/dashboard/suppliers')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  Rifornitori
+                </Link>
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </nav>
   )
 }
