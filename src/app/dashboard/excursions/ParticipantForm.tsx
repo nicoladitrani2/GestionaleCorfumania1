@@ -629,18 +629,6 @@ export function ParticipantForm({
                         className={inputClassName}
                       />
                     </div>
-
-                    <div className="sm:col-span-2">
-                      <label className={labelClassName}>Luogo Deposito</label>
-                      <input
-                        type="text"
-                        name="dropoffLocation"
-                        value={formData.dropoffLocation}
-                        onChange={handleChange}
-                        className={inputClassName}
-                        placeholder="Destinazione finale (e ritiro per il ritorno)"
-                      />
-                    </div>
                   </div>
 
                   {/* Ritorno */}
