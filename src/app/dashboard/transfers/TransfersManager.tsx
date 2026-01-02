@@ -532,26 +532,27 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 sm:p-4 animate-in fade-in duration-200">
               <div className="w-full max-w-5xl h-full sm:h-[90vh] bg-white sm:rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
                 <ParticipantForm
-                  transferId={selectedTransfer.id}
-                  excursionName={selectedTransfer.name}
-                  excursionDate={selectedTransfer.date}
-                  type="TRANSFER"
-                  initialData={editingParticipant}
-                  defaultValues={{
-            pickupLocation: selectedTransfer.pickupLocation,
-            dropoffLocation: selectedTransfer.dropoffLocation,
-            returnPickupLocation: selectedTransfer.returnPickupLocation || selectedTransfer.dropoffLocation,
-            pickupTime: selectedTransfer.date ? new Date(selectedTransfer.date).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
-                    returnDate: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toISOString().split('T')[0] : '',
-                    returnTime: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'}) : '',
-                  }}
                   onSuccess={handleParticipantSuccess}
                   onCancel={() => {
                     setIsAddingParticipant(false)
                     setEditingParticipant(null)
                   }}
-                  defaultSupplier={currentUserSupplierName}
+                  initialData={editingParticipant}
+                  transferId={selectedTransfer.id}
+                  excursionName={selectedTransfer.name}
+                  excursionDate={selectedTransfer.date}
+                  type="TRANSFER"
                   currentUserRole={currentUserRole}
+                  defaultValues={{
+                    pickupLocation: selectedTransfer.pickupLocation,
+                    dropoffLocation: selectedTransfer.dropoffLocation,
+                    returnPickupLocation: selectedTransfer.returnPickupLocation || selectedTransfer.dropoffLocation
+                  }}
+                  defaultSupplier={
+                    currentUserRole === 'ASSISTANT' 
+                      ? (currentUserSupplierName || 'GO4SEA') 
+                      : 'GO4SEA'
+                  }
                 />
               </div>
             </div>

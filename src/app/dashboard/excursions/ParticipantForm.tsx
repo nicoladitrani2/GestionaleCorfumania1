@@ -317,14 +317,23 @@ export function ParticipantForm({
         )
         const pdfBlob = doc.output('blob')
         
-        // Converti in Base64 per inviare via JSON
-        const reader = new FileReader()
-        reader.readAsDataURL(pdfBlob)
-        reader.onloadend = async () => {
-          const base64data = reader.result?.toString().split(',')[1]
-          payload.pdfAttachment = base64data
-          await sendData(payload)
-        }
+        // Converti in Base64 per inviare via JSON (Promisified)
+        const base64data = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader()
+            reader.readAsDataURL(pdfBlob)
+            reader.onloadend = () => {
+                const result = reader.result?.toString()
+                if (result) {
+                    resolve(result.split(',')[1])
+                } else {
+                    reject(new Error("Failed to convert PDF to Base64"))
+                }
+            }
+            reader.onerror = error => reject(error)
+        })
+
+        payload.pdfAttachment = base64data
+        await sendData(payload)
       } else {
         await sendData(payload)
       }
@@ -605,6 +614,22 @@ export function ParticipantForm({
                     <h4 className="font-semibold text-lg">Dettagli Trasferimento</h4>
                   </div>
                   
+                  {/* Info Trasferimento Master (Read-Only) */}
+                  <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 mb-4 text-sm text-blue-900">
+                    <div className="flex flex-col sm:flex-row gap-4">
+                        <div className="font-medium">
+                            <span className="text-blue-600 uppercase text-xs font-bold block mb-1">Tratta</span>
+                            {defaultValues?.pickupLocation || '...'} <span className="text-gray-400">➜</span> {defaultValues?.dropoffLocation || '...'}
+                        </div>
+                        {excursionDate && (
+                            <div className="font-medium">
+                                <span className="text-blue-600 uppercase text-xs font-bold block mb-1">Data Partenza</span>
+                                {new Date(excursionDate).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                            </div>
+                        )}
+                    </div>
+                  </div>
+
                   {/* Andata */}
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -652,7 +677,7 @@ export function ParticipantForm({
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div className="sm:col-span-2">
-                          <label className={labelClassName}>Luogo Ritiro</label>
+                          <label className={labelClassName}>Luogo Ritorno</label>
                           <input
                             type="text"
                             name="returnPickupLocation"
