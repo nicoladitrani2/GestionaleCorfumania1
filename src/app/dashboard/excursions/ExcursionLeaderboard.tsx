@@ -57,16 +57,20 @@ export function ExcursionLeaderboard({ excursion, currentUserRole }: ExcursionLe
         })
       }
 
-      const stats = statsMap.get(userId)
-      const price = p.price || 0
-      stats.totalSales += price
+      // Calculate commission based on actual payment (deposit)
+      // If paymentType is BALANCE, deposit should be equal to price (full payment)
+      // If paymentType is DEPOSIT, deposit is the partial amount
+      // If REFUNDED, we skip (0 commission)
+      const amountPaid = p.deposit || 0
+      
+      stats.totalSales += amountPaid
       stats.count += 1
 
       // Calculate commission
       if (stats.supplierId) {
         const commConfig = excursion.commissions.find((c: any) => c.supplierId === stats.supplierId)
         if (commConfig) {
-           stats.totalCommission += price * (commConfig.commissionPercentage / 100)
+           stats.totalCommission += amountPaid * (commConfig.commissionPercentage / 100)
         }
       }
     })
