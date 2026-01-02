@@ -1,50 +1,51 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Download, X } from 'lucide-react'
 
 export default function PWAInstallButton() {
-  const [deferredPrompt, setDeferredPrompt] = useState<any>(null)
   const [isVisible, setIsVisible] = useState(false)
   const [mounted, setMounted] = useState(false)
+  const deferredPromptRef = useRef<any>(null)
 
   useEffect(() => {
     setMounted(true)
-    
-    // Check if event is already available
-    if ((window as any).deferredPrompt) {
-      setDeferredPrompt((window as any).deferredPrompt)
-      setIsVisible(true)
-    }
 
-    // Listen for the event
-    const handlePromptReady = () => {
+    const checkPrompt = () => {
       if ((window as any).deferredPrompt) {
-        setDeferredPrompt((window as any).deferredPrompt)
+        deferredPromptRef.current = (window as any).deferredPrompt
         setIsVisible(true)
       }
     }
+    
+    // Initial check
+    checkPrompt()
 
-    window.addEventListener('pwa-prompt-ready', handlePromptReady)
+    // Listen for the event
+    window.addEventListener('pwa-prompt-ready', checkPrompt)
 
     return () => {
-      window.removeEventListener('pwa-prompt-ready', handlePromptReady)
+      window.removeEventListener('pwa-prompt-ready', checkPrompt)
     }
   }, [])
 
   const handleInstallClick = async () => {
-    if (!deferredPrompt) return
+    const promptEvent = deferredPromptRef.current
+    if (!promptEvent) {
+      setIsVisible(false)
+      return
+    }
 
     try {
       // Show the native install prompt
-      deferredPrompt.prompt()
+      await promptEvent.prompt()
 
       // Wait for the user to respond to the prompt
-      const { outcome } = await deferredPrompt.userChoice
+      const { outcome } = await promptEvent.userChoice
       console.log(`User response to the install prompt: ${outcome}`)
 
       // We've used the prompt, and can't use it again, discard it
-      setDeferredPrompt(null)
+      deferredPromptRef.current = null
       setIsVisible(false)
       (window as any).deferredPrompt = null
     } catch (err) {
