@@ -16,6 +16,17 @@ export default function PWALifecycle() {
             console.error('Service Worker registration failed:', error)
           })
       }
+
+      // Capture install prompt
+      window.addEventListener('beforeinstallprompt', (e) => {
+        // Prevent the mini-infobar from appearing on mobile
+        e.preventDefault()
+        // Stash the event so it can be triggered later.
+        ;(window as any).deferredPrompt = e
+        // Update UI notify the user they can install the PWA
+        window.dispatchEvent(new Event('pwa-prompt-ready'))
+        console.log('beforeinstallprompt captured in PWALifecycle')
+      })
     }
   }, [])
 
