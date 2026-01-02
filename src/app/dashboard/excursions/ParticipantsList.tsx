@@ -381,49 +381,8 @@ export function ParticipantsList({
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
   const [showDeleteChoice, setShowDeleteChoice] = useState(false)
   const [participantToDelete, setParticipantToDelete] = useState<any>(null)
-  const [showLeaderboard, setShowLeaderboard] = useState(false)
 
-  const leaderboardStats = useMemo(() => {
-    if (!participants.length || !excursion?.commissions) return []
 
-    // Map to store user stats
-    const statsMap = new Map()
-
-    participants.forEach(p => {
-      // Filter invalid
-      if (p.paymentType === 'REFUNDED' || p.isExpired) return
-
-      const userId = p.createdById
-      if (!userId) return
-
-      if (!statsMap.has(userId)) {
-        statsMap.set(userId, {
-          userId,
-          userName: `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.trim() || p.createdBy?.email || 'Sconosciuto',
-          supplierName: p.createdBy?.supplier?.name || '-',
-          supplierId: p.createdBy?.supplierId,
-          totalSales: 0,
-          totalCommission: 0,
-          count: 0
-        })
-      }
-
-      const stats = statsMap.get(userId)
-      const price = p.price || 0
-      stats.totalSales += price
-      stats.count += 1
-
-      // Calculate commission
-      if (stats.supplierId) {
-        const commConfig = excursion.commissions.find((c: any) => c.supplierId === stats.supplierId)
-        if (commConfig) {
-           stats.totalCommission += price * (commConfig.commissionPercentage / 100)
-        }
-      }
-    })
-
-    return Array.from(statsMap.values()).sort((a, b) => b.totalCommission - a.totalCommission)
-  }, [participants, excursion])
 
   const fetchParticipants = async () => {
     try {
@@ -621,19 +580,6 @@ export function ParticipantsList({
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center px-1">
-        {currentUserRole === 'ADMIN' && (
-          <button
-            onClick={() => setShowLeaderboard(!showLeaderboard)}
-            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shadow-sm ${
-              showLeaderboard 
-                ? 'bg-amber-50 text-amber-700 border border-amber-200' 
-                : 'bg-white text-gray-700 border border-gray-300 hover:bg-gray-50'
-            }`}
-          >
-            <Award className="w-4 h-4" />
-            {showLeaderboard ? 'Nascondi Classifica' : 'Classifica Assistenti'}
-          </button>
-        )}
         <button
           onClick={exportToPDF}
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm ml-auto"
@@ -642,57 +588,6 @@ export function ParticipantsList({
           Esporta PDF
         </button>
       </div>
-
-      {/* Leaderboard Section */}
-      {showLeaderboard && currentUserRole === 'ADMIN' && (
-        <div className="bg-white rounded-xl shadow-sm border border-amber-200 overflow-hidden animate-in slide-in-from-top-4 duration-300 mb-6">
-          <div className="p-4 bg-gradient-to-r from-amber-500 to-orange-500 text-white flex justify-between items-center">
-            <div className="flex items-center gap-2">
-              <Award className="w-6 h-6" />
-              <h3 className="text-lg font-bold">Classifica Commissioni (Questa Escursione)</h3>
-            </div>
-          </div>
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-sm text-gray-600">
-              <thead className="bg-amber-50 text-xs uppercase font-semibold text-amber-800/70">
-                <tr>
-                  <th className="px-6 py-3">Pos</th>
-                  <th className="px-6 py-3">Assistente</th>
-                  <th className="px-6 py-3">Fornitore</th>
-                  <th className="px-6 py-3 text-right">Vendite</th>
-                  <th className="px-6 py-3 text-right">Commissioni</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-amber-100/50">
-                {leaderboardStats.map((stat: any, index: number) => (
-                  <tr key={stat.userId} className="hover:bg-amber-50/30 transition-colors">
-                    <td className="px-6 py-3">
-                      <div className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs text-white ${
-                        index === 0 ? 'bg-yellow-400 shadow-sm' :
-                        index === 1 ? 'bg-gray-400' :
-                        index === 2 ? 'bg-amber-700' : 'bg-gray-200 text-gray-600'
-                      }`}>
-                        {index + 1}
-                      </div>
-                    </td>
-                    <td className="px-6 py-3 font-medium text-gray-900">{stat.userName}</td>
-                    <td className="px-6 py-3">{stat.supplierName}</td>
-                    <td className="px-6 py-3 text-right">€ {stat.totalSales.toFixed(2)}</td>
-                    <td className="px-6 py-3 text-right font-bold text-amber-600">€ {stat.totalCommission.toFixed(2)}</td>
-                  </tr>
-                ))}
-                {leaderboardStats.length === 0 && (
-                  <tr>
-                    <td colSpan={5} className="px-6 py-8 text-center text-gray-400 italic">
-                      Nessuna vendita registrata per questa escursione.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* Legenda Azioni */}
       <div className="flex flex-wrap gap-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100">

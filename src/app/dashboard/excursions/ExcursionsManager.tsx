@@ -666,9 +666,9 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                 Classifica
               </button>
             )}
-            <button
+              <button
               onClick={() => setViewMode('HISTORY')}
-              className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
+              className={`pb-2 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
                 viewMode === 'HISTORY'
                   ? 'border-blue-600 text-blue-600'
                   : 'border-transparent text-gray-500 hover:text-gray-700'
@@ -731,8 +731,8 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
             <span className="text-gray-900 font-medium text-sm">Escursioni</span>
           </div>
 
-          <div className="flex justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100">
-            <div className="flex items-center gap-4">
+          <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-xl shadow-sm border border-gray-100 gap-4">
+            <div className="flex items-center gap-4 w-full md:w-auto justify-between md:justify-start">
               <div className="p-2 bg-blue-50 rounded-lg">
                 <Filter className="w-5 h-5 text-blue-600" />
               </div>
@@ -761,11 +761,11 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
             </div>
 
             {currentUserRole === 'ADMIN' && (
-              <div className="flex gap-2">
+              <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto sm:justify-end">
                 {activeTab === 'ARCHIVE' && excursions.length > 0 && (
                   <button
                     onClick={handleClearArchive}
-                    className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 flex items-center gap-2 shadow-sm transition-all font-medium"
+                    className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 flex items-center justify-center gap-2 shadow-sm transition-all font-medium w-full sm:w-auto"
                   >
                     <Trash2 className="w-4 h-4" />
                     Svuota Archivio
@@ -773,7 +773,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
                 )}
                 <button
                   onClick={handleCreateExcursion}
-                  className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center gap-2 shadow-sm hover:shadow transition-all transform hover:-translate-y-0.5 font-medium"
+                  className="px-4 py-2 bg-gradient-to-r from-green-600 to-emerald-600 text-white rounded-lg hover:from-green-700 hover:to-emerald-700 flex items-center justify-center gap-2 shadow-sm hover:shadow transition-all transform hover:-translate-y-0.5 font-medium w-full sm:w-auto"
                 >
                   <Plus className="w-4 h-4" />
                   Nuova Escursione
