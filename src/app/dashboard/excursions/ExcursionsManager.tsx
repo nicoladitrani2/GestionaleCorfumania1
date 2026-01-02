@@ -586,7 +586,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
 
           {(isAddingParticipant || editingParticipant) && (
             <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 sm:p-4 animate-in fade-in duration-200">
-              <div className="w-full max-w-5xl h-full sm:h-auto sm:max-h-[95vh] bg-white sm:rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
+              <div className="w-full max-w-5xl h-full sm:h-[90vh] bg-white sm:rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
                 <ParticipantForm
                   excursionId={selectedExcursion.id}
                   excursionName={selectedExcursion.name}

@@ -791,7 +791,7 @@ export function ParticipantForm({
       </div>
 
       {/* Footer */}
-      <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col-reverse sm:flex-row justify-end gap-3 shrink-0">
+      <div className="p-4 bg-gray-50 border-t border-gray-100 flex flex-col-reverse sm:flex-row justify-end gap-3 shrink-0 relative z-10">
         <button
           type="button"
           onClick={onCancel}
