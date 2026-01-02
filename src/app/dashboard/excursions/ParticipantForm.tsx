@@ -23,6 +23,7 @@ interface ParticipantFormProps {
     returnPickupLocation?: string
   }
   defaultSupplier?: string
+  currentUserRole?: string
 }
 
 const NATIONALITIES = [
