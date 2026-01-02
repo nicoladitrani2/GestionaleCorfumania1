@@ -584,13 +584,13 @@ export function ParticipantForm({
                     onChange={handleChange}
                     className={`${inputClassName} pl-10`}
                   >
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
+                    {suppliers && suppliers.length > 0 && suppliers.map((s) => (
+                      s ? <option key={s.id || s.name} value={s.name}>{s.name}</option> : null
                     ))}
                     {/* Mantieni il valore attuale se non è presente nella lista (es. vecchi record o lista vuota) */}
-                    {formData.supplier && !suppliers.some(s => s.name === formData.supplier) && (
-                      <option value={formData.supplier}>{formData.supplier}</option>
-                    )}
+          {formData.supplier && !suppliers.some(s => s?.name === formData.supplier) && (
+            <option value={formData.supplier}>{formData.supplier}</option>
+          )}
                   </select>
                   <Briefcase className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 </div>
@@ -629,14 +629,14 @@ export function ParticipantForm({
                     </div>
 
                     <div className="sm:col-span-2">
-                      <label className={labelClassName}>Luogo Deposito (Opzionale)</label>
+                      <label className={labelClassName}>Luogo Deposito / Ritiro Ritorno (Opzionale)</label>
                       <input
                         type="text"
                         name="dropoffLocation"
                         value={formData.dropoffLocation}
                         onChange={handleChange}
                         className={inputClassName}
-                        placeholder="Destinazione finale (se diversa dal ritorno)"
+                        placeholder="Destinazione finale (e ritiro per il ritorno)"
                       />
                     </div>
                   </div>
@@ -660,7 +660,7 @@ export function ParticipantForm({
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div>
                           <label className={labelClassName}>Data Ritorno</label>
                           <input
@@ -681,17 +681,7 @@ export function ParticipantForm({
                             className={inputClassName}
                           />
                         </div>
-                        <div>
-                          <label className={labelClassName}>Luogo Ritiro Ritorno</label>
-                          <input
-                            type="text"
-                            name="returnPickupLocation"
-                            value={formData.returnPickupLocation}
-                            onChange={handleChange}
-                            className={inputClassName}
-                            placeholder="Da dove si riparte?"
-                          />
-                        </div>
+                        {/* Luogo Ritiro Ritorno rimosso come richiesto - coincide con il deposito dell'andata */}
                       </div>
                     </div>
                   ) : (

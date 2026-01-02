@@ -28,7 +28,11 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
   useEffect(() => {
     fetch('/api/suppliers')
       .then(res => res.json())
-      .then(data => setSuppliers(data))
+      .then(data => {
+        if (Array.isArray(data)) {
+          setSuppliers(data)
+        }
+      })
       .catch(console.error)
   }, [])
 

@@ -308,8 +308,8 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
                     onChange={(e) => setNewSupplier(e.target.value)}
                     className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all appearance-none bg-white text-base md:text-sm text-gray-900"
                   >
-                    {suppliers.map(s => (
-                      <option key={s.id} value={s.name}>{s.name}</option>
+                    {suppliers && suppliers.length > 0 && suppliers.map(s => (
+                      s ? <option key={s.id || s.name} value={s.name}>{s.name}</option> : null
                     ))}
                     {suppliers.length === 0 && <option value="GO4SEA">GO4SEA</option>}
                   </select>

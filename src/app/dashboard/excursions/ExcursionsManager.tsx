@@ -55,10 +55,12 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
       const res = await fetch('/api/suppliers')
       if (res.ok) {
         const data = await res.json()
-        setSuppliers(data)
-        // Initialize commissions empty, we'll fill it if editing or leave empty
-        if (!editingExcursionId) {
-             setCommissions(data.map((s: any) => ({ supplierId: s.id, percentage: '' })))
+        if (Array.isArray(data)) {
+          setSuppliers(data)
+          // Initialize commissions empty, we'll fill it if editing or leave empty
+          if (!editingExcursionId) {
+               setCommissions(data.map((s: any) => ({ supplierId: s.id, percentage: '' })))
+          }
         }
       }
     } catch (e) {
@@ -514,8 +516,9 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                 <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Fornitori (%)</label>
                 <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
                   {suppliers.length === 0 && <p className="text-sm text-gray-500 italic">Nessun fornitore disponibile.</p>}
-                  {suppliers.map(supplier => (
-                    <div key={supplier.id} className="flex items-center justify-between gap-3">
+                  {suppliers && suppliers.length > 0 && suppliers.map(supplier => (
+                    supplier ? (
+                    <div key={supplier.id || supplier.name} className="flex items-center justify-between gap-3">
                       <span className="text-sm font-medium text-gray-700 truncate flex-1" title={supplier.name}>{supplier.name}</span>
                       <div className="relative w-24">
                         <input
@@ -536,6 +539,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                         <span className="absolute right-2 top-1.5 text-gray-400 text-xs">%</span>
                       </div>
                     </div>
+                    ) : null
                   ))}
                 </div>
               </div>
