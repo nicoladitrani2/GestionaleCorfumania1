@@ -50,7 +50,9 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
       const res = await fetch('/api/suppliers')
       if (res.ok) {
         const data = await res.json()
-        setSuppliers(data)
+        if (Array.isArray(data)) {
+          setSuppliers(data)
+        }
       }
     } catch (e) {
       console.error("Failed to fetch suppliers", e)

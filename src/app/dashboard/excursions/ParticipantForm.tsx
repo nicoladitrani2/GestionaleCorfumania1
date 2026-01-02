@@ -96,10 +96,13 @@ export function ParticipantForm({
         const res = await fetch('/api/suppliers')
         if (res.ok) {
           const data = await res.json()
-          setSuppliers(data)
           
-          // Se stiamo creando un nuovo partecipante
-          if (!initialData && Array.isArray(data) && data.length > 0) {
+          // Ensure data is an array before setting state
+          if (Array.isArray(data)) {
+            setSuppliers(data)
+            
+            // Se stiamo creando un nuovo partecipante
+            if (!initialData && data.length > 0) {
             setFormData(prev => {
               // 1. Se Admin -> Corfumania
               if (currentUserRole === 'ADMIN') {

@@ -8,11 +8,32 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   }
 
-  const suppliers = await prisma.supplier.findMany({
-    orderBy: { name: 'asc' }
-  })
+  try {
+    let suppliers = await prisma.supplier.findMany({
+      orderBy: { name: 'asc' }
+    })
 
-  return NextResponse.json(suppliers)
+    // Auto-seed Corfumania if missing (Critical for default logic)
+    const hasCorfumania = suppliers.some(s => s.name.toLowerCase() === 'corfumania')
+    if (!hasCorfumania) {
+      try {
+        const newSupplier = await prisma.supplier.create({ 
+          data: { name: 'Corfumania' } 
+        })
+        suppliers.push(newSupplier)
+        // Re-sort
+        suppliers.sort((a, b) => a.name.localeCompare(b.name))
+      } catch (seedError) {
+        console.error("Failed to auto-seed Corfumania:", seedError)
+        // Continue without it, don't block the API
+      }
+    }
+
+    return NextResponse.json(suppliers)
+  } catch (error) {
+    console.error("Failed to fetch suppliers:", error)
+    return NextResponse.json({ error: 'Errore nel recupero fornitori' }, { status: 500 })
+  }
 }
 
 export async function POST(request: Request) {
