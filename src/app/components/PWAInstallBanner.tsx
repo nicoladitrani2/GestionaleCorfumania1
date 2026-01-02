@@ -7,6 +7,15 @@ export default function PWAInstallBanner() {
   const [showBanner, setShowBanner] = useState(false)
   const [isMounted, setIsMounted] = useState(false)
   const deferredPromptRef = useRef<any>(null)
+  
+  // Create a stable reference to the setter to avoid any closure issues
+  const setShowBannerSafe = (value: boolean) => {
+    if (typeof setShowBanner === 'function') {
+      setShowBanner(value)
+    } else {
+      console.error('CRITICAL: setShowBanner is not a function!', setShowBanner)
+    }
+  }
 
   useEffect(() => {
     setIsMounted(true)
@@ -14,7 +23,7 @@ export default function PWAInstallBanner() {
     const checkPrompt = () => {
       if ((window as any).deferredPrompt) {
         deferredPromptRef.current = (window as any).deferredPrompt
-        setShowBanner(true)
+        setShowBannerSafe(true)
       }
     }
     
@@ -32,7 +41,7 @@ export default function PWAInstallBanner() {
   const handleInstallClick = async () => {
     const promptEvent = deferredPromptRef.current
     if (!promptEvent) {
-      setShowBanner(false)
+      setShowBannerSafe(false)
       return
     }
 
@@ -46,16 +55,16 @@ export default function PWAInstallBanner() {
 
       // We've used the prompt, and can't use it again, discard it
       deferredPromptRef.current = null
-      setShowBanner(false)
+      setShowBannerSafe(false)
       (window as any).deferredPrompt = null
     } catch (err) {
       console.error('Error during installation:', err)
-      setShowBanner(false)
+      setShowBannerSafe(false)
     }
   }
 
   const handleClose = () => {
-    setShowBanner(false)
+    setShowBannerSafe(false)
   }
 
   if (!isMounted) return null
