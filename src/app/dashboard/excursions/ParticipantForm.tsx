@@ -132,7 +132,7 @@ export function ParticipantForm({
       }
     }
     fetchSuppliers()
-  }, [initialData, defaultSupplier])
+  }, [initialData, defaultSupplier, currentUserRole])
 
   useEffect(() => {
     if (initialData) {
