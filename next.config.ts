@@ -10,16 +10,11 @@ const withPWA = require("@ducanh2912/next-pwa").default({
   workboxOptions: {
     disableDevLogs: true,
   },
-  register: true,
+  register: false,
   skipWaiting: true,
 });
 
 const nextConfig: NextConfig = {
-  eslint: {
-    // Warning: This allows production builds to successfully complete even if
-    // your project has ESLint errors.
-    ignoreDuringBuilds: true,
-  },
   typescript: {
     // We also ignore typescript errors just in case, though tsc passed locally.
     ignoreBuildErrors: true,
