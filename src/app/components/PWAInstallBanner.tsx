@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Download, X } from 'lucide-react'
 
 export default function PWAInstallBanner() {
@@ -29,7 +29,7 @@ export default function PWAInstallBanner() {
     }
   }, [])
 
-  const handleInstallClick = useCallback(async () => {
+  const handleInstallClick = async () => {
     const promptEvent = deferredPromptRef.current
     if (!promptEvent) {
       setShowBanner(false)
@@ -52,7 +52,7 @@ export default function PWAInstallBanner() {
       console.error('Error during installation:', err)
       setShowBanner(false)
     }
-  }, [])
+  }
 
   const handleClose = () => {
     setShowBanner(false)
