@@ -204,6 +204,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
   const toLocalISOString = (dateStr: string) => {
     if (!dateStr) return ''
     const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return ''
     const pad = (n: number) => n < 10 ? '0' + n : n
     return date.getFullYear() +
       '-' + pad(date.getMonth() + 1) +
@@ -350,8 +351,16 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
   const formatDateDisplay = (dateStr: string) => {
     if (!dateStr) return '-'
     const date = new Date(dateStr)
-    return date.toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric' }) + ' ' + 
-           date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    if (isNaN(date.getTime())) return '-'
+    return (
+      date.toLocaleDateString('it-IT', {
+        day: '2-digit',
+        month: '2-digit',
+        year: 'numeric',
+      }) +
+      ' ' +
+      date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+    )
   }
 
   return (

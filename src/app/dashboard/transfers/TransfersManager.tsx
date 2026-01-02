@@ -146,6 +146,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
     setNewDate('')
     setNewPickupLocation('')
     setNewDropoffLocation('')
+    setNewReturnPickupLocation('')
     setNewEndDate('')
     
     // Logica di default fornitore
@@ -356,6 +357,17 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
                     placeholder="Es. Hotel X"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Luogo Ritiro Ritorno</label>
+                <input
+                  type="text"
+                  value={newReturnPickupLocation}
+                  onChange={(e) => setNewReturnPickupLocation(e.target.value)}
+                  className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                  placeholder="Es. Hotel X (opzionale - se vuoto usa Luogo Deposito)"
+                />
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
