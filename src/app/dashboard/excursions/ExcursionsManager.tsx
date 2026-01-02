@@ -70,8 +70,11 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
       // Check if already in list
       const found = excursions.find(e => e.id === excursionId)
       if (found) {
+        // Only reset creation mode if we're switching to a different excursion
+        if (selectedExcursion?.id !== found.id) {
+          setIsCreating(false)
+        }
         setSelectedExcursion(found)
-        setIsCreating(false)
         return
       }
 
