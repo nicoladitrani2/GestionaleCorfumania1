@@ -21,7 +21,20 @@ export async function GET(request: Request) {
   const participants = await prisma.participant.findMany({
     where: whereClause,
     orderBy: { createdAt: 'desc' },
-    include: { createdBy: { select: { firstName: true, lastName: true, email: true, code: true } } }
+    include: { 
+      createdBy: { 
+        select: { 
+          firstName: true, 
+          lastName: true, 
+          email: true, 
+          code: true,
+          supplierId: true,
+          supplier: {
+            select: { name: true }
+          }
+        } 
+      } 
+    }
   })
 
   return NextResponse.json(participants)

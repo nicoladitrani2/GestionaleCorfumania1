@@ -2,9 +2,10 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown } from 'lucide-react'
+import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Award } from 'lucide-react'
 import { ParticipantForm } from './ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
+import { ExcursionLeaderboard } from './ExcursionLeaderboard'
 import { AuditLogList } from './AuditLogList'
 import Link from 'next/link'
 
@@ -25,7 +26,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
   const [editingParticipant, setEditingParticipant] = useState<any>(null)
   
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
-  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY'>('PARTICIPANTS')
+  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY' | 'LEADERBOARD'>('PARTICIPANTS')
   const [newStartDate, setNewStartDate] = useState('')
   const [newEndDate, setNewEndDate] = useState('')
   const [newConfirmationDeadline, setNewConfirmationDeadline] = useState('')
@@ -652,6 +653,19 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
               <Users className="w-4 h-4" />
               Partecipanti
             </button>
+            {currentUserRole === 'ADMIN' && (
+              <button
+                onClick={() => setViewMode('LEADERBOARD')}
+                className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
+                  viewMode === 'LEADERBOARD'
+                    ? 'border-amber-600 text-amber-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <Award className="w-4 h-4" />
+                Classifica
+              </button>
+            )}
             <button
               onClick={() => setViewMode('HISTORY')}
               className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
@@ -683,7 +697,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
             </div>
           )}
 
-          {viewMode === 'PARTICIPANTS' ? (
+          {viewMode === 'PARTICIPANTS' && (
             <ParticipantsList 
               excursion={selectedExcursion}
               key={refreshParticipantsTrigger}
@@ -693,7 +707,16 @@ export function ExcursionsManager({ currentUserId, currentUserRole }: Excursions
               currentUserId={currentUserId}
               currentUserRole={currentUserRole}
             />
-          ) : (
+          )}
+
+          {viewMode === 'LEADERBOARD' && (
+            <ExcursionLeaderboard 
+              excursion={selectedExcursion}
+              currentUserRole={currentUserRole}
+            />
+          )}
+
+          {viewMode === 'HISTORY' && (
             <AuditLogList excursionId={selectedExcursion.id} />
           )}
         </div>
