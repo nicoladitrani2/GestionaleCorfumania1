@@ -661,6 +661,17 @@ export function ParticipantForm({
                       </div>
 
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div className="sm:col-span-2">
+                          <label className={labelClassName}>Luogo Ritiro</label>
+                          <input
+                            type="text"
+                            name="returnPickupLocation"
+                            value={formData.returnPickupLocation}
+                            onChange={handleChange}
+                            className={inputClassName}
+                            placeholder="Luogo di ritiro per il ritorno"
+                          />
+                        </div>
                         <div>
                           <label className={labelClassName}>Data Ritorno</label>
                           <input
