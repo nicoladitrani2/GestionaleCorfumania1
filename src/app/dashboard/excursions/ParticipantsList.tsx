@@ -49,7 +49,7 @@ const thClassName = "px-6 py-4 text-left text-xs font-semibold text-gray-500 upp
 interface ParticipantsTableProps {
   data: any[]
   emptyMessage: string
-  currentUserRole: string
+  userRole: string
   currentUserId: string
   onEdit: (p: any) => void
   onDelete: (id: string) => void
@@ -61,7 +61,7 @@ interface ParticipantsTableProps {
 const ParticipantsTable = ({ 
   data, 
   emptyMessage,
-  currentUserRole,
+  userRole,
   currentUserId,
   onEdit,
   onDelete,
@@ -126,7 +126,7 @@ const ParticipantsTable = ({
         </thead>
         <tbody className="bg-white divide-y divide-gray-100">
           {data.map((p) => {
-            const canEdit = currentUserRole === 'ADMIN' || p.createdById === currentUserId
+            const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
             
             return (
               <tr 
@@ -241,7 +241,7 @@ const ParticipantsTable = ({
     {/* Mobile Card View */}
     <div className="md:hidden divide-y divide-gray-100">
       {data.map((p) => {
-        const canEdit = currentUserRole === 'ADMIN' || p.createdById === currentUserId
+        const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         
         return (
           <div 
@@ -357,7 +357,7 @@ interface ParticipantsListProps {
   onUpdate?: () => void
   refreshTrigger: number
   currentUserId: string
-  currentUserRole: string
+  userRole: string
   excursion: any
 }
 
@@ -366,7 +366,7 @@ export function ParticipantsList({
   onUpdate,
   refreshTrigger, 
   currentUserId, 
-  currentUserRole, 
+  userRole, 
   excursion
 }: ParticipantsListProps) {
   const excursionId = excursion.id
@@ -617,7 +617,7 @@ export function ParticipantsList({
         <ParticipantsTable 
           data={activeParticipants} 
           emptyMessage="Nessun partecipante attivo registrato" 
-          currentUserRole={currentUserRole}
+          userRole={userRole}
           currentUserId={currentUserId}
           onEdit={onEdit}
           onDelete={handleDelete}
@@ -649,7 +649,7 @@ export function ParticipantsList({
             <ParticipantsTable 
               data={refundedParticipants} 
               emptyMessage="Nessun partecipante rimborsato" 
-              currentUserRole={currentUserRole}
+              userRole={userRole}
               currentUserId={currentUserId}
               onEdit={onEdit}
               onDelete={handleDelete}
@@ -683,7 +683,7 @@ export function ParticipantsList({
             <ParticipantsTable 
               data={expiredParticipants} 
               emptyMessage="Nessun partecipante scaduto" 
-              currentUserRole={currentUserRole}
+              userRole={userRole}
               currentUserId={currentUserId}
               onEdit={onEdit}
               onDelete={handleDelete}

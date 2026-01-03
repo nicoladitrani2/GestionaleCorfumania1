@@ -12,7 +12,7 @@ export default async function ExcursionsPage() {
     <div className="p-6">
       <ExcursionsManager 
         currentUserId={session.user.id} 
-        currentUserRole={session.user.role} 
+        userRole={session.user.role} 
         currentUserSupplierName={session.user.supplierName}
       />
     </div>

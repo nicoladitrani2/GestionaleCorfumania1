@@ -5,10 +5,10 @@ import { Award, User, Euro, Store } from 'lucide-react'
 
 interface ExcursionLeaderboardProps {
   excursion: any
-  currentUserRole: string
+  userRole: string
 }
 
-export function ExcursionLeaderboard({ excursion, currentUserRole }: ExcursionLeaderboardProps) {
+export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboardProps) {
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -80,7 +80,7 @@ export function ExcursionLeaderboard({ excursion, currentUserRole }: ExcursionLe
     return Array.from(statsMap.values()).sort((a: any, b: any) => b.totalCommission - a.totalCommission)
   }, [participants, excursion])
 
-  if (currentUserRole !== 'ADMIN') {
+  if (userRole !== 'ADMIN') {
     return (
         <div className="p-8 text-center text-gray-500">
             <Award className="w-12 h-12 mx-auto text-gray-300 mb-3" />

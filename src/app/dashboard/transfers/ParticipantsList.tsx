@@ -12,7 +12,7 @@ interface ParticipantsListProps {
   onUpdate?: () => void
   refreshTrigger: number
   currentUserId: string
-  currentUserRole: string
+  userRole: string
   transfer: any
 }
 
@@ -21,7 +21,7 @@ export function ParticipantsList({
   onUpdate,
   refreshTrigger, 
   currentUserId, 
-  currentUserRole, 
+  userRole, 
   transfer
 }: ParticipantsListProps) {
   const transferId = transfer.id
@@ -298,7 +298,7 @@ export function ParticipantsList({
           </thead>
           <tbody className="bg-white divide-y divide-gray-100">
             {data.map((p) => {
-              const canEdit = currentUserRole === 'ADMIN' || p.createdById === currentUserId
+              const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
               
               return (
                 <tr 
@@ -420,7 +420,7 @@ export function ParticipantsList({
       {/* Mobile Card View */}
       <div className="md:hidden divide-y divide-gray-100">
         {data.map((p) => {
-          const canEdit = currentUserRole === 'ADMIN' || p.createdById === currentUserId
+          const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
           
           return (
             <div 

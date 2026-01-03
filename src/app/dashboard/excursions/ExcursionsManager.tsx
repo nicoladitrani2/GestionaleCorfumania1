@@ -11,11 +11,11 @@ import Link from 'next/link'
 
 interface ExcursionsManagerProps {
   currentUserId: string
-  currentUserRole: string
+  userRole: string
   currentUserSupplierName?: string
 }
 
-export function ExcursionsManager({ currentUserId, currentUserRole, currentUserSupplierName }: ExcursionsManagerProps) {
+export function ExcursionsManager({ currentUserId, userRole, currentUserSupplierName }: ExcursionsManagerProps) {
   const [excursions, setExcursions] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
@@ -588,7 +588,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <h2 className="text-3xl font-bold text-gray-900">{selectedExcursion.name}</h2>
-                  {currentUserRole === 'ADMIN' && (
+                  {userRole === 'ADMIN' && (
                     <button 
                       onClick={(e) => handleEditExcursion(selectedExcursion, e)}
                       className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-full transition-colors"
@@ -625,7 +625,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                     </div>
                   )}
                   {/* Commission Display for Assistants */}
-                  {currentUserRole !== 'ADMIN' && selectedExcursion.commissions && selectedExcursion.commissions.length > 0 && (
+                  {userRole !== 'ADMIN' && selectedExcursion.commissions && selectedExcursion.commissions.length > 0 && (
                      <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg text-emerald-800 border border-emerald-100">
                       <Euro className="w-4 h-4 text-emerald-600 shrink-0" />
                       <div className="flex flex-col">
@@ -634,7 +634,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                       </div>
                     </div>
                   )}
-                  {currentUserRole === 'ADMIN' && (selectedExcursion.totalCollected !== undefined) && (
+                  {userRole === 'ADMIN' && (selectedExcursion.totalCollected !== undefined) && (
                     <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
                       <Euro className="w-4 h-4 text-green-600 shrink-0" />
                       <div className="flex flex-col">
@@ -667,7 +667,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
               <Users className="w-4 h-4" />
               Partecipanti
             </button>
-            {currentUserRole === 'ADMIN' && (
+            {userRole === 'ADMIN' && (
               <button
                 onClick={() => setViewMode('LEADERBOARD')}
                 className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
@@ -706,9 +706,9 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                     setIsAddingParticipant(false)
                     setEditingParticipant(null)
                   }}
-                  currentUserRole={currentUserRole}
+                  userRole={userRole}
                   defaultSupplier={
-                    currentUserRole === 'ASSISTANT' 
+                    userRole === 'ASSISTANT' 
                       ? (currentUserSupplierName || 'GO4SEA') 
                       : 'GO4SEA'
                   }
@@ -725,14 +725,14 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
               onEdit={setEditingParticipant}
               onUpdate={fetchExcursions}
               currentUserId={currentUserId}
-              currentUserRole={currentUserRole}
+              userRole={userRole}
             />
           )}
 
           {viewMode === 'LEADERBOARD' && (
             <ExcursionLeaderboard 
               excursion={selectedExcursion}
-              currentUserRole={currentUserRole}
+              userRole={userRole}
             />
           )}
 
@@ -780,7 +780,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
               </nav>
             </div>
 
-            {currentUserRole === 'ADMIN' && (
+            {userRole === 'ADMIN' && (
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto sm:justify-end">
                 {activeTab === 'ARCHIVE' && excursions.length > 0 && (
                   <button
@@ -818,7 +818,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                         {excursion.name}
                       </h3>
                     </div>
-                    {currentUserRole === 'ADMIN' && (
+                    {userRole === 'ADMIN' && (
                       <div className="flex gap-1">
                         {activeTab === 'ARCHIVE' && (
                           <button 
@@ -867,7 +867,7 @@ export function ExcursionsManager({ currentUserId, currentUserRole, currentUserS
                       <span className="font-medium text-gray-700 ml-2">
                         {excursion._count?.participants || 0} Partecipanti
                       </span>
-                      {currentUserRole === 'ADMIN' && (excursion.totalCollected !== undefined) && (
+                      {userRole === 'ADMIN' && (excursion.totalCollected !== undefined) && (
                         <div className="ml-auto flex items-center gap-1 bg-green-50 px-2 py-1 rounded text-green-700 border border-green-100">
                           <Euro className="w-3 h-3" />
                           <span className="font-mono font-medium text-sm">

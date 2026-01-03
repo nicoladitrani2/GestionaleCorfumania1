@@ -23,7 +23,7 @@ interface ParticipantFormProps {
     returnPickupLocation?: string
   }
   defaultSupplier?: string
-  currentUserRole?: string
+  userRole?: string
 }
 
 const NATIONALITIES = [
@@ -56,10 +56,10 @@ export function ParticipantForm({
   type = 'EXCURSION',
   defaultValues,
   defaultSupplier,
-  currentUserRole
+  userRole
 }: ParticipantFormProps) {
   // Debug log per verificare il deploy su Vercel
-  console.log('ParticipantForm init:', { currentUserRole })
+  console.log('ParticipantForm init:', { userRole })
 
   const [formData, setFormData] = useState({
     firstName: '',
@@ -108,7 +108,7 @@ export function ParticipantForm({
             if (!initialData && data.length > 0) {
             setFormData(prev => {
               // 1. Se Admin -> Corfumania
-              if (currentUserRole === 'ADMIN') {
+              if (userRole === 'ADMIN') {
                 const corfumania = data.find((s: any) => s?.name?.toLowerCase() === 'corfumania')
                 if (corfumania) return { ...prev, supplier: corfumania.name }
               }
@@ -141,7 +141,7 @@ export function ParticipantForm({
       }
     }
     fetchSuppliers()
-  }, [initialData, defaultSupplier, currentUserRole])
+  }, [initialData, defaultSupplier, userRole])
 
   useEffect(() => {
     if (initialData) {

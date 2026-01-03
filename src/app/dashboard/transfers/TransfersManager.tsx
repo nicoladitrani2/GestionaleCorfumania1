@@ -9,11 +9,11 @@ import Link from 'next/link'
 
 interface TransfersManagerProps {
   currentUserId: string
-  currentUserRole: string
+  userRole: string
   currentUserSupplierName?: string
 }
 
-export function TransfersManager({ currentUserId, currentUserRole, currentUserSupplierName }: TransfersManagerProps) {
+export function TransfersManager({ currentUserId, userRole, currentUserSupplierName }: TransfersManagerProps) {
   const [transfers, setTransfers] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
   const [loading, setLoading] = useState(true)
@@ -151,7 +151,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
     
     // Logica di default fornitore
     let defaultSup = 'GO4SEA'
-    if (currentUserRole === 'ADMIN') {
+    if (userRole === 'ADMIN') {
       const corfumania = suppliers.find(s => s?.name?.toLowerCase() === 'corfumania')
       if (corfumania) defaultSup = corfumania.name
     } else if (currentUserSupplierName) {
@@ -427,7 +427,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
               <div>
                 <div className="flex items-center gap-3 mb-2">
                   <h2 className="text-3xl font-bold text-gray-900">{selectedTransfer.name}</h2>
-                  {currentUserRole === 'ADMIN' && (
+                  {userRole === 'ADMIN' && (
                     <button 
                       onClick={(e) => handleEditTransfer(selectedTransfer, e)}
                       className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-full transition-colors"
@@ -519,12 +519,17 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
 
           {viewMode === 'PARTICIPANTS' && (
              <ParticipantsList
-               transfer={selectedTransfer}
-               onEdit={(p) => setEditingParticipant(p)}
-               onUpdate={() => setRefreshParticipantsTrigger(prev => prev + 1)}
+               onEdit={(participant) => {
+                 setEditingParticipant(participant)
+                 setIsAddingParticipant(true)
+               }}
+               onUpdate={() => {
+                 setRefreshParticipantsTrigger(prev => prev + 1)
+               }}
                refreshTrigger={refreshParticipantsTrigger}
                currentUserId={currentUserId}
-               currentUserRole={currentUserRole}
+               userRole={userRole}
+               transfer={selectedTransfer}
              />
           )}
 
@@ -542,14 +547,14 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
                   excursionName={selectedTransfer.name}
                   excursionDate={selectedTransfer.date}
                   type="TRANSFER"
-                  currentUserRole={currentUserRole}
+                  userRole={userRole}
                   defaultValues={{
                     pickupLocation: selectedTransfer.pickupLocation,
                     dropoffLocation: selectedTransfer.dropoffLocation,
                     returnPickupLocation: selectedTransfer.returnPickupLocation || selectedTransfer.dropoffLocation
                   }}
                   defaultSupplier={
-                    currentUserRole === 'ASSISTANT' 
+                    userRole === 'ASSISTANT' 
                       ? (currentUserSupplierName || 'GO4SEA') 
                       : 'GO4SEA'
                   }
@@ -624,7 +629,7 @@ export function TransfersManager({ currentUserId, currentUserRole, currentUserSu
                       <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
                         <MapIcon className="w-6 h-6 text-blue-600" />
                       </div>
-                      {currentUserRole === 'ADMIN' && (
+                      {userRole === 'ADMIN' && (
                         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                            <button
                              onClick={(e) => handleEditTransfer(transfer, e)}
