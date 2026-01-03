@@ -58,6 +58,9 @@ export function ParticipantForm({
   defaultSupplier,
   currentUserRole
 }: ParticipantFormProps) {
+  // Debug log per verificare il deploy su Vercel
+  console.log('ParticipantForm init:', { currentUserRole })
+
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
