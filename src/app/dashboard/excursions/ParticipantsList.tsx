@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { generateParticipantPDF } from '@/lib/pdf-generator'
 import { ParticipantDetailsModal } from './ParticipantDetailsModal'
 import { RefundModal } from './RefundModal'
 import { DeleteChoiceModal } from './DeleteChoiceModal'
@@ -423,8 +424,27 @@ export function ParticipantsList({
     if (!participantToDelete) return
 
     try {
+      // Generate PDF for cancellation email
+      let pdfBase64 = undefined
+      if (participantToDelete.email) {
+          const updatedParticipant = {
+            ...participantToDelete,
+            paymentType: 'CANCELLED',
+            isOption: false
+          }
+          const eventData = {
+            type: 'EXCURSION',
+            name: excursionName,
+            date: excursionDate
+          }
+          const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+          pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      }
+
       const res = await fetch(`/api/participants/${participantToDelete.id}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfAttachment: pdfBase64 })
       })
       if (res.ok) {
         setShowDeleteChoice(false)
@@ -450,6 +470,23 @@ export function ParticipantsList({
     if (!confirm(`Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`)) return
 
     try {
+      // Generate updated PDF
+      const updatedParticipant = {
+        ...p,
+        paymentType: 'BALANCE',
+        deposit: p.price,
+        isOption: false
+      }
+
+      const eventData = {
+        type: 'EXCURSION',
+        name: excursionName,
+        date: excursionDate
+      }
+
+      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+
       const res = await fetch(`/api/participants/${p.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -457,7 +494,8 @@ export function ParticipantsList({
           ...p,
           paymentType: 'BALANCE',
           deposit: p.price, // Set deposit to full price as it's fully paid
-          isOption: false
+          isOption: false,
+          pdfAttachment: pdfBase64
         })
       })
 
@@ -472,10 +510,43 @@ export function ParticipantsList({
 
   const handleRefund = async (participantId: string, amount: number, method: string, notes: string) => {
     try {
+      const participant = participants.find(p => p.id === participantId)
+      let pdfBase64 = undefined
+
+      if (participant) {
+        const methodLabels: Record<string, string> = {
+          'CASH': 'Contanti',
+          'TRANSFER': 'Bonifico',
+          'CARD': 'Carta'
+        }
+        
+        const refundNote = `[${new Date().toLocaleDateString()}] Rimborsato €${amount} (${methodLabels[method] || method}) - ${notes || ''}`
+        
+        const updatedParticipant = {
+            ...participant,
+            paymentType: 'REFUNDED',
+            notes: participant.notes ? `${participant.notes}\n${refundNote}` : refundNote
+        }
+        
+        const eventData = {
+            type: 'EXCURSION',
+            name: excursionName,
+            date: excursionDate
+        }
+        
+        const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+        pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      }
+
       const res = await fetch(`/api/participants/${participantId}/refund`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refundAmount: amount, refundMethod: method, notes })
+        body: JSON.stringify({ 
+          refundAmount: amount, 
+          refundMethod: method, 
+          notes,
+          pdfAttachment: pdfBase64
+        })
       })
       if (res.ok) {
         setShowRefund(false)

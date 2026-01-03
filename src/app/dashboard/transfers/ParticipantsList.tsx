@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react'
 import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Map as MapIcon } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
+import { generateParticipantPDF } from '@/lib/pdf-generator'
 import { ParticipantDetailsModal } from '../excursions/ParticipantDetailsModal'
 import { RefundModal } from '../excursions/RefundModal'
 
@@ -62,11 +63,37 @@ export function ParticipantsList({
   }, [transferId, refreshTrigger])
 
   const handleDelete = async (id: string) => {
+    const p = participants.find(p => p.id === id)
     if (!confirm('Sei sicuro di voler eliminare questo partecipante?')) return
 
     try {
+      // Generate PDF for cancellation email
+      let pdfBase64 = undefined
+      if (p && p.email) {
+          const updatedParticipant = {
+            ...p,
+            paymentType: 'CANCELLED',
+            isOption: false
+          }
+          const eventData = {
+            type: 'TRANSFER',
+            name: transferName,
+            date: transferDate,
+            pickupLocation: p.pickupLocation,
+            dropoffLocation: p.dropoffLocation,
+            pickupTime: p.pickupTime,
+            returnDate: p.returnDate,
+            returnTime: p.returnTime,
+            returnPickupLocation: p.returnPickupLocation
+          }
+          const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+          pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      }
+
       const res = await fetch(`/api/participants/${id}`, {
         method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfAttachment: pdfBase64 })
       })
       if (res.ok) {
         fetchParticipants()
@@ -82,6 +109,29 @@ export function ParticipantsList({
     if (!confirm(`Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`)) return
 
     try {
+      // Generate updated PDF
+      const updatedParticipant = {
+        ...p,
+        paymentType: 'BALANCE',
+        deposit: p.price,
+        isOption: false
+      }
+
+      const eventData = {
+        type: 'TRANSFER',
+        name: transferName,
+        date: transferDate,
+        pickupLocation: p.pickupLocation,
+        dropoffLocation: p.dropoffLocation,
+        pickupTime: p.pickupTime,
+        returnDate: p.returnDate,
+        returnTime: p.returnTime,
+        returnPickupLocation: p.returnPickupLocation
+      }
+
+      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+
       const res = await fetch(`/api/participants/${p.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -89,7 +139,8 @@ export function ParticipantsList({
           ...p,
           paymentType: 'BALANCE',
           deposit: p.price, // Set deposit to full price as it's fully paid
-          isOption: false
+          isOption: false,
+          pdfAttachment: pdfBase64
         })
       })
 
@@ -104,10 +155,49 @@ export function ParticipantsList({
 
   const handleRefund = async (participantId: string, amount: number, method: string, notes: string) => {
     try {
+      const participant = participants.find(p => p.id === participantId)
+      let pdfBase64 = undefined
+
+      if (participant) {
+        const methodLabels: Record<string, string> = {
+          'CASH': 'Contanti',
+          'TRANSFER': 'Bonifico',
+          'CARD': 'Carta'
+        }
+        
+        const refundNote = `[${new Date().toLocaleDateString()}] Rimborsato €${amount} (${methodLabels[method] || method}) - ${notes || ''}`
+        
+        const updatedParticipant = {
+            ...participant,
+            paymentType: 'REFUNDED',
+            notes: participant.notes ? `${participant.notes}\n${refundNote}` : refundNote
+        }
+        
+        const eventData = {
+            type: 'TRANSFER',
+            name: transferName,
+            date: transferDate,
+            pickupLocation: participant.pickupLocation,
+            dropoffLocation: participant.dropoffLocation,
+            pickupTime: participant.pickupTime,
+            returnDate: participant.returnDate,
+            returnTime: participant.returnTime,
+            returnPickupLocation: participant.returnPickupLocation
+        }
+        
+        const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+        pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      }
+
       const res = await fetch(`/api/participants/${participantId}/refund`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ refundAmount: amount, refundMethod: method, notes })
+        body: JSON.stringify({ 
+          refundAmount: amount, 
+          refundMethod: method, 
+          notes,
+          pdfAttachment: pdfBase64
+        })
       })
       if (res.ok) {
         setShowRefund(false)
@@ -193,19 +283,67 @@ export function ParticipantsList({
       }
     }
 
-    // Columns: Nome, Posti, Nazionalità, Ritiro, Deposito, Telefono, Note
-    const tableData = list.map(p => [
-      `${p.firstName} ${p.lastName}`,
-      p.groupSize?.toString() || '1',
-      p.nationality || '-',
-      `${p.pickupLocation || '-'} ${p.pickupTime ? `(${p.pickupTime})` : ''}`,
-      p.dropoffLocation || '-',
-      p.phoneNumber || '-',
-      p.notes || '-'
-    ])
+    // Columns: Nome, Posti, Nazionalità, Andata, Ritorno, Telefono, Note
+    const tableData = list.map(p => {
+      // Andata (Arrival) Details
+      const arrivalDateStr = transferDate ? new Date(transferDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : ''
+      // Fallback to transfer time if participant time is missing
+      let arrivalTimeStr = p.pickupTime || ''
+      if (!arrivalTimeStr && transferDate) {
+        arrivalTimeStr = new Date(transferDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+      }
+      
+      const arrivalLocStr = p.pickupLocation || '-'
+      
+      const arrivalParts = []
+      if (arrivalDateStr) arrivalParts.push(arrivalDateStr)
+      if (arrivalTimeStr) arrivalParts.push(arrivalTimeStr)
+      const arrivalDateTime = arrivalParts.join(' ')
+      const arrivalDetails = arrivalDateTime ? `${arrivalLocStr}\n${arrivalDateTime}` : arrivalLocStr
+
+      // Ritorno (Return) Details
+      let returnDetails = '-'
+      
+      // Get return date from participant or fallback to transfer's end date
+      let returnDateStr = ''
+      if (p.returnDate) {
+        returnDateStr = new Date(p.returnDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
+      } else if (transfer.endDate) {
+        returnDateStr = new Date(transfer.endDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
+      }
+
+      // Get return time from participant or fallback to transfer end date's time
+      let returnTimeStr = p.returnTime || ''
+      if (!returnTimeStr && transfer.endDate) {
+        returnTimeStr = new Date(transfer.endDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
+      }
+
+      // User stated deposit coincides with return, so we use dropoffLocation if returnPickupLocation is missing
+      const returnLocStr = p.returnPickupLocation || p.dropoffLocation || '-'
+      
+      const returnParts = []
+      if (returnDateStr) returnParts.push(returnDateStr)
+      if (returnTimeStr) returnParts.push(returnTimeStr)
+      const returnDateTime = returnParts.join(' ')
+      
+      // If we have any return info (date/time or location), show it
+      if (returnDateTime || (returnLocStr && returnLocStr !== '-')) {
+        returnDetails = returnDateTime ? `${returnLocStr}\n${returnDateTime}` : returnLocStr
+      }
+
+      return [
+        `${p.firstName} ${p.lastName}`,
+        p.groupSize?.toString() || '1',
+        p.nationality || '-',
+        arrivalDetails,
+        returnDetails,
+        p.phoneNumber || '-',
+        p.notes || '-'
+      ]
+    })
 
     autoTable(doc, {
-      head: [['Nome', 'Pax', 'Naz.', 'Ritiro', 'Deposito', 'Tel', 'Note']],
+      head: [['Nome', 'Pax', 'Naz.', 'Andata', 'Ritorno', 'Tel', 'Note']],
       body: tableData,
       startY: 50,
       styles: { fontSize: 8, cellPadding: 2 },

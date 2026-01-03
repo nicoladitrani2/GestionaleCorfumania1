@@ -78,6 +78,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           docNumber: body.docNumber,
           docType: body.docType,
           phoneNumber: body.phoneNumber,
+          email: body.email,
           notes: body.notes,
           supplier: body.supplier,
           isOption: body.isOption,
@@ -182,6 +183,45 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       details += `: ${changes.join(', ')}`
     }
 
+    // Send Email if email and PDF are provided (for updates like Settle Balance)
+    if (updated.email && body.pdfAttachment) {
+      try {
+        const transporter = nodemailer.createTransport({
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true, // true for 465, false for other ports
+                auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS
+                },
+                tls: {
+                    rejectUnauthorized: false
+                }
+            })
+
+        const subject = updated.paymentType === 'BALANCE' 
+          ? 'Conferma Saldo - Corfumania' 
+          : 'Aggiornamento Prenotazione - Corfumania'
+
+        await transporter.sendMail({
+          from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+          to: updated.email,
+          subject: subject,
+          text: `Gentile ${updated.firstName} ${updated.lastName},\n\nTi inviamo in allegato il documento aggiornato con le ultime modifiche alla tua prenotazione.\n\nCordiali saluti,\nTeam Corfumania`,
+          attachments: [
+            {
+              filename: `Prenotazione_${updated.firstName}_${updated.lastName}.pdf`,
+              content: body.pdfAttachment,
+              encoding: 'base64',
+            },
+          ],
+        })
+        console.log('Email aggiornamento inviata a:', updated.email)
+      } catch (emailError) {
+        console.error('Error sending update email:', emailError)
+      }
+    }
+
     await createAuditLog(
       session.user.id,
       'UPDATE_PARTICIPANT',
@@ -189,60 +229,6 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       participant.excursionId,
       participant.transferId
     )
-
-    // Send Email if email and PDF are provided (Logic copied from POST)
-    if (body.email && body.pdfAttachment) {
-      console.log('Tentativo invio email AGGIORNAMENTO a:', body.email);
-      
-      try {
-        const transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-                user: process.env.EMAIL_USER,
-                pass: process.env.EMAIL_PASS
-            },
-            tls: {
-                rejectUnauthorized: false
-            }
-        });
-
-        // Verify connection configuration
-        await new Promise((resolve, reject) => {
-            transporter.verify(function (error, success) {
-                if (error) {
-                    console.error('Errore verifica SMTP:', error);
-                    reject(error);
-                } else {
-                    console.log("Server SMTP pronto per l'invio (UPDATE)");
-                    resolve(success);
-                }
-            });
-        });
-
-        const info = await transporter.sendMail({
-            from: `"Corfumania" <${process.env.EMAIL_USER}>`,
-            to: body.email,
-            subject: 'Aggiornamento Prenotazione - Corfumania',
-            text: `Gentile ${updated.firstName} ${updated.lastName},\n\nIn allegato trovi il riepilogo AGGIORNATO della tua prenotazione.\n\nCordiali saluti,\nTeam Corfumania`,
-            attachments: [
-                {
-                    filename: `Riepilogo_${updated.firstName}_${updated.lastName}_Aggiornato.pdf`,
-                    content: Buffer.from(body.pdfAttachment, 'base64')
-                }
-            ]
-        });
-
-        console.log('Email aggiornamento inviata con successo:', info.messageId);
-
-      } catch (emailError: any) {
-        console.error('FALLIMENTO INVIO EMAIL AGGIORNAMENTO:', emailError);
-        if (emailError.response) {
-            console.error('SMTP Response:', emailError.response);
-        }
-      }
-    }
 
     return NextResponse.json(updated)
   } catch (error: any) {
@@ -272,6 +258,46 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
   if (session.user.role !== 'ADMIN' && participant.createdById !== session.user.id) {
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  // Check for PDF attachment to send cancellation email
+  try {
+    const body = await request.json()
+    if (participant.email && body?.pdfAttachment) {
+      try {
+        const transporter = nodemailer.createTransport({
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true, // true for 465, false for other ports
+                auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS
+                },
+                tls: {
+                    rejectUnauthorized: false
+                }
+            })
+
+        await transporter.sendMail({
+          from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+          to: participant.email,
+          subject: 'Cancellazione Prenotazione - Corfumania',
+          text: `Gentile ${participant.firstName} ${participant.lastName},\n\nTi informiamo che la tua prenotazione è stata cancellata.\nIn allegato trovi il documento di riepilogo.\n\nCordiali saluti,\nTeam Corfumania`,
+          attachments: [
+            {
+              filename: `Cancellazione_${participant.firstName}_${participant.lastName}.pdf`,
+              content: body.pdfAttachment,
+              encoding: 'base64',
+            },
+          ],
+        })
+        console.log('Email cancellazione inviata a:', participant.email)
+      } catch (emailError) {
+        console.error('Error sending cancellation email:', emailError)
+      }
+    }
+  } catch (e) {
+    // Body parsing failed (likely no body), ignore
   }
 
   await prisma.participant.delete({ where: { id } })

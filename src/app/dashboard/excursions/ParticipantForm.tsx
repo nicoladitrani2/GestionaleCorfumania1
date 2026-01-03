@@ -13,6 +13,7 @@ interface ParticipantFormProps {
   transferId?: string
   excursionName?: string
   excursionDate?: string | Date
+  excursionEndDate?: string | Date | null
   type?: 'EXCURSION' | 'TRANSFER'
   defaultValues?: {
     pickupLocation?: string
@@ -53,6 +54,7 @@ export function ParticipantForm({
   transferId,
   excursionName, 
   excursionDate,
+  excursionEndDate,
   type = 'EXCURSION',
   defaultValues,
   defaultSupplier,
@@ -280,6 +282,8 @@ export function ParticipantForm({
         excursionId: type === 'EXCURSION' ? excursionId : undefined,
         transferId: type === 'TRANSFER' ? transferId : undefined,
         paymentMethod: formData.depositPaymentMethod, // Legacy sync
+        depositPaymentMethod: formData.depositPaymentMethod,
+        balancePaymentMethod: formData.balancePaymentMethod,
       }
 
       // Se c'è un'email, genera il PDF (sia per creazione che per modifica)
@@ -618,44 +622,40 @@ export function ParticipantForm({
                   </div>
                   
                   {/* Info Trasferimento Master (Read-Only) */}
-                  <div className="bg-blue-50/50 p-3 rounded-lg border border-blue-100 mb-4 text-sm text-blue-900">
-                    <div className="flex flex-col sm:flex-row gap-4">
-                        <div className="font-medium">
-                            <span className="text-blue-600 uppercase text-xs font-bold block mb-1">Tratta</span>
-                            {defaultValues?.pickupLocation || '...'} <span className="text-gray-400">➜</span> {defaultValues?.dropoffLocation || '...'}
+                  <div className="bg-blue-50/50 p-4 rounded-lg border border-blue-100 mb-6 text-blue-900">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-y-4 gap-x-8">
+                        <div className="space-y-1">
+                            <span className="text-blue-600 uppercase text-xs font-bold block">Luogo Ritiro</span>
+                            <div className="font-medium text-lg">{defaultValues?.pickupLocation || '-'}</div>
+                        </div>
+                        <div className="space-y-1">
+                            <span className="text-blue-600 uppercase text-xs font-bold block">Luogo Deposito</span>
+                            <div className="font-medium text-lg">{defaultValues?.dropoffLocation || '-'}</div>
                         </div>
                         {excursionDate && (
-                            <div className="font-medium">
-                                <span className="text-blue-600 uppercase text-xs font-bold block mb-1">Data Partenza</span>
-                                {new Date(excursionDate).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
+                            <div className="space-y-1">
+                                <span className="text-blue-600 uppercase text-xs font-bold block">Data e Ora Partenza</span>
+                                <div className="font-medium flex items-center gap-2">
+                                  <Calendar className="w-4 h-4 text-blue-500" />
+                                  {new Date(excursionDate).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                                  <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-sm font-bold">
+                                    {new Date(excursionDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
                             </div>
                         )}
-                    </div>
-                  </div>
-
-                  {/* Andata */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div>
-                      <label className={labelClassName}>Luogo Ritiro</label>
-                      <input
-                        type="text"
-                        name="pickupLocation"
-                        value={formData.pickupLocation}
-                        onChange={handleChange}
-                        className={inputClassName}
-                        placeholder="Hotel, Aeroporto, ecc."
-                      />
-                    </div>
-                    
-                    <div>
-                      <label className={labelClassName}>Ora Ritiro</label>
-                      <input
-                        type="time"
-                        name="pickupTime"
-                        value={formData.pickupTime}
-                        onChange={handleChange}
-                        className={inputClassName}
-                      />
+                        {excursionEndDate && (
+                            <div className="space-y-1">
+                                <span className="text-blue-600 uppercase text-xs font-bold block">Data e Ora Arrivo</span>
+                                <div className="font-medium flex items-center gap-2">
+                                  <Calendar className="w-4 h-4 text-blue-500" />
+                                  {new Date(excursionEndDate).toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' })}
+                                  <span className="bg-blue-100 text-blue-800 px-2 py-0.5 rounded text-sm font-bold">
+                                    {new Date(excursionEndDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                                  </span>
+                                </div>
+                            </div>
+                        )}
                     </div>
                   </div>
 
@@ -717,13 +717,22 @@ export function ParticipantForm({
                     <div className="flex justify-center sm:justify-start">
                        <button 
                          type="button"
-                         onClick={() => setFormData(prev => ({...prev, returnDate: new Date().toISOString().split('T')[0] }))}
+                         onClick={() => setFormData(prev => ({
+                           ...prev, 
+                           returnDate: excursionEndDate 
+                             ? new Date(excursionEndDate).toISOString().split('T')[0] 
+                             : new Date().toISOString().split('T')[0],
+                           returnTime: excursionEndDate 
+                             ? new Date(excursionEndDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) 
+                             : '',
+                           returnPickupLocation: defaultValues?.dropoffLocation || ''
+                         }))}
                          className="group flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 hover:text-blue-700 transition-all text-sm font-medium border border-blue-200 border-dashed"
                        >
                          <div className="bg-blue-200 text-blue-700 rounded-full p-0.5 group-hover:bg-blue-300 transition-colors">
                             <Plus className="w-3 h-3" />
                          </div>
-                         Aggiungi Ritorno
+                         Modifica Ritorno
                        </button>
                     </div>
                   )}

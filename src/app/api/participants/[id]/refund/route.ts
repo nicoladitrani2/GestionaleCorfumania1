@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
+import nodemailer from 'nodemailer'
 
 export async function POST(
   request: Request,
@@ -12,7 +13,7 @@ export async function POST(
   const { id } = await params
 
   try {
-    const { refundMethod, refundAmount, notes } = await request.json()
+    const { refundMethod, refundAmount, notes, pdfAttachment } = await request.json()
 
     if (!refundMethod || !refundAmount) {
       return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
@@ -57,6 +58,41 @@ export async function POST(
       participant.excursionId,
       participant.transferId
     )
+
+    // 3. Send Email if PDF is provided
+    if (participant.email && pdfAttachment) {
+      try {
+        const transporter = nodemailer.createTransport({
+                host: 'smtp.gmail.com',
+                port: 465,
+                secure: true, // true for 465, false for other ports
+                auth: {
+                    user: process.env.EMAIL_USER,
+                    pass: process.env.EMAIL_PASS
+                },
+                tls: {
+                    rejectUnauthorized: false
+                }
+            })
+
+        await transporter.sendMail({
+          from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+          to: participant.email,
+          subject: 'Rimborso Effettuato - Corfumania',
+          text: `Gentile ${participant.firstName} ${participant.lastName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato.\n\nCordiali saluti,\nTeam Corfumania`,
+          attachments: [
+            {
+              filename: `Rimborso_${participant.firstName}_${participant.lastName}.pdf`,
+              content: pdfAttachment,
+              encoding: 'base64',
+            },
+          ],
+        })
+        console.log('Email rimborso inviata a:', participant.email)
+      } catch (emailError) {
+        console.error('Error sending refund email:', emailError)
+      }
+    }
 
     return NextResponse.json({ success: true })
   } catch (error) {

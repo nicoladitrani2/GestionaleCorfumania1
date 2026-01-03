@@ -12,6 +12,9 @@ interface ParticipantData {
   price: number
   deposit: number
   paymentType: 'DEPOSIT' | 'BALANCE'
+  paymentMethod?: string // Legacy or fallback
+  depositPaymentMethod?: string
+  balancePaymentMethod?: string
   groupSize: number
   isOption: boolean
   notes?: string
@@ -67,8 +70,14 @@ export const generateParticipantPDF = (participant: ParticipantData, event: Excu
   let statusText = ''
   let statusColor = [0, 0, 0]
   
-  if (participant.isOption) {
-    statusText = 'OPZIONE'
+  if (participant.paymentType === 'REFUNDED') {
+    statusText = 'RIMBORSATO'
+    statusColor = [156, 163, 175] // gray-400
+  } else if (participant.paymentType === 'CANCELLED') {
+    statusText = 'CANCELLATO'
+    statusColor = [220, 38, 38] // red-600
+  } else if (participant.isOption) {
+    statusText = 'NON PAGATO'
     statusColor = [220, 38, 38] // red-600
   } else if (participant.paymentType === 'BALANCE') {
     statusText = 'SALDATO'
@@ -213,6 +222,39 @@ export const generateParticipantPDF = (participant: ParticipantData, event: Excu
     ['Acconto Versato', `€ ${participant.deposit.toFixed(2)}`],
     ['Rimanente da Saldare', `€ ${(participant.price - participant.deposit).toFixed(2)}`]
   ]
+
+  // Add Payment Methods Details
+  const paymentMethodMap: Record<string, string> = {
+    'CASH': 'Contanti',
+    'TRANSFER': 'Bonifico',
+    'CARD': 'Carta'
+  }
+
+  const translateMethod = (method?: string) => {
+    if (!method) return '-';
+    return paymentMethodMap[method] || method;
+  }
+
+  // Determine what to show
+  if (participant.isOption) {
+     // For options, usually no payment, but if we want to show intent
+  } else if (participant.paymentType === 'BALANCE') {
+     const depMethod = participant.depositPaymentMethod || participant.paymentMethod;
+     const balMethod = participant.balancePaymentMethod || participant.paymentMethod; // Fallback if same
+
+     if (depMethod && balMethod && depMethod !== balMethod) {
+        // Split payments
+        paymentDetails.push(['Metodo Acconto', translateMethod(depMethod)]);
+        paymentDetails.push(['Metodo Saldo', translateMethod(balMethod)]);
+     } else {
+        // Unified or single method
+        paymentDetails.push(['Metodo Pagamento', translateMethod(depMethod || balMethod)]);
+     }
+  } else {
+     // Deposit only
+     const depMethod = participant.depositPaymentMethod || participant.paymentMethod;
+     paymentDetails.push(['Metodo Acconto', translateMethod(depMethod)]);
+  }
 
   autoTable(doc, {
     startY: yPos,
