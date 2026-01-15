@@ -12,6 +12,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
   const archived = searchParams.get('archived') === 'true'
+  const all = searchParams.get('all') === 'true'
   const now = new Date()
 
   let currentUserSupplierId: string | null = null
@@ -50,7 +51,7 @@ export async function GET(request: Request) {
   
   if (id) {
     whereClause.id = id
-  } else {
+  } else if (!all) {
     if (archived) {
       whereClause.endDate = { lt: now }
     } else {

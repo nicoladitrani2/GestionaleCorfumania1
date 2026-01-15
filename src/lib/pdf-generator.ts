@@ -103,9 +103,36 @@ export const generateParticipantPDF = (participant: ParticipantData, event: Excu
   doc.setFillColor(243, 244, 246) // gray-100
   
   // Determine if it's a Transfer or Excursion
-  const isTransfer = (event as TransferData).type === 'TRANSFER'
+  const isTransfer = (event as any).type === 'TRANSFER'
+  const isRental = (event as any).type === 'RENTAL'
 
-  if (isTransfer) {
+  if (isRental) {
+    const rental = event as RentalData
+    // Taller box for rental details
+    doc.roundedRect(20, yPos, 170, 50, 3, 3, 'FD') 
+    
+    doc.setTextColor(55, 65, 81) // gray-700
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text(rental.name, 30, yPos + 12)
+
+    doc.setFontSize(10)
+    doc.setFont('helvetica', 'normal')
+    
+    const rentalDate = new Date(rental.date).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
+    doc.text(`Data Inizio: ${rentalDate.charAt(0).toUpperCase() + rentalDate.slice(1)}`, 30, yPos + 20)
+    
+    // Pickup / Dropoff details
+    doc.setFont('helvetica', 'bold')
+    doc.text('Ritiro:', 30, yPos + 30)
+    doc.text('Consegna:', 30, yPos + 38)
+    
+    doc.setFont('helvetica', 'normal')
+    doc.text(rental.pickupLocation || '-', 50, yPos + 30)
+    doc.text(rental.dropoffLocation || '-', 60, yPos + 38)
+    
+    yPos += 15 // Adjust yPos for next section
+  } else if (isTransfer) {
     const transfer = event as TransferData
     // Taller box for transfer details
     doc.roundedRect(20, yPos, 170, 50, 3, 3, 'FD') 

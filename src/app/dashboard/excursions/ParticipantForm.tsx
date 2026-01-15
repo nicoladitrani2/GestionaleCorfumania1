@@ -14,7 +14,7 @@ interface ParticipantFormProps {
   excursionName?: string
   excursionDate?: string | Date
   excursionEndDate?: string | Date | null
-  type?: 'EXCURSION' | 'TRANSFER'
+  type?: 'EXCURSION' | 'TRANSFER' | 'RENTAL'
   defaultValues?: {
     pickupLocation?: string
     dropoffLocation?: string
@@ -88,6 +88,9 @@ export function ParticipantForm({
     returnPickupLocation: defaultValues?.returnPickupLocation || '',
     returnDate: defaultValues?.returnDate || '',
     returnTime: defaultValues?.returnTime || '',
+    rentalType: 'CAR',
+    rentalStartDate: '',
+    rentalEndDate: '',
   })
   const [customNationality, setCustomNationality] = useState('')
   const [error, setError] = useState('')
@@ -281,6 +284,10 @@ export function ParticipantForm({
         deposit: parseFloat(String(formData.deposit)) || 0,
         excursionId: type === 'EXCURSION' ? excursionId : undefined,
         transferId: type === 'TRANSFER' ? transferId : undefined,
+        isRental: type === 'RENTAL',
+        rentalType: type === 'RENTAL' ? (formData as any).rentalType : undefined,
+        rentalStartDate: type === 'RENTAL' ? (formData as any).rentalStartDate : undefined,
+        rentalEndDate: type === 'RENTAL' ? (formData as any).rentalEndDate : undefined,
         paymentMethod: formData.depositPaymentMethod, // Legacy sync
         depositPaymentMethod: formData.depositPaymentMethod,
         balancePaymentMethod: formData.balancePaymentMethod,
@@ -449,6 +456,78 @@ export function ParticipantForm({
         )}
 
         <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Dati Noleggio */}
+          {type === 'RENTAL' && (
+            <div className="space-y-4">
+               <div className="flex items-center gap-2 pb-2 border-b border-gray-100">
+                  <Briefcase className="w-5 h-5 text-blue-600" />
+                  <h3 className="text-lg font-semibold text-gray-800">Dati Noleggio</h3>
+               </div>
+               <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 sm:gap-6">
+                 <div>
+                    <label className={labelClassName}>Tipo Mezzo</label>
+                    <select
+                      name="rentalType"
+                      value={(formData as any).rentalType}
+                      onChange={handleChange}
+                      className={inputClassName}
+                    >
+                      <option value="CAR">Auto</option>
+                      <option value="MOTO">Moto</option>
+                      <option value="BOAT">Barca</option>
+                    </select>
+                 </div>
+                 <div>
+                    <label className={labelClassName}>Data Inizio</label>
+                    <input
+                      type="date"
+                      name="rentalStartDate"
+                      value={(formData as any).rentalStartDate}
+                      onChange={handleChange}
+                      className={inputClassName}
+                      required
+                    />
+                 </div>
+                 <div>
+                    <label className={labelClassName}>Data Fine</label>
+                    <input
+                      type="date"
+                      name="rentalEndDate"
+                      value={(formData as any).rentalEndDate}
+                      onChange={handleChange}
+                      className={inputClassName}
+                      required
+                    />
+                 </div>
+               </div>
+               
+               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+                  <div>
+                    <label className={labelClassName}>Luogo Consegna</label>
+                    <input
+                      type="text"
+                      name="pickupLocation"
+                      value={formData.pickupLocation}
+                      onChange={handleChange}
+                      className={inputClassName}
+                      placeholder="Luogo di consegna del mezzo"
+                    />
+                  </div>
+                  <div>
+                    <label className={labelClassName}>Luogo Ritiro</label>
+                    <input
+                      type="text"
+                      name="dropoffLocation"
+                      value={formData.dropoffLocation}
+                      onChange={handleChange}
+                      className={inputClassName}
+                      placeholder="Luogo di ritiro del mezzo"
+                    />
+                  </div>
+               </div>
+            </div>
+          )}
+
           {/* Dati Partecipante */}
           <div className="space-y-4">
             <div className="flex items-center gap-2 pb-2 border-b border-gray-100">

@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { Map, Users, Settings, Briefcase, Bus } from 'lucide-react'
+import { Map, Users, Settings, Briefcase, Bus, PieChart, Car } from 'lucide-react'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { WeeklyCalendar } from './WeeklyCalendar'
@@ -51,6 +51,22 @@ export default async function DashboardPage() {
       href: '/dashboard/transfers',
       color: 'bg-orange-500',
       visible: true
+    },
+    {
+      title: 'Noleggi',
+      description: 'Gestione noleggi e partecipanti',
+      icon: Car,
+      href: '/dashboard/rentals',
+      color: 'bg-green-500',
+      visible: true
+    },
+    {
+      title: 'Reports',
+      description: 'Statistiche e report avanzati',
+      icon: PieChart,
+      href: '/dashboard/reports',
+      color: 'bg-indigo-500',
+      visible: isAdmin
     },
     {
       title: 'Assistenti',

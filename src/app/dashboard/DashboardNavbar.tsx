@@ -59,8 +59,14 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
               <Link href="/dashboard/transfers" className={`text-sm font-medium ${pathname.startsWith('/dashboard/transfers') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
                 Trasferimenti
               </Link>
+              <Link href="/dashboard/rentals" className={`text-sm font-medium ${pathname.startsWith('/dashboard/rentals') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                Noleggi
+              </Link>
               {user.role === 'ADMIN' && (
                 <>
+                  <Link href="/dashboard/reports" className={`text-sm font-medium ${pathname.startsWith('/dashboard/reports') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                    Reports
+                  </Link>
                   <Link href="/dashboard/users" className={`text-sm font-medium ${pathname.startsWith('/dashboard/users') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
                     Assistenti
                   </Link>
@@ -138,8 +144,30 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
             >
               Trasferimenti
             </Link>
+            <Link
+              href="/dashboard/rentals"
+              onClick={() => setIsMobileMenuOpen(false)}
+              className={`block px-3 py-2 rounded-md text-base font-medium ${
+                pathname.startsWith('/dashboard/rentals')
+                  ? 'bg-blue-50 text-blue-600'
+                  : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              Noleggi
+            </Link>
             {user.role === 'ADMIN' && (
               <>
+                <Link
+                  href="/dashboard/reports"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${
+                    pathname.startsWith('/dashboard/reports')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  Reports
+                </Link>
                 <Link
                   href="/dashboard/users"
                   onClick={() => setIsMobileMenuOpen(false)}

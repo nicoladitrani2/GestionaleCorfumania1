@@ -191,8 +191,49 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
             </div>
           </div>
 
-          {/* Additional Info */}
-          <div className="mt-8 pt-6 border-t border-gray-100">
+          {/* Rental Info */}
+            {participant.isRental && (
+              <div className="col-span-1 md:col-span-2 mt-6 pt-6 border-t border-gray-100">
+                <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Dati Noleggio</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div className="flex items-start gap-3">
+                    <Briefcase className="w-5 h-5 text-gray-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-gray-700">Mezzo</p>
+                      <p className="font-bold text-gray-900">
+                        {participant.rentalType === 'CAR' ? 'Auto' : 
+                         participant.rentalType === 'MOTO' ? 'Moto' : 
+                         participant.rentalType === 'BOAT' ? 'Barca' : participant.rentalType || '-'}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="flex items-start gap-3">
+                    <Calendar className="w-5 h-5 text-gray-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-gray-700">Periodo</p>
+                      <p className="font-bold text-gray-900">
+                        {formatDate(participant.rentalStartDate)} - {formatDate(participant.rentalEndDate)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-start gap-3">
+                    <MapIcon className="w-5 h-5 text-gray-600 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-bold text-gray-700">Luoghi</p>
+                      <p className="text-sm text-gray-900">
+                        <span className="font-semibold">Ritiro:</span> {participant.pickupLocation || '-'}<br/>
+                        <span className="font-semibold">Consegna:</span> {participant.dropoffLocation || '-'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Additional Info */}
+            <div className="mt-8 pt-6 border-t border-gray-100 col-span-1 md:col-span-2">
             <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Altre Info</h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

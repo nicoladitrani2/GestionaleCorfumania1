@@ -11,12 +11,14 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const excursionId = searchParams.get('excursionId')
   const transferId = searchParams.get('transferId')
+  const isRental = searchParams.get('isRental') === 'true'
 
-  if (!excursionId && !transferId) return NextResponse.json({ error: 'Excursion ID or Transfer ID required' }, { status: 400 })
+  if (!excursionId && !transferId && !isRental) return NextResponse.json({ error: 'Excursion ID, Transfer ID, or isRental required' }, { status: 400 })
 
   const whereClause: any = {}
   if (excursionId) whereClause.excursionId = excursionId
   if (transferId) whereClause.transferId = transferId
+  if (isRental) whereClause.isRental = true
 
   const participants = await prisma.participant.findMany({
     where: whereClause,
@@ -64,8 +66,8 @@ export async function POST(request: Request) {
     if (body.groupSize !== undefined && (parseInt(body.groupSize) < 1)) {
       return NextResponse.json({ error: 'Il numero di partecipanti deve essere almeno 1.' }, { status: 400 })
     }
-    if (!body.excursionId && !body.transferId) {
-      return NextResponse.json({ error: 'ID escursione o trasferimento mancante.' }, { status: 400 })
+    if (!body.excursionId && !body.transferId && !body.isRental) {
+      return NextResponse.json({ error: 'ID escursione, trasferimento o flag noleggio mancante.' }, { status: 400 })
     }
 
     const { 
@@ -73,7 +75,8 @@ export async function POST(request: Request) {
       docNumber, docType, phoneNumber, email, notes, supplier, isOption,
       paymentType, paymentMethod, depositPaymentMethod, balancePaymentMethod,
       groupSize, price, deposit, pdfAttachment,
-      pickupLocation, dropoffLocation, pickupTime, returnPickupLocation, returnDate, returnTime
+      pickupLocation, dropoffLocation, pickupTime, returnPickupLocation, returnDate, returnTime,
+      isRental, rentalType, rentalStartDate, rentalEndDate
     } = body
 
     // Check expiration logic
@@ -108,6 +111,13 @@ export async function POST(request: Request) {
             isExpired = true
           }
         }
+    } else if (isRental && rentalStartDate) {
+        const startOfToday = new Date()
+        startOfToday.setHours(0, 0, 0, 0)
+        const isRentalPassed = new Date(rentalStartDate) < startOfToday
+        if (isRentalPassed && (isOption || paymentType === 'DEPOSIT')) {
+            isExpired = true
+        }
     }
 
     const participant = await prisma.participant.create({
@@ -137,6 +147,12 @@ export async function POST(request: Request) {
         returnPickupLocation,
         returnDate: returnDate ? new Date(returnDate) : null,
         returnTime,
+
+        // Rental fields
+        isRental: !!isRental,
+        rentalType,
+        rentalStartDate: rentalStartDate ? new Date(rentalStartDate) : null,
+        rentalEndDate: rentalEndDate ? new Date(rentalEndDate) : null,
 
         groupSize: parseInt(groupSize) || 1,
         price: price || 0,

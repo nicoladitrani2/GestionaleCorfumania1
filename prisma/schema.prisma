@@ -124,6 +124,12 @@ model Participant {
   returnDate           DateTime?
   returnTime           String?
 
+  // Rental specific fields
+  isRental        Boolean   @default(false)
+  rentalType      String?   // CAR, MOTO, BOAT
+  rentalStartDate DateTime?
+  rentalEndDate   DateTime?
+
   createdBy     User      @relation(fields: [createdById], references: [id])
   createdById   String
   
