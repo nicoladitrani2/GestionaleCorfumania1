@@ -533,16 +533,46 @@ export default function ReportsPage() {
 
           {/* Special Services Table */}
           {reportData?.bySpecialService && reportData.bySpecialService.length > 0 && (
-             <TableCard 
-                title="Performance Tasse & Extra" 
-                data={reportData?.bySpecialService} 
-                columns={[
-                    { header: 'Servizio', key: 'name' },
-                    { header: 'Pax', key: 'pax', align: 'right' },
-                    { header: 'Incasso Totale', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
-                    { header: 'Netto Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-blue-600' }
-                ]}
-            />
+            <div className="bg-white rounded-xl shadow-sm border border-indigo-100 overflow-hidden">
+              <div className="p-4 border-b bg-indigo-50 font-semibold text-indigo-700 flex items-center gap-2">
+                <CheckSquare className="w-5 h-5" />
+                Tasse & Extra
+              </div>
+              <div className="p-4 space-y-4">
+                {/* Special Services Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-indigo-50 p-4 rounded-xl border border-indigo-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-indigo-600">Totale Netto Agenzia (Extra)</p>
+                      <p className="text-2xl font-bold text-indigo-700">
+                        € {reportData.bySpecialService.reduce((acc, s) => acc + s.commission, 0).toFixed(2)}
+                      </p>
+                    </div>
+                    <PieChart className="w-8 h-8 text-indigo-300" />
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-purple-600">Totale Partecipanti (Extra)</p>
+                      <p className="text-2xl font-bold text-purple-700">
+                        {reportData.bySpecialService.reduce((acc, s) => acc + s.pax, 0)}
+                      </p>
+                    </div>
+                    <Users className="w-8 h-8 text-purple-300" />
+                  </div>
+                </div>
+
+                <TableCard 
+                    title="Performance Tasse & Extra" 
+                    data={reportData?.bySpecialService} 
+                    columns={[
+                        { header: 'Servizio', key: 'name' },
+                        { header: 'Pax', key: 'pax', align: 'right' },
+                        { header: 'Incasso Totale', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
+                        { header: 'Netto Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-blue-600' }
+                    ]}
+                />
+              </div>
+            </div>
           )}
         </div>
       </div>

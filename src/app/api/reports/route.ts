@@ -178,6 +178,12 @@ export async function GET(request: Request) {
         
         // --- SPECIAL SERVICES ---
         if (p.specialServiceType) {
+             // Filter by specific Special Service Type
+             if (types && types.length > 0) {
+                 const currentSpecialType = `SPECIAL_${p.specialServiceType}`
+                 if (!types.includes(currentSpecialType)) return
+             }
+
              // For Special Services, Revenue is the Price (Deposit)
              // And Agency Net is 100% of Revenue (No Supplier cost deducted in Commission logic usually, 
              // or Supplier is internal so Commission = Revenue)
