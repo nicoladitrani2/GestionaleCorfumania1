@@ -16,21 +16,26 @@ interface AuditLog {
 }
 
 interface AuditLogListProps {
-  excursionId: string
+  excursionId?: string
+  transferId?: string
 }
 
-export function AuditLogList({ excursionId }: AuditLogListProps) {
+export function AuditLogList({ excursionId, transferId }: AuditLogListProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     fetchLogs()
-  }, [excursionId])
+  }, [excursionId, transferId])
 
   const fetchLogs = async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/excursions/${excursionId}/logs`)
+      const url = excursionId 
+        ? `/api/excursions/${excursionId}/logs`
+        : `/api/transfers/${transferId}/logs`
+        
+      const res = await fetch(url)
       if (res.ok) {
         setLogs(await res.json())
       }
@@ -48,6 +53,11 @@ export function AuditLogList({ excursionId }: AuditLogListProps) {
       case 'DELETE_PARTICIPANT': return 'Eliminazione Partecipante'
       case 'UPDATE_EXCURSION': return 'Modifica Escursione'
       case 'CREATE_EXCURSION': return 'Creazione Escursione'
+      case 'CREATE_TRANSFER': return 'Creazione Trasferimento'
+      case 'UPDATE_TRANSFER': return 'Modifica Trasferimento'
+      case 'DELETE_TRANSFER': return 'Eliminazione Trasferimento'
+      case 'APPROVE_PARTICIPANT': return 'Approvazione Sconto'
+      case 'REJECT_PARTICIPANT': return 'Rifiuto Sconto'
       default: return action
     }
   }

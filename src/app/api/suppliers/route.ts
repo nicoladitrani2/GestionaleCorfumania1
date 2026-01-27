@@ -13,22 +13,6 @@ export async function GET(request: Request) {
       orderBy: { name: 'asc' }
     })
 
-    // Auto-seed Corfumania if missing (Critical for default logic)
-    const hasCorfumania = suppliers.some(s => s.name.toLowerCase() === 'corfumania')
-    if (!hasCorfumania) {
-      try {
-        const newSupplier = await prisma.supplier.create({ 
-          data: { name: 'Corfumania' } 
-        })
-        suppliers.push(newSupplier)
-        // Re-sort
-        suppliers.sort((a, b) => a.name.localeCompare(b.name))
-      } catch (seedError) {
-        console.error("Failed to auto-seed Corfumania:", seedError)
-        // Continue without it, don't block the API
-      }
-    }
-
     return NextResponse.json(suppliers)
   } catch (error) {
     console.error("Failed to fetch suppliers:", error)
@@ -109,12 +93,21 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'ID obbligatorio' }, { status: 400 })
     }
 
+    const supplierToCheck = await prisma.supplier.findUnique({ where: { id } })
+    if (!supplierToCheck) {
+      return NextResponse.json({ error: 'Fornitore non trovato' }, { status: 404 })
+    }
+
     await prisma.supplier.delete({
       where: { id }
     })
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
+    console.error("Delete supplier error:", error)
+    if (error.code === 'P2003') {
+      return NextResponse.json({ error: 'Impossibile eliminare: il fornitore è associato ad altri dati (es. escursioni o utenti).' }, { status: 400 })
+    }
     return NextResponse.json({ error: 'Errore durante l\'eliminazione' }, { status: 500 })
   }
 }

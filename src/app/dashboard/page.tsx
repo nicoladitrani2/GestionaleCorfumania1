@@ -1,26 +1,49 @@
 import Link from 'next/link'
-import { Map, Users, Settings, Briefcase, Bus, PieChart, Car } from 'lucide-react'
+import { Map, Users, Settings, Briefcase, Bus, PieChart, Car, AlertTriangle } from 'lucide-react'
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { WeeklyCalendar } from './WeeklyCalendar'
+import { ApprovalsWidget } from './ApprovalsWidget'
 
 export default async function DashboardPage() {
   const session = await getSession()
   const isAdmin = session?.user?.role === 'ADMIN'
 
-  // Fetch all excursions for calendar
-  const excursionsData = await prisma.excursion.findMany({
-    orderBy: { startDate: 'asc' },
-    include: {
-      participants: {
-        where: { isExpired: false },
-        select: { groupSize: true }
+  // Fetch pending approvals if admin
+  let pendingApprovals: any[] = []
+  if (isAdmin) {
+    pendingApprovals = await prisma.participant.findMany({
+      where: { approvalStatus: 'PENDING' },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        excursion: { select: { name: true, startDate: true } },
+        transfer: { select: { name: true, date: true } },
+        createdBy: { select: { firstName: true, lastName: true, email: true } }
       }
-    }
-  })
+    })
+  }
+
+  // Fetch all excursions for calendar
+  let excursionsData: any[] = []
+  let connectionError = false
+
+  try {
+    excursionsData = await prisma.excursion.findMany({
+      orderBy: { startDate: 'asc' },
+      include: {
+        participants: {
+          where: { isExpired: false },
+          select: { groupSize: true }
+        }
+      }
+    })
+  } catch (error) {
+    console.warn('Failed to fetch excursions for dashboard calendar:', error)
+    connectionError = true
+  }
 
   const excursions = excursionsData.map(excursion => {
-    const totalParticipants = excursion.participants.reduce((sum, p) => sum + (p.groupSize || 1), 0)
+    const totalParticipants = excursion.participants.reduce((sum: number, p: any) => sum + (p.groupSize || 1), 0)
     const { participants, ...rest } = excursion
     return {
       ...rest,
@@ -34,6 +57,14 @@ export default async function DashboardPage() {
       }
     }
   })
+
+  // Format pending approvals for widget
+  const formattedApprovals = pendingApprovals.map(p => ({
+    ...p,
+    excursion: p.excursion ? { ...p.excursion, startDate: p.excursion.startDate.toISOString() } : null,
+    transfer: p.transfer ? { ...p.transfer, date: p.transfer.date.toISOString() } : null,
+    rentalStartDate: p.rentalStartDate ? p.rentalStartDate.toISOString() : null,
+  }))
 
   const modules = [
     {
@@ -77,8 +108,8 @@ export default async function DashboardPage() {
       visible: isAdmin
     },
     {
-      title: 'Rifornitori',
-      description: 'Gestione rifornitori escursioni',
+      title: 'Fornitori',
+      description: 'Gestione fornitori escursioni',
       icon: Briefcase,
       href: '/dashboard/suppliers',
       color: 'bg-emerald-500',
@@ -88,6 +119,26 @@ export default async function DashboardPage() {
 
   return (
     <div className="py-4 space-y-8">
+      {connectionError && (
+        <div className="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded-md shadow-sm">
+          <div className="flex">
+            <div className="flex-shrink-0">
+              <AlertTriangle className="h-5 w-5 text-yellow-400" />
+            </div>
+            <div className="ml-3">
+              <p className="text-sm text-yellow-700 font-medium">
+                Connessione al database instabile
+              </p>
+              <p className="text-sm text-yellow-600 mt-1">
+                Il database si sta risvegliando. Se non vedi i dati nel calendario, prova a ricaricare la pagina tra qualche secondo.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+      
+      {isAdmin && <ApprovalsWidget participants={formattedApprovals} />}
+
       <WeeklyCalendar excursions={excursions} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">

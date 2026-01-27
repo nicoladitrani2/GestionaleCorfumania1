@@ -2,18 +2,32 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, User, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Briefcase, ArrowRight } from 'lucide-react'
+import { Plus, Users, User, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Briefcase, ArrowRight, Percent, BarChart3 } from 'lucide-react'
 import { ParticipantForm } from '../excursions/ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
+import { AuditLogList } from '../excursions/AuditLogList'
+import { FinancialSummary } from '../components/FinancialSummary'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 import Link from 'next/link'
 
 interface TransfersManagerProps {
   currentUserId: string
   userRole: string
   currentUserSupplierName?: string
+  userAgencyId?: string
+  agencyDefaultCommission?: number
+  agencyCommissionType?: string
 }
 
-export function TransfersManager({ currentUserId, userRole, currentUserSupplierName }: TransfersManagerProps) {
+export function TransfersManager({ 
+  currentUserId, 
+  userRole, 
+  currentUserSupplierName, 
+  userAgencyId,
+  agencyDefaultCommission,
+  agencyCommissionType
+}: TransfersManagerProps) {
   const [transfers, setTransfers] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
   const [loading, setLoading] = useState(true)
@@ -23,7 +37,7 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
   const [isAddingParticipant, setIsAddingParticipant] = useState(false)
   const [editingParticipant, setEditingParticipant] = useState<any>(null)
   
-  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY'>('PARTICIPANTS')
+  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY' | 'SUMMARY'>('PARTICIPANTS')
   const [newDate, setNewDate] = useState('')
   const [newTransferName, setNewTransferName] = useState('')
   const [newPickupLocation, setNewPickupLocation] = useState('')
@@ -33,6 +47,37 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
   const [newSupplier, setNewSupplier] = useState('GO4SEA')
   const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
   
+  // Modal States
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    onConfirm: () => void
+    variant?: 'danger' | 'warning' | 'info'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  })
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'success' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
+
+  // State for agencies and commissions
+  const [agencies, setAgencies] = useState<{ id: string, name: string, defaultCommission: number, commissionType: string }[]>([])
+  const [commissions, setCommissions] = useState<{ agencyId: string, percentage: string }[]>([])
+
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
   const [error, setError] = useState('')
 
@@ -44,7 +89,29 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
   useEffect(() => {
     fetchTransfers()
     fetchSuppliers()
+    fetchAgencies()
   }, [activeTab])
+
+  const fetchAgencies = async () => {
+    try {
+      const res = await fetch('/api/agencies')
+      if (res.ok) {
+        const data = await res.json()
+        if (Array.isArray(data)) {
+          setAgencies(data)
+          // Initialize commissions with default values if not editing
+          if (!editingTransferId) {
+             setCommissions(data.map((a: any) => ({ 
+               agencyId: a.id, 
+               percentage: a.defaultCommission ? a.defaultCommission.toString() : '' 
+             })))
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Error fetching agencies:', e)
+    }
+  }
 
   const fetchSuppliers = async () => {
     try {
@@ -120,24 +187,40 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
 
   const handleDeleteTransfer = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!window.confirm(`Sei sicuro di voler eliminare il trasferimento "${name}"? Questa azione è irreversibile.`)) {
-      return
-    }
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Elimina Trasferimento',
+      message: `Sei sicuro di voler eliminare il trasferimento "${name}"? Questa azione è irreversibile.`,
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/transfers?id=${id}`, {
+            method: 'DELETE'
+          })
 
-    try {
-      const res = await fetch(`/api/transfers?id=${id}`, {
-        method: 'DELETE'
-      })
-
-      if (res.ok) {
-        fetchTransfers()
-      } else {
-        alert('Errore durante l\'eliminazione')
+          if (res.ok) {
+            fetchTransfers()
+          } else {
+            const data = await res.json().catch(() => ({}))
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante l\'eliminazione',
+              variant: 'danger'
+            })
+          }
+        } catch (e) {
+          console.error(e)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'danger'
+          })
+        }
       }
-    } catch (e) {
-      console.error(e)
-      alert('Errore di connessione')
-    }
+    })
   }
 
   const handleCreateTransfer = () => {
@@ -151,10 +234,7 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
     
     // Logica di default fornitore
     let defaultSup = 'GO4SEA'
-    if (userRole === 'ADMIN') {
-      const corfumania = suppliers.find(s => s?.name?.toLowerCase() === 'corfumania')
-      if (corfumania) defaultSup = corfumania.name
-    } else if (currentUserSupplierName) {
+    if (currentUserSupplierName) {
       defaultSup = currentUserSupplierName
     } else if (suppliers.length > 0) {
       defaultSup = suppliers[0].name
@@ -191,6 +271,20 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
     setNewDropoffLocation(transfer.dropoffLocation || '')
     setNewEndDate(transfer.endDate ? toLocalISOString(transfer.endDate) : '')
     setNewSupplier(transfer.supplier || 'GO4SEA')
+    
+    // Populate commissions
+    if (transfer.commissions) {
+      setCommissions(agencies.map(a => {
+        const comm = transfer.commissions.find((c: any) => c.agencyId === a.id)
+        return {
+          agencyId: a.id,
+          percentage: comm ? comm.commissionPercentage.toString() : (a.defaultCommission ? a.defaultCommission.toString() : '')
+        }
+      }))
+    } else {
+      setCommissions(agencies.map(a => ({ agencyId: a.id, percentage: a.defaultCommission ? a.defaultCommission.toString() : '' })))
+    }
+
     setIsCreating(true)
   }
 
@@ -288,6 +382,40 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
     )
   }
 
+  const getTransferCommission = (transfer: any) => {
+    let commValue = null
+    let commType = null
+    
+    // Check for Transfer-specific Override first
+    if (userAgencyId && transfer.commissions) {
+        const override = transfer.commissions.find((c: any) => c.agencyId === userAgencyId)
+        if (override) {
+            commValue = override.commissionPercentage
+            commType = override.commissionType || 'PERCENTAGE'
+        }
+    }
+
+    // If no override, check Agency Default
+    if ((commValue === null || commValue === undefined) && userAgencyId) {
+      const agency = agencies.find(a => a.id === userAgencyId)
+      if (agency) {
+        commValue = agency.defaultCommission
+        commType = agency.commissionType
+      }
+    } 
+    
+    // Fallback for Admin if no agency context (e.g. Arianna)
+    if ((commValue === null || commValue === undefined) && userRole === 'ADMIN') {
+       commValue = 1
+       commType = 'FIXED'
+    }
+    
+    if (commValue !== null && commValue !== undefined) {
+        return { value: commValue, type: commType }
+    }
+    return null
+  }
+
   return (
     <>
       {isCreating && (
@@ -315,7 +443,7 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
               )}
               
               <div>
-                <label className="block text-sm font-bold text-gray-900 mb-1">Fornitore</label>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Fornitore (Operatore Trasporto)</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Briefcase className="h-5 w-5 text-gray-500" />
@@ -336,7 +464,7 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-900 mb-1">Luogo Ritiro</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Partenza</label>
                   <input
                     type="text"
                     value={newPickupLocation}
@@ -347,7 +475,7 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-gray-900 mb-1">Luogo Deposito</label>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Destinazione</label>
                   <input
                     type="text"
                     value={newDropoffLocation}
@@ -445,6 +573,24 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
                     </div>
                   )}
 
+                  {(() => {
+                    const comm = getTransferCommission(selectedTransfer)
+                    if (comm) {
+                      return (
+                        <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg text-purple-800 border border-purple-100">
+                          <Percent className="w-4 h-4 text-purple-600 shrink-0" />
+                          <div className="flex flex-col">
+                            <span className="text-xs text-purple-600 font-semibold uppercase tracking-wider">Commissione</span>
+                            <span className="font-medium">
+                              {comm.value} {comm.type === 'FIXED' ? '€' : '%'}
+                            </span>
+                          </div>
+                        </div>
+                      )
+                    }
+                    return null
+                  })()}
+
                   <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg text-gray-800 border border-gray-100">
                     <Briefcase className="w-4 h-4 text-gray-600 shrink-0" />
                     <div className="flex flex-col">
@@ -503,53 +649,94 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
                 <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-t-full" />
               )}
             </button>
-            {/* Audit log view could be added here later */}
+            {userRole === 'ADMIN' && (
+              <button
+                onClick={() => setViewMode('SUMMARY')}
+                className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
+                  viewMode === 'SUMMARY' 
+                    ? 'text-emerald-600' 
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Riepilogo
+                {viewMode === 'SUMMARY' && (
+                  <span className="absolute bottom-0 left-0 w-full h-0.5 bg-emerald-600 rounded-t-full" />
+                )}
+              </button>
+            )}
+            <button
+              onClick={() => setViewMode('HISTORY')}
+              className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
+                viewMode === 'HISTORY' 
+                  ? 'text-blue-600' 
+                  : 'text-gray-500 hover:text-gray-700'
+              }`}
+            >
+              Cronologia
+              {viewMode === 'HISTORY' && (
+                <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-t-full" />
+              )}
+            </button>
           </div>
 
           {viewMode === 'PARTICIPANTS' && (
              <ParticipantsList
+               key={refreshParticipantsTrigger}
+               eventId={selectedTransfer.id}
+               eventType="TRANSFER"
+               transferName={selectedTransfer.name}
+               transferDate={selectedTransfer.date}
                onEdit={(participant) => {
                  setEditingParticipant(participant)
                  setIsAddingParticipant(true)
                }}
-               onUpdate={() => {
-                 setRefreshParticipantsTrigger(prev => prev + 1)
-               }}
-               refreshTrigger={refreshParticipantsTrigger}
                currentUserId={currentUserId}
                userRole={userRole}
-               transfer={selectedTransfer}
+               onUpdate={fetchTransfers}
              />
           )}
 
-          {(isAddingParticipant || editingParticipant) && (
-            <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 sm:p-4 animate-in fade-in duration-200">
-              <div className="w-full max-w-5xl h-full sm:h-[90vh] bg-white sm:rounded-xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col">
-                <ParticipantForm
-                  onSuccess={handleParticipantSuccess}
-                  onCancel={() => {
-                    setIsAddingParticipant(false)
-                    setEditingParticipant(null)
-                  }}
-                  initialData={editingParticipant}
-                  transferId={selectedTransfer.id}
-                  excursionName={selectedTransfer.name}
-                  excursionDate={selectedTransfer.date}
-                  excursionEndDate={selectedTransfer.endDate}
-                  type="TRANSFER"
-                  userRole={userRole}
-                  defaultValues={{
+          {viewMode === 'SUMMARY' && userRole === 'ADMIN' && (
+              <FinancialSummary
+                entityId={selectedTransfer.id}
+                type="TRANSFER"
+                refreshTrigger={refreshParticipantsTrigger}
+              />
+            )}
+            
+            {viewMode === 'HISTORY' && (
+            <div className="mt-6">
+                <AuditLogList transferId={selectedTransfer.id} />
+            </div>
+          )}
+
+          {isAddingParticipant && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+              <ParticipantForm
+                onCancel={() => {
+                  setIsAddingParticipant(false)
+                  setEditingParticipant(null)
+                }}
+                onSuccess={handleParticipantSuccess}
+                transferId={selectedTransfer.id}
+                transferName={selectedTransfer.name}
+                transferDate={selectedTransfer.date}
+                transferEndDate={selectedTransfer.endDate}
+                defaultValues={{
                     pickupLocation: selectedTransfer.pickupLocation,
                     dropoffLocation: selectedTransfer.dropoffLocation,
-                    returnPickupLocation: selectedTransfer.returnPickupLocation || selectedTransfer.dropoffLocation
-                  }}
-                  defaultSupplier={
-                    userRole === 'ASSISTANT' 
-                      ? (currentUserSupplierName || 'GO4SEA') 
-                      : 'GO4SEA'
-                  }
-                />
-              </div>
+                    pickupTime: selectedTransfer.date ? new Date(selectedTransfer.date).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '',
+                    returnDate: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toISOString().split('T')[0] : '',
+                    returnTime: selectedTransfer.endDate ? new Date(selectedTransfer.endDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '',
+                    returnPickupLocation: selectedTransfer.dropoffLocation
+                }}
+                initialData={editingParticipant}
+                type="TRANSFER"
+                userRole={userRole}
+                userAgencyId={userAgencyId}
+                agencyDefaultCommission={agencyDefaultCommission}
+                agencyCommissionType={agencyCommissionType}
+              />
             </div>
           )}
         </div>
@@ -648,6 +835,18 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
                         <Calendar className="w-4 h-4 mr-2 text-gray-400" />
                         {formatDateDisplay(transfer.date)}
                       </div>
+                      {(() => {
+                        const comm = getTransferCommission(transfer)
+                        if (comm) {
+                          return (
+                            <div className="flex items-center text-sm text-purple-600 font-medium">
+                                <Percent className="w-4 h-4 mr-2" />
+                                <span>{comm.value} {comm.type === 'FIXED' ? '€' : '%'}</span>
+                            </div>
+                          )
+                        }
+                        return null
+                      })()}
                     </div>
 
                     <div className="flex items-center justify-between pt-4 border-t border-gray-50">
@@ -696,6 +895,22 @@ export function TransfersManager({ currentUserId, userRole, currentUserSupplierN
           )}
         </div>
       )}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+      
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal({ ...alertModal, isOpen: false })}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
     </>
   )
 }

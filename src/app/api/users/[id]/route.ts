@@ -9,7 +9,7 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { email, password, firstName, lastName, role, code, supplierId } = body
+    const { email, password, firstName, lastName, role, code, agencyId } = body
 
     const dataToUpdate: any = {
       email,
@@ -17,7 +17,7 @@ export async function PUT(
       lastName,
       role,
       code,
-      supplierId: supplierId || null
+      agencyId: agencyId || null
     }
 
     if (password) {

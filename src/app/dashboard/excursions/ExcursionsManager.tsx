@@ -2,20 +2,33 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Award } from 'lucide-react'
+import { Plus, Users, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Award, BarChart3 } from 'lucide-react'
 import { ParticipantForm } from './ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
 import { ExcursionLeaderboard } from './ExcursionLeaderboard'
 import { AuditLogList } from './AuditLogList'
+import { FinancialSummary } from '../components/FinancialSummary'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 import Link from 'next/link'
 
 interface ExcursionsManagerProps {
   currentUserId: string
   userRole: string
   currentUserSupplierName?: string
+  userAgencyId?: string
+  agencyDefaultCommission?: number
+  agencyCommissionType?: string
 }
 
-export function ExcursionsManager({ currentUserId, userRole, currentUserSupplierName }: ExcursionsManagerProps) {
+export function ExcursionsManager({ 
+  currentUserId, 
+  userRole, 
+  currentUserSupplierName, 
+  userAgencyId,
+  agencyDefaultCommission,
+  agencyCommissionType
+}: ExcursionsManagerProps) {
   const [excursions, setExcursions] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
@@ -27,44 +40,89 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
   const [editingParticipant, setEditingParticipant] = useState<any>(null)
   
   const [selectedTemplateId, setSelectedTemplateId] = useState('')
-  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY' | 'LEADERBOARD'>('PARTICIPANTS')
+  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY' | 'LEADERBOARD' | 'SUMMARY'>('PARTICIPANTS')
   const [newStartDate, setNewStartDate] = useState('')
   const [newEndDate, setNewEndDate] = useState('')
   const [newConfirmationDeadline, setNewConfirmationDeadline] = useState('')
   const [newExcursionName, setNewExcursionName] = useState('')
+  const [newPriceAdult, setNewPriceAdult] = useState('')
+  const [newPriceChild, setNewPriceChild] = useState('')
+  const [newTransferDepartureLocation, setNewTransferDepartureLocation] = useState('')
+  const [newTransferDestinationLocation, setNewTransferDestinationLocation] = useState('')
+  const [newTransferTime, setNewTransferTime] = useState('')
   const [editingExcursionId, setEditingExcursionId] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [isTemplateDropdownOpen, setIsTemplateDropdownOpen] = useState(false)
 
+  // Recurrence State
+  const [isRecurring, setIsRecurring] = useState(false)
+  const [recurrenceFrequency, setRecurrenceFrequency] = useState('WEEKLY')
+  const [recurrenceEndDate, setRecurrenceEndDate] = useState('')
+  const [recurrenceDays, setRecurrenceDays] = useState<number[]>([])
+
   const [refreshParticipantsTrigger, setRefreshParticipantsTrigger] = useState(0)
 
-  // State for suppliers and commissions
-  const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
-  const [commissions, setCommissions] = useState<{ supplierId: string, percentage: string }[]>([])
+  // State for agencies and commissions
+  const [agencies, setAgencies] = useState<{ id: string, name: string, defaultCommission: number, commissionType: string }[]>([])
+  const [commissions, setCommissions] = useState<{ agencyId: string, percentage: string, commissionType: string }[]>([])
+  
+  // Selection State
+  const [selectedExcursions, setSelectedExcursions] = useState<string[]>([])
+
+  // Modal States
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    onConfirm: () => void
+    variant?: 'danger' | 'warning' | 'info'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  })
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'success' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
   const searchParams = useSearchParams()
   const router = useRouter()
 
   useEffect(() => {
     fetchTemplates()
-    fetchSuppliers()
+    fetchAgencies()
   }, [])
 
-  const fetchSuppliers = async () => {
+  const fetchAgencies = async () => {
     try {
-      const res = await fetch('/api/suppliers')
+      const res = await fetch('/api/agencies')
       if (res.ok) {
         const data = await res.json()
         if (Array.isArray(data)) {
-          setSuppliers(data)
-          // Initialize commissions empty, we'll fill it if editing or leave empty
+          setAgencies(data)
+          // Initialize commissions with default values if not editing
           if (!editingExcursionId) {
-               setCommissions(data.map((s: any) => ({ supplierId: s.id, percentage: '' })))
+             setCommissions(data.map((a: any) => ({ 
+               agencyId: a.id, 
+               percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
+               commissionType: a.commissionType || 'PERCENTAGE'
+             })))
           }
         }
       }
     } catch (e) {
-      console.error('Error fetching suppliers:', e)
+      console.error('Error fetching agencies:', e)
     }
   }
 
@@ -148,56 +206,102 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
 
   const handleDeleteExcursion = async (id: string, name: string, e: React.MouseEvent) => {
     e.stopPropagation()
-    if (!window.confirm(`Sei sicuro di voler eliminare l'escursione "${name}"? Questa azione è irreversibile.`)) {
-      return
-    }
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Elimina Escursione',
+      message: `Sei sicuro di voler eliminare l'escursione "${name}"? Questa azione è irreversibile.`,
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/excursions?id=${id}`, {
+            method: 'DELETE'
+          })
 
-    try {
-      const res = await fetch(`/api/excursions?id=${id}`, {
-        method: 'DELETE'
-      })
-
-      if (res.ok) {
-        fetchExcursions()
-      } else {
-        alert('Errore durante l\'eliminazione')
+          if (res.ok) {
+            fetchExcursions()
+          } else {
+            const data = await res.json().catch(() => ({}))
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante l\'eliminazione',
+              variant: 'danger'
+            })
+          }
+        } catch (e) {
+          console.error(e)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'danger'
+          })
+        }
       }
-    } catch (e) {
-      console.error(e)
-      alert('Errore di connessione')
-    }
+    })
   }
 
   const handleClearArchive = async () => {
-    if (!window.confirm('Sei sicuro di voler svuotare l\'archivio? Tutte le escursioni passate verranno eliminate definitivamente.')) {
-      return
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Svuota Archivio',
+      message: 'Sei sicuro di voler svuotare l\'archivio? Tutte le escursioni passate verranno eliminate definitivamente.',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/excursions?archived=true`, {
+            method: 'DELETE'
+          })
 
-    try {
-      const res = await fetch(`/api/excursions?archived=true`, {
-        method: 'DELETE'
-      })
-
-      if (res.ok) {
-        fetchExcursions()
-      } else {
-        alert('Errore durante lo svuotamento dell\'archivio')
+          if (res.ok) {
+            fetchExcursions()
+          } else {
+            const data = await res.json().catch(() => ({}))
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante lo svuotamento dell\'archivio',
+              variant: 'danger'
+            })
+          }
+        } catch (e) {
+          console.error(e)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'danger'
+          })
+        }
       }
-    } catch (e) {
-      console.error(e)
-      alert('Errore di connessione')
-    }
+    })
   }
 
   const handleCreateExcursion = () => {
     setEditingExcursionId(null)
     setNewExcursionName('')
+    setNewPriceAdult('')
+    setNewPriceChild('')
+    setNewTransferDepartureLocation('')
+    setNewTransferDestinationLocation('')
+    setNewTransferTime('')
     setNewStartDate('')
     setNewEndDate('')
     setNewConfirmationDeadline('')
     setSelectedTemplateId('')
+    // Recurrence Reset
+    setIsRecurring(false)
+    setRecurrenceFrequency('WEEKLY')
+    setRecurrenceEndDate('')
+    setRecurrenceDays([])
+
     // Reset commissions
-    setCommissions(suppliers.map(s => ({ supplierId: s.id, percentage: '' })))
+    setCommissions(agencies.map(a => ({ 
+      agencyId: a.id, 
+      percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
+      commissionType: a.commissionType || 'PERCENTAGE'
+    })))
     setIsCreating(true)
   }
 
@@ -217,6 +321,11 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
     e.stopPropagation()
     setEditingExcursionId(excursion.id)
     setNewExcursionName(excursion.name)
+    setNewPriceAdult(excursion.priceAdult ? excursion.priceAdult.toString() : '')
+    setNewPriceChild(excursion.priceChild ? excursion.priceChild.toString() : '')
+    setNewTransferDepartureLocation(excursion.transferDepartureLocation || '')
+    setNewTransferDestinationLocation(excursion.transferDestinationLocation || '')
+    setNewTransferTime(excursion.transferTime || '')
     setNewStartDate(toLocalISOString(excursion.startDate))
     setNewEndDate(toLocalISOString(excursion.endDate))
     setNewConfirmationDeadline(toLocalISOString(excursion.confirmationDeadline))
@@ -224,41 +333,60 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
     
     // Populate commissions
     if (excursion.commissions) {
-      setCommissions(suppliers.map(s => {
-        const comm = excursion.commissions.find((c: any) => c.supplierId === s.id)
+      setCommissions(agencies.map(a => {
+        const comm = excursion.commissions.find((c: any) => c.agencyId === a.id)
         return {
-          supplierId: s.id,
-          percentage: comm ? comm.commissionPercentage.toString() : ''
+          agencyId: a.id,
+          percentage: comm ? comm.commissionPercentage.toString() : (a.defaultCommission ? a.defaultCommission.toString() : ''),
+          commissionType: comm ? (comm.commissionType || 'PERCENTAGE') : (a.commissionType || 'PERCENTAGE')
         }
       }))
     } else {
-      setCommissions(suppliers.map(s => ({ supplierId: s.id, percentage: '' })))
+      setCommissions(agencies.map(a => ({ 
+        agencyId: a.id, 
+        percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
+        commissionType: a.commissionType || 'PERCENTAGE'
+      })))
     }
     
     setIsCreating(true)
   }
 
   const handleDeleteTemplate = async (templateId: string, templateName: string) => {
-    if (!window.confirm(`Sei sicuro di voler eliminare il template "${templateName}"?`)) {
-      return
-    }
+    setConfirmModal({
+      isOpen: true,
+      title: 'Elimina Template',
+      message: `Sei sicuro di voler eliminare il template "${templateName}"?`,
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/excursions/templates?id=${templateId}`, {
+            method: 'DELETE'
+          })
 
-    try {
-      const res = await fetch(`/api/excursions/templates?id=${templateId}`, {
-        method: 'DELETE'
-      })
-
-      if (res.ok) {
-        setTemplates(templates.filter(t => t.id !== templateId))
-        setSelectedTemplateId('')
-        setNewExcursionName('')
-      } else {
-        alert('Errore durante l\'eliminazione del template')
+          if (res.ok) {
+            setTemplates(templates.filter(t => t.id !== templateId))
+            setSelectedTemplateId('')
+            setNewExcursionName('')
+          } else {
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: 'Errore durante l\'eliminazione del template',
+              variant: 'danger'
+            })
+          }
+        } catch (e) {
+          console.error(e)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'danger'
+          })
+        }
       }
-    } catch (e) {
-      console.error(e)
-      alert('Errore di connessione')
-    }
+    })
   }
 
   const handleTemplateChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
@@ -284,10 +412,10 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
     const now = new Date()
 
     // Controllo data passata (solo per nuovi inserimenti)
-    if (!editingExcursionId && start < now) {
-      setError('La data di inizio non può essere nel passato.')
-      return
-    }
+    // if (!editingExcursionId && start < now) {
+    //   setError('La data di inizio non può essere nel passato.')
+    //   return
+    // }
 
     if (end && end < start) {
       setError('La data di fine non può essere precedente alla data di inizio.')
@@ -302,12 +430,25 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
     try {
       const url = '/api/excursions'
       const method = editingExcursionId ? 'PUT' : 'POST'
-      const payload = {
+      const payload: any = {
         name: newExcursionName,
         startDate: newStartDate,
         endDate: newEndDate,
         confirmationDeadline: newConfirmationDeadline || newStartDate, // Default to startDate
+        priceAdult: newPriceAdult,
+        priceChild: newPriceChild,
+        transferDepartureLocation: newTransferDepartureLocation,
+        transferDestinationLocation: newTransferDestinationLocation,
+        transferTime: newTransferTime,
         commissions // Add commissions
+      }
+
+      if (isRecurring) {
+        payload.recurrence = {
+          frequency: recurrenceFrequency,
+          endDate: recurrenceEndDate,
+          days: recurrenceDays
+        }
       }
 
       const body = editingExcursionId 
@@ -320,7 +461,10 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
         body: JSON.stringify(body),
       })
 
-      if (!res.ok) throw new Error('Errore durante il salvataggio')
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        throw new Error(errorData.error || errorData.details || 'Errore durante il salvataggio')
+      }
       
       const savedExcursion = await res.json()
 
@@ -363,12 +507,117 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
     )
   }
 
+  const handleToggleSelect = (id: string, e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (selectedExcursions.includes(id)) {
+      setSelectedExcursions(selectedExcursions.filter(sid => sid !== id))
+    } else {
+      setSelectedExcursions([...selectedExcursions, id])
+    }
+  }
+
+  const handleSelectAll = () => {
+    if (selectedExcursions.length === excursions.length) {
+      setSelectedExcursions([])
+    } else {
+      setSelectedExcursions(excursions.map(e => e.id))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (selectedExcursions.length === 0) return
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Eliminazione Multipla',
+      message: `Sei sicuro di voler eliminare le ${selectedExcursions.length} escursioni selezionate?`,
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch('/api/excursions', {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ids: selectedExcursions })
+          })
+
+          if (res.ok) {
+            setSelectedExcursions([])
+            fetchExcursions()
+          } else {
+            const data = await res.json().catch(() => ({}))
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante l\'eliminazione multipla',
+              variant: 'danger'
+            })
+          }
+        } catch (e) {
+          console.error(e)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'danger'
+          })
+        }
+      }
+    })
+  }
+
+  const handleDeleteAllActive = async () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'ATTENZIONE',
+      message: 'Sei sicuro di voler eliminare TUTTE le escursioni attive (future e correnti)? Questa azione è irreversibile e cancellerà anche tutti i partecipanti associati.',
+      variant: 'danger',
+      onConfirm: () => {
+        setTimeout(() => {
+          setConfirmModal({
+            isOpen: true,
+            title: 'CONFERMA FINALE',
+            message: 'Sei DAVVERO sicuro? Questa operazione svuoterà completamente la lista delle escursioni in programma.',
+            variant: 'danger',
+            onConfirm: async () => {
+              try {
+                const res = await fetch('/api/excursions?active=true', {
+                  method: 'DELETE'
+                })
+
+                if (res.ok) {
+                  setSelectedExcursions([])
+                  fetchExcursions()
+                } else {
+                  const data = await res.json().catch(() => ({}))
+                  setAlertModal({
+                    isOpen: true,
+                    title: 'Errore',
+                    message: data.error || 'Errore durante l\'eliminazione massiva',
+                    variant: 'danger'
+                  })
+                }
+              } catch (e) {
+                console.error(e)
+                setAlertModal({
+                  isOpen: true,
+                  title: 'Errore',
+                  message: 'Errore di connessione',
+                  variant: 'danger'
+                })
+              }
+            }
+          })
+        }, 300)
+      }
+    })
+  }
+
   return (
     <>
       {isCreating && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
-            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-6 py-4 flex justify-between items-center">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-6 py-4 flex justify-between items-center shrink-0">
               <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                 {editingExcursionId ? <Edit className="w-5 h-5 sm:w-6 sm:h-6" /> : <Plus className="w-5 h-5 sm:w-6 sm:h-6" />}
                 {editingExcursionId ? 'Modifica Escursione' : 'Nuova Escursione'}
@@ -381,7 +630,7 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
               </button>
             </div>
             
-            <form onSubmit={handleSaveExcursion} className="p-4 sm:p-6 space-y-5">
+            <form onSubmit={handleSaveExcursion} className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1">
               {error && (
                 <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
                    <AlertCircle className="w-4 h-4 shrink-0" />
@@ -467,21 +716,88 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
                 </div>
               )}
               
-              <div>
-                <label className="block text-sm font-bold text-gray-900 mb-1">Nome Escursione</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <MapIcon className="h-5 w-5 text-gray-500" />
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Nome Escursione</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <MapIcon className="h-5 w-5 text-gray-500" />
+                    </div>
+                    <input
+                      type="text"
+                      value={newExcursionName}
+                      onChange={(e) => setNewExcursionName(e.target.value)}
+                      required
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                      placeholder="Es. Tour dell'Isola"
+                    />
                   </div>
-                  <input
-                    type="text"
-                    value={newExcursionName}
-                    onChange={(e) => setNewExcursionName(e.target.value)}
-                    required
-                    className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
-                    placeholder="Es. Tour dell'Isola"
-                  />
                 </div>
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulti (€)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newPriceAdult}
+                      onChange={(e) => setNewPriceAdult(e.target.value)}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
+                      placeholder="0.00"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambini (€)</label>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={newPriceChild}
+                      onChange={(e) => setNewPriceChild(e.target.value)}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Transfer Details Section */}
+              <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <h4 className="font-bold text-gray-900 mb-3 flex items-center gap-2">
+                  <span className="bg-blue-100 text-blue-700 p-1 rounded">🚌</span> Dettagli Trasferimento (Opzionale)
+                </h4>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Punto di Partenza</label>
+                    <input
+                      type="text"
+                      value={newTransferDepartureLocation}
+                      onChange={(e) => setNewTransferDepartureLocation(e.target.value)}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm text-gray-900"
+                      placeholder="Es. Porto, Hotel..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Destinazione</label>
+                    <input
+                      type="text"
+                      value={newTransferDestinationLocation}
+                      onChange={(e) => setNewTransferDestinationLocation(e.target.value)}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm text-gray-900"
+                      placeholder="Es. Spiaggia, Centro..."
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1">Orario Partenza</label>
+                    <input
+                      type="time"
+                      value={newTransferTime}
+                      onChange={(e) => setNewTransferTime(e.target.value)}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm text-gray-900"
+                    />
+                  </div>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">Questi dati verranno precompilati quando si aggiunge un partecipante che richiede il trasferimento.</p>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
@@ -521,31 +837,127 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
                 </p>
               </div>
 
-              <div>
-                <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Fornitori (%)</label>
-                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
-                  {suppliers.length === 0 && <p className="text-sm text-gray-500 italic">Nessun fornitore disponibile.</p>}
-                  {suppliers && suppliers.length > 0 && suppliers.map(supplier => (
-                    supplier ? (
-                    <div key={supplier.id || supplier.name} className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-gray-700 truncate flex-1" title={supplier.name}>{supplier.name}</span>
-                      <div className="relative w-24">
+              <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+                  <div className="flex items-center gap-2 mb-3">
+                    <input
+                      type="checkbox"
+                      id="isRecurring"
+                      checked={isRecurring}
+                      onChange={(e) => setIsRecurring(e.target.checked)}
+                      className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                    />
+                    <label htmlFor="isRecurring" className="text-sm font-bold text-gray-900 select-none cursor-pointer">
+                      Ripeti Escursione (Periodicità)
+                    </label>
+                  </div>
+
+                  {isRecurring && (
+                    <div className="space-y-3 pl-6 animate-in slide-in-from-top-2 duration-200">
+                      {editingExcursionId && (
+                        <div className="bg-amber-50 text-amber-800 p-3 rounded-md text-xs border border-amber-200 flex gap-2 items-start">
+                           <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                           <p>
+                             <strong>Attenzione:</strong> Attivando la periodicità in modifica, verranno create <strong>nuove escursioni future</strong> a partire dalla data di questa escursione.
+                             L'escursione corrente verrà aggiornata ma non duplicata.
+                           </p>
+                        </div>
+                      )}
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">Frequenza</label>
+                        <select
+                          value={recurrenceFrequency}
+                          onChange={(e) => setRecurrenceFrequency(e.target.value)}
+                          className="block w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500"
+                        >
+                          <option value="WEEKLY">Settimanale</option>
+                          <option value="DAILY">Giornaliero</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-xs font-semibold text-gray-700 mb-1">Fino al</label>
                         <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.1"
-                          placeholder="0"
-                          value={commissions.find(c => c.supplierId === supplier.id)?.percentage || ''}
-                          onChange={(e) => {
-                            const val = e.target.value
-                            setCommissions(prev => prev.map(c => 
-                              c.supplierId === supplier.id ? { ...c, percentage: val } : c
-                            ))
-                          }}
-                          className="block w-full border border-gray-300 rounded-md py-1 px-2 text-right pr-6 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                          type="date"
+                          value={recurrenceEndDate}
+                          onChange={(e) => setRecurrenceEndDate(e.target.value)}
+                          required={isRecurring}
+                          className="block w-full border border-gray-300 rounded-lg p-2 text-sm focus:ring-blue-500 focus:border-blue-500"
                         />
-                        <span className="absolute right-2 top-1.5 text-gray-400 text-xs">%</span>
+                      </div>
+
+                      {recurrenceFrequency === 'WEEKLY' && (
+                        <div>
+                          <label className="block text-xs font-semibold text-gray-700 mb-1">Giorni della settimana</label>
+                          <div className="flex flex-wrap gap-2">
+                            {['D', 'L', 'M', 'M', 'G', 'V', 'S'].map((day, index) => (
+                              <button
+                                key={index}
+                                type="button"
+                                onClick={() => {
+                                  if (recurrenceDays.includes(index)) {
+                                    setRecurrenceDays(recurrenceDays.filter(d => d !== index))
+                                  } else {
+                                    setRecurrenceDays([...recurrenceDays, index])
+                                  }
+                                }}
+                                className={`w-8 h-8 rounded-full text-xs font-bold flex items-center justify-center transition-colors ${
+                                  recurrenceDays.includes(index)
+                                    ? 'bg-blue-600 text-white'
+                                    : 'bg-white border border-gray-300 text-gray-700 hover:bg-gray-50'
+                                }`}
+                              >
+                                {day}
+                              </button>
+                            ))}
+                          </div>
+                          <p className="text-xs text-gray-500 mt-1">Seleziona i giorni in cui ripetere l'escursione.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Agenzie (Default)</label>
+                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
+                  {agencies.length === 0 && <p className="text-sm text-gray-500 italic">Nessuna agenzia disponibile.</p>}
+                  {agencies && agencies.length > 0 && agencies.map(agency => (
+                    agency ? (
+                    <div key={agency.id || agency.name} className="flex items-center justify-between gap-3">
+                      <span className="text-sm font-medium text-gray-700 truncate flex-1" title={agency.name}>{agency.name}</span>
+                      <div className="flex gap-2 w-48">
+                          <select
+                              value={commissions.find(c => c.agencyId === agency.id)?.commissionType || 'PERCENTAGE'}
+                              onChange={(e) => {
+                                  const val = e.target.value
+                                  setCommissions(prev => prev.map(c => 
+                                      c.agencyId === agency.id ? { ...c, commissionType: val } : c
+                                  ))
+                              }}
+                              className="w-20 text-xs border border-gray-300 rounded-md py-1 px-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                          >
+                              <option value="PERCENTAGE">%</option>
+                              <option value="FIXED">€/pax</option>
+                          </select>
+                          <div className="relative flex-1">
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              placeholder="0"
+                              value={commissions.find(c => c.agencyId === agency.id)?.percentage || ''}
+                              onChange={(e) => {
+                                const val = e.target.value
+                                setCommissions(prev => prev.map(c => 
+                                  c.agencyId === agency.id ? { ...c, percentage: val } : c
+                                ))
+                              }}
+                              className="block w-full border border-gray-300 rounded-md py-1 px-2 text-right pr-6 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            />
+                            <span className="absolute right-2 top-1.5 text-gray-400 text-xs">
+                                {commissions.find(c => c.agencyId === agency.id)?.commissionType === 'FIXED' ? '€' : '%'}
+                            </span>
+                          </div>
                       </div>
                     </div>
                     ) : null
@@ -630,7 +1042,10 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
                       <Euro className="w-4 h-4 text-emerald-600 shrink-0" />
                       <div className="flex flex-col">
                         <span className="text-xs text-emerald-600 font-semibold uppercase tracking-wide">La tua Commissione</span>
-                        <span className="font-medium font-mono">{selectedExcursion.commissions[0].commissionPercentage}%</span>
+                        <span className="font-medium font-mono">
+                          {selectedExcursion.commissions[0].commissionPercentage}
+                          {selectedExcursion.commissions[0].commissionType === 'FIXED' ? '€' : '%'}
+                        </span>
                       </div>
                     </div>
                   )}
@@ -680,6 +1095,19 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
                 Classifica
               </button>
             )}
+            {userRole === 'ADMIN' && (
+              <button
+                onClick={() => setViewMode('SUMMARY')}
+                className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
+                  viewMode === 'SUMMARY'
+                    ? 'border-emerald-600 text-emerald-600'
+                    : 'border-transparent text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                <BarChart3 className="w-4 h-4" />
+                Riepilogo
+              </button>
+            )}
               <button
               onClick={() => setViewMode('HISTORY')}
               className={`pb-2 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 whitespace-nowrap ${
@@ -707,11 +1135,15 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
                     setEditingParticipant(null)
                   }}
                   userRole={userRole}
-                  defaultSupplier={
-                    userRole === 'ASSISTANT' 
-                      ? (currentUserSupplierName || 'GO4SEA') 
-                      : 'GO4SEA'
-                  }
+                  priceAdult={selectedExcursion.priceAdult}
+                  priceChild={selectedExcursion.priceChild}
+                  userAgencyId={userAgencyId}
+                  defaultSupplier={userRole === 'ASSISTANT' ? currentUserSupplierName : undefined}
+                  excursionTransferDepartureLocation={selectedExcursion.transferDepartureLocation}
+                  excursionTransferDestinationLocation={selectedExcursion.transferDestinationLocation}
+                  excursionTransferTime={selectedExcursion.transferTime}
+                  agencyDefaultCommission={agencyDefaultCommission}
+                  agencyCommissionType={agencyCommissionType}
                 />
               </div>
             </div>
@@ -736,8 +1168,16 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
             />
           )}
 
-          {viewMode === 'HISTORY' && (
-            <AuditLogList excursionId={selectedExcursion.id} />
+          {viewMode === 'SUMMARY' && userRole === 'ADMIN' && (
+              <FinancialSummary 
+                entityId={selectedExcursion.id}
+                type="EXCURSION"
+                refreshTrigger={refreshParticipantsTrigger}
+              />
+            )}
+
+            {viewMode === 'HISTORY' && (
+              <ExcursionHistory excursionId={selectedExcursion.id} />
           )}
         </div>
       ) : (
@@ -782,6 +1222,36 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
 
             {userRole === 'ADMIN' && (
               <div className="flex flex-col sm:flex-row gap-2 w-full md:w-auto sm:justify-end">
+                {activeTab === 'ACTIVE' && excursions.length > 0 && (
+                   <button
+                    onClick={handleDeleteAllActive}
+                    className="px-4 py-2 bg-red-50 text-red-600 border border-red-200 rounded-lg hover:bg-red-100 flex items-center justify-center gap-2 shadow-sm transition-all font-medium w-full sm:w-auto"
+                    title="Elimina tutte le escursioni attive"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Elimina Tutto
+                  </button>
+                )}
+
+                {selectedExcursions.length > 0 && (
+                  <button
+                    onClick={handleBulkDelete}
+                    className="px-4 py-2 bg-red-600 text-white border border-red-700 rounded-lg hover:bg-red-700 flex items-center justify-center gap-2 shadow-sm transition-all font-medium w-full sm:w-auto animate-in fade-in zoom-in duration-200"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Elimina ({selectedExcursions.length})
+                  </button>
+                )}
+
+                {activeTab === 'ACTIVE' && excursions.length > 0 && (
+                    <button
+                        onClick={handleSelectAll}
+                        className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center justify-center gap-2 shadow-sm transition-all font-medium w-full sm:w-auto"
+                    >
+                        {selectedExcursions.length === excursions.length ? 'Deseleziona' : 'Seleziona Tutti'}
+                    </button>
+                )}
+
                 {activeTab === 'ARCHIVE' && excursions.length > 0 && (
                   <button
                     onClick={handleClearArchive}
@@ -806,11 +1276,21 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
             {excursions.map((excursion) => (
               <div 
                 key={excursion.id} 
-                className="group bg-white rounded-xl shadow-sm hover:shadow-xl transition-all duration-300 border border-gray-200 flex flex-col overflow-hidden hover:-translate-y-1"
+                className={`group bg-white rounded-xl shadow-sm hover:shadow-xl transition-all duration-300 border ${selectedExcursions.includes(excursion.id) ? 'border-blue-500 ring-2 ring-blue-500' : 'border-gray-200'} flex flex-col overflow-hidden hover:-translate-y-1`}
               >
                 <div className="p-6 flex-grow cursor-pointer" onClick={() => router.push(`/dashboard/excursions?id=${excursion.id}`)}>
                   <div className="flex justify-between items-start mb-4">
                     <div className="flex items-start gap-3">
+                      {userRole === 'ADMIN' && (
+                        <div onClick={(e) => e.stopPropagation()} className="pt-2">
+                            <input 
+                                type="checkbox"
+                                checked={selectedExcursions.includes(excursion.id)}
+                                onChange={(e) => handleToggleSelect(excursion.id, e as any)}
+                                className="w-5 h-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500 cursor-pointer shadow-sm"
+                            />
+                        </div>
+                      )}
                       <div className="p-2 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
                         <MapIcon className="w-6 h-6 text-blue-600" />
                       </div>
@@ -820,15 +1300,13 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
                     </div>
                     {userRole === 'ADMIN' && (
                       <div className="flex gap-1">
-                        {activeTab === 'ARCHIVE' && (
-                          <button 
-                            onClick={(e) => handleDeleteExcursion(excursion.id, excursion.name, e)}
-                            className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-full transition-colors"
-                            title="Elimina Escursione"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                        <button 
+                          onClick={(e) => handleDeleteExcursion(excursion.id, excursion.name, e)}
+                          className="text-gray-400 hover:text-red-600 p-2 hover:bg-red-50 rounded-full transition-colors"
+                          title="Elimina Escursione"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                         <button 
                           onClick={(e) => handleEditExcursion(excursion, e)}
                           className="text-gray-400 hover:text-blue-600 p-2 hover:bg-blue-50 rounded-full transition-colors"
@@ -902,6 +1380,22 @@ export function ExcursionsManager({ currentUserId, userRole, currentUserSupplier
           </div>
         </div>
       )}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal({ ...confirmModal, isOpen: false })}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+      
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal({ ...alertModal, isOpen: false })}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
     </>
   )
 }

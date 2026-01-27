@@ -62,6 +62,12 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
               <Link href="/dashboard/rentals" className={`text-sm font-medium ${pathname.startsWith('/dashboard/rentals') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
                 Noleggi
               </Link>
+              <Link href="/dashboard/clients" className={`text-sm font-medium ${pathname.startsWith('/dashboard/clients') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                Clienti
+              </Link>
+              <Link href="/dashboard/taxes" className={`text-sm font-medium ${pathname.startsWith('/dashboard/taxes') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                Tasse & Extra
+              </Link>
               {user.role === 'ADMIN' && (
                 <>
                   <Link href="/dashboard/reports" className={`text-sm font-medium ${pathname.startsWith('/dashboard/reports') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
@@ -71,7 +77,10 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
                     Assistenti
                   </Link>
                   <Link href="/dashboard/suppliers" className={`text-sm font-medium ${pathname.startsWith('/dashboard/suppliers') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
-                    Rifornitori
+                    Fornitori
+                  </Link>
+                  <Link href="/dashboard/agencies" className={`text-sm font-medium ${pathname.startsWith('/dashboard/agencies') ? 'text-blue-600' : 'text-gray-500 hover:text-gray-900'} transition-colors`}>
+                    Agenzie
                   </Link>
                 </>
               )}
@@ -188,7 +197,18 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
                       : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
                   }`}
                 >
-                  Rifornitori
+                  Fornitori
+                </Link>
+                <Link
+                  href="/dashboard/agencies"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  className={`block px-3 py-2 rounded-md text-base font-medium ${
+                    pathname.startsWith('/dashboard/agencies')
+                      ? 'bg-blue-50 text-blue-600'
+                      : 'text-gray-700 hover:bg-gray-50 hover:text-gray-900'
+                  }`}
+                >
+                  Agenzie
                 </Link>
               </>
             )}

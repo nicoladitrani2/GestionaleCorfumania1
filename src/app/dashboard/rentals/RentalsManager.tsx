@@ -9,9 +9,19 @@ interface RentalsManagerProps {
   currentUserId: string
   userRole: string
   currentUserSupplierName?: string
+  userAgencyId?: string
+  agencyDefaultCommission?: number
+  agencyCommissionType?: string
 }
 
-export function RentalsManager({ currentUserId, userRole, currentUserSupplierName }: RentalsManagerProps) {
+export function RentalsManager({ 
+  currentUserId, 
+  userRole, 
+  currentUserSupplierName, 
+  userAgencyId,
+  agencyDefaultCommission,
+  agencyCommissionType
+}: RentalsManagerProps) {
   const [isAdding, setIsAdding] = useState(false)
   const [editingParticipant, setEditingParticipant] = useState<any>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
@@ -59,7 +69,9 @@ export function RentalsManager({ currentUserId, userRole, currentUserSupplierNam
               initialData={editingParticipant}
               type="RENTAL"
               userRole={userRole}
-              defaultSupplier={currentUserSupplierName}
+              userAgencyId={userAgencyId}
+              agencyDefaultCommission={agencyDefaultCommission}
+              agencyCommissionType={agencyCommissionType}
             />
           </div>
         </div>

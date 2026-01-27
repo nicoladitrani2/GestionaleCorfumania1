@@ -3,6 +3,8 @@ import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: Request) {
   const session = await getSession()
   if (!session) {
@@ -15,6 +17,21 @@ export async function GET(request: Request) {
   const now = new Date()
   // Set to beginning of today
   now.setHours(0, 0, 0, 0)
+
+  let currentUserAgencyId: string | null = null
+  if (session.user.role !== 'ADMIN') {
+    try {
+      if (session.user.id) {
+        const user = await prisma.user.findUnique({
+          where: { id: session.user.id },
+          select: { agencyId: true }
+        })
+        currentUserAgencyId = user?.agencyId || null
+      }
+    } catch (e) {
+      console.error('Error fetching user agency:', e)
+    }
+  }
 
   // Check for expired transfers and update participants
   const expiredTransfers = await prisma.transfer.findMany({
@@ -55,6 +72,11 @@ export async function GET(request: Request) {
     where: whereClause,
     orderBy: { date: 'asc' },
     include: {
+      agencyCommissions: {
+        include: {
+          agency: true
+        }
+      },
       participants: {
         select: { 
           groupSize: true,
@@ -62,7 +84,8 @@ export async function GET(request: Request) {
           price: true,
           paymentType: true,
           isOption: true,
-          isExpired: true
+          isExpired: true,
+          approvalStatus: true
         }
       }
     }
@@ -79,11 +102,9 @@ export async function GET(request: Request) {
     let totalCollected = 0
 
     transfer.participants.forEach(p => {
-        // Skip expired for total count, but keep for history? 
-        // User wants separation. Let's count them based on status.
-        // Usually expired = deleted logic, but here we have isExpired flag.
-        // Assuming we count all relevant ones.
-        
+        // Exclude Rejected participants from everything
+        if (p.approvalStatus === 'REJECTED') return
+
         const size = p.groupSize || 1
         const dep = typeof p.deposit === 'number' ? p.deposit : Number(p.deposit)
         const pr = typeof p.price === 'number' ? p.price : Number(p.price)
@@ -96,6 +117,8 @@ export async function GET(request: Request) {
         } else {
             // Real payments
             if (!p.isExpired) activeParticipants += size
+            // Exclude expired from revenue? User said "rejected = no revenue".
+            // Logic for expired deposits is ambiguous, but for REJECTED we already returned above.
             totalCollected += (isNaN(dep) ? 0 : dep)
             
             if (p.paymentType === 'BALANCE' || (dep >= pr && pr > 0)) {
@@ -106,7 +129,7 @@ export async function GET(request: Request) {
         }
     })
 
-    const { participants, ...rest } = transfer
+    const { participants, agencyCommissions, ...rest } = transfer
     
     const result: any = {
       ...rest,
@@ -123,6 +146,13 @@ export async function GET(request: Request) {
 
     if (session.user.role === 'ADMIN') {
       result.totalCollected = totalCollected
+      result.commissions = agencyCommissions || []
+    } else {
+        if (currentUserAgencyId && Array.isArray(agencyCommissions)) {
+            result.commissions = agencyCommissions.filter((c: any) => c.agencyId === currentUserAgencyId)
+        } else {
+            result.commissions = []
+        }
     }
 
     return result
@@ -139,7 +169,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { name, date, supplier, pickupLocation, dropoffLocation, endDate } = body
+    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions } = body
 
     if (!name || !date || !supplier) {
         return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
@@ -191,7 +221,7 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate } = body
+    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
@@ -203,16 +233,31 @@ export async function PUT(request: Request) {
         }
     }
 
+    const updateData: any = {
+      name,
+      date: date ? new Date(date) : undefined,
+      endDate: endDate ? new Date(endDate) : undefined,
+      pickupLocation,
+      dropoffLocation,
+      returnPickupLocation,
+      supplier
+    }
+
+    if (commissions) {
+        updateData.agencyCommissions = {
+            deleteMany: {},
+            create: commissions
+              .map((c: any) => ({
+                agencyId: c.agencyId,
+                commissionPercentage: parseFloat(c.percentage)
+              }))
+              .filter((c: any) => !isNaN(c.commissionPercentage))
+        }
+    }
+
     const transfer = await prisma.transfer.update({
       where: { id },
-      data: {
-        name,
-        date: date ? new Date(date) : undefined,
-        endDate: endDate ? new Date(endDate) : undefined,
-        pickupLocation,
-        dropoffLocation,
-        supplier
-      }
+      data: updateData
     })
 
     // If date is updated to today or future, reactivate expired participants
@@ -264,6 +309,17 @@ export async function DELETE(request: Request) {
   try {
     const transfer = await prisma.transfer.findUnique({ where: { id } })
     if (transfer) {
+        // Check for participants
+        const participantCount = await prisma.participant.count({
+            where: { transferId: id }
+        })
+
+        if (participantCount > 0) {
+            return NextResponse.json({ 
+                error: 'Impossibile eliminare il trasferimento: sono presenti partecipanti (attivi, rimborsati o sospesi).' 
+            }, { status: 400 })
+        }
+
         await prisma.transfer.delete({ where: { id } })
         
         await createAuditLog(

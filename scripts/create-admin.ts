@@ -13,7 +13,8 @@ async function main() {
       where: { email },
       update: {
         password: hashedPassword, // Reset password if exists
-        role: 'ADMIN'
+        role: 'ADMIN',
+        code: 'ADMIN01'
       },
       create: {
         email,
@@ -21,6 +22,7 @@ async function main() {
         firstName: 'Arianna',
         lastName: 'Amministrazione',
         role: 'ADMIN',
+        code: 'ADMIN01'
       },
     })
     console.log(`User created/updated: ${user.email}`)

@@ -14,7 +14,7 @@ export async function GET() {
         role: true,
         code: true,
         createdAt: true,
-        supplier: {
+        agency: {
           select: {
             id: true,
             name: true
@@ -31,7 +31,7 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const body = await request.json()
-    const { email, password, firstName, lastName, role, code, supplierId } = body
+    const { email, password, firstName, lastName, role, code, agencyId } = body
 
     const existingUser = await prisma.user.findUnique({
       where: { email }
@@ -51,7 +51,7 @@ export async function POST(request: Request) {
         lastName,
         role: role || 'USER',
         code: code || undefined, // Let Prisma generate if undefined, or use provided
-        supplierId: supplierId || null,
+        agencyId: agencyId || null,
         mustChangePassword: true
       }
     })

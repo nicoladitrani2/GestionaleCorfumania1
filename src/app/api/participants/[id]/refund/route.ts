@@ -60,7 +60,9 @@ export async function POST(
     )
 
     // 3. Send Email if PDF is provided
-    if (participant.email && pdfAttachment) {
+    const hasAttachments = (pdfAttachmentIT && pdfAttachmentEN) || pdfAttachment
+
+    if (participant.email && hasAttachments) {
       try {
         const transporter = nodemailer.createTransport({
                 host: 'smtp.gmail.com',
@@ -75,18 +77,29 @@ export async function POST(
                 }
             })
 
+        const attachments = []
+        if (pdfAttachmentIT && pdfAttachmentEN) {
+             attachments.push({
+                    filename: `Rimborso_${participant.firstName}_${participant.lastName}_IT.pdf`,
+                    content: Buffer.from(pdfAttachmentIT, 'base64')
+             })
+             attachments.push({
+                    filename: `Refund_${participant.firstName}_${participant.lastName}_EN.pdf`,
+                    content: Buffer.from(pdfAttachmentEN, 'base64')
+             })
+        } else if (pdfAttachment) {
+             attachments.push({
+                    filename: `Rimborso_${participant.firstName}_${participant.lastName}.pdf`,
+                    content: Buffer.from(pdfAttachment, 'base64')
+             })
+        }
+
         await transporter.sendMail({
           from: `"Corfumania" <${process.env.EMAIL_USER}>`,
           to: participant.email,
           subject: 'Rimborso Effettuato - Corfumania',
-          text: `Gentile ${participant.firstName} ${participant.lastName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato.\n\nCordiali saluti,\nTeam Corfumania`,
-          attachments: [
-            {
-              filename: `Rimborso_${participant.firstName}_${participant.lastName}.pdf`,
-              content: pdfAttachment,
-              encoding: 'base64',
-            },
-          ],
+          text: `Gentile ${participant.firstName} ${participant.lastName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
+          attachments: attachments,
         })
         console.log('Email rimborso inviata a:', participant.email)
       } catch (emailError) {

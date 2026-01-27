@@ -1,4 +1,4 @@
-import { X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, Users, CheckCircle, AlertCircle, Clock, Info, UserCheck, FileDown, RotateCcw } from 'lucide-react'
+import { X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, Users, CheckCircle, AlertCircle, Clock, Info, UserCheck, FileDown, RotateCcw, Map as MapIcon } from 'lucide-react'
 import { generateParticipantPDF } from '@/lib/pdf-generator'
 
 interface ParticipantDetailsModalProps {

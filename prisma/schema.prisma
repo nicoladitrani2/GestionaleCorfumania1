@@ -1,6 +1,3 @@
-// This is your Prisma schema file,
-// learn more about it in the docs: https://pris.ly/d/prisma-schema
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -8,6 +5,18 @@ generator client {
 datasource db {
   provider = "postgresql"
   url      = env("DATABASE_URL")
+}
+
+model Agency {
+  id          String                      @id @default(cuid())
+  name        String                      @unique
+  createdAt   DateTime                    @default(now())
+  updatedAt   DateTime                    @updatedAt
+  defaultCommission Float                 @default(0)
+  commissionType    String                @default("PERCENTAGE") // PERCENTAGE or FIXED
+  commissions ExcursionAgencyCommission[]
+  transferCommissions TransferAgencyCommission[]
+  users       User[]
 }
 
 model User {
@@ -21,50 +30,69 @@ model User {
   mustChangePassword Boolean       @default(false)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
-  participants       Participant[]
+  agencyId           String?
   auditLogs          AuditLog[]
-  supplierId         String?
-  supplier           Supplier?     @relation(fields: [supplierId], references: [id])
+  participants       Participant[]
+  agency             Agency?       @relation(fields: [agencyId], references: [id])
 }
 
 model Excursion {
-  id                   String        @id @default(cuid())
+  id                   String                      @id @default(cuid())
   name                 String
   startDate            DateTime
   endDate              DateTime?
   confirmationDeadline DateTime?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
-  participants         Participant[]
+  createdAt            DateTime                    @default(now())
+  updatedAt            DateTime                    @updatedAt
+  priceAdult           Float                       @default(0)
+  priceChild           Float                       @default(0)
+  tax                  Float                       @default(0)
   auditLogs            AuditLog[]
-  commissions          ExcursionCommission[]
+  agencyCommissions    ExcursionAgencyCommission[]
+  participants         Participant[]
+  transferDepartureLocation String?
+  transferDestinationLocation String?
+  transferTime         String?
 }
 
-model ExcursionCommission {
+model ExcursionAgencyCommission {
   id                   String    @id @default(cuid())
   excursionId          String
-  supplierId           String
+  agencyId             String
   commissionPercentage Float     @default(0)
-  
+  commissionType       String    @default("PERCENTAGE") // PERCENTAGE or FIXED
+  agency               Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
   excursion            Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
-  supplier             Supplier  @relation(fields: [supplierId], references: [id], onDelete: Cascade)
 
-  @@unique([excursionId, supplierId])
+  @@unique([excursionId, agencyId])
 }
 
 model Transfer {
-  id              String   @id @default(cuid())
-  name            String
-  date            DateTime
-  endDate         DateTime?
-  pickupLocation  String?
-  dropoffLocation String?
+  id                   String        @id @default(cuid())
+  name                 String
+  date                 DateTime
+  endDate              DateTime?
+  pickupLocation       String?
+  dropoffLocation      String?
+  supplier             String
+  createdAt            DateTime      @default(now())
+  updatedAt            DateTime      @updatedAt
   returnPickupLocation String?
-  supplier        String
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-  participants    Participant[]
-  auditLogs       AuditLog[]
+  agencyCommissions    TransferAgencyCommission[]
+  auditLogs            AuditLog[]
+  participants         Participant[]
+}
+
+model TransferAgencyCommission {
+  id                   String    @id @default(cuid())
+  transferId           String
+  agencyId             String
+  commissionPercentage Float     @default(0)
+  commissionType       String    @default("PERCENTAGE") // PERCENTAGE or FIXED
+  agency               Agency    @relation(fields: [agencyId], references: [id], onDelete: Cascade)
+  transfer             Transfer  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, agencyId])
 }
 
 model ExcursionTemplate {
@@ -75,72 +103,97 @@ model ExcursionTemplate {
 }
 
 model AuditLog {
-  id          String    @id @default(cuid())
+  id          String     @id @default(cuid())
   action      String
   details     String
-  
-  user        User      @relation(fields: [userId], references: [id])
   userId      String
-
-  excursion   Excursion? @relation(fields: [excursionId], references: [id], onDelete: Cascade)
   excursionId String?
-
-  transfer    Transfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  createdAt   DateTime   @default(now())
   transferId  String?
-
-  createdAt   DateTime  @default(now())
+  excursion   Excursion? @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  transfer    Transfer?  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  user        User       @relation(fields: [userId], references: [id])
 }
 
 model Participant {
-  id            String    @id @default(cuid())
-  firstName     String
-  lastName      String
-  nationality   String?
-  dateOfBirth   DateTime?
-  docNumber     String?
-  docType       String?
-  phoneNumber   String?
-  email         String?
-  notes         String?
-  groupSize     Int       @default(1)
-  isOption      Boolean   @default(false)
-  supplier      String
-  paymentType   String
-  paymentMethod String // Kept for backward compatibility, will map to depositPaymentMethod
-  
-  depositPaymentMethod String?
+  id                   String     @id @default(cuid())
+  firstName            String
+  lastName             String
+  nationality          String?
+  dateOfBirth          DateTime?
+  docNumber            String?
+  docType              String?
+  phoneNumber          String?
+  email                String?
+  notes                String?
+  groupSize            Int        @default(1)
+  isOption             Boolean    @default(false)
+  supplier             String
+  paymentType          String
+  paymentMethod        String
+  price                Float      @default(0)
+  deposit              Float      @default(0)
+  isExpired            Boolean    @default(false)
+  createdById          String
+  excursionId          String?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
   balancePaymentMethod String?
-
-  price         Float     @default(0)
-  deposit       Float     @default(0)
-
-  isExpired     Boolean   @default(false)
-
-  // Transfer specific fields
-  pickupLocation       String?
+  depositPaymentMethod String?
   dropoffLocation      String?
+  pickupLocation       String?
   pickupTime           String?
-  returnPickupLocation String?
   returnDate           DateTime?
+  returnPickupLocation String?
+  returnDropoffLocation String?
   returnTime           String?
-
-  // Rental specific fields
-  isRental        Boolean   @default(false)
-  rentalType      String?   // CAR, MOTO, BOAT
-  rentalStartDate DateTime?
-  rentalEndDate   DateTime?
-
-  createdBy     User      @relation(fields: [createdById], references: [id])
-  createdById   String
+  transferId           String?
+  adults               Int        @default(1)
+  children             Int        @default(0)
+  isRental             Boolean    @default(false)
+  rentalEndDate        DateTime?
+  rentalStartDate      DateTime?
+  rentalType           String?
+  accommodation        String?
+  needsTransfer        Boolean    @default(false)
+  licenseType          String?
+  insurancePrice       Float      @default(0)
+  supplementPrice      Float      @default(0)
+  assistantCommission  Float      @default(0)
+  assistantCommissionType String  @default("PERCENTAGE") // PERCENTAGE or FIXED
+  agencyId             String?
+  commissionPercentage Float      @default(0)
+  tax                  Float      @default(0)
+  clientId             String?
   
-  excursion     Excursion? @relation(fields: [excursionId], references: [id], onDelete: Cascade)
-  excursionId   String?
+  // New fields for Approval Workflow
+  approvalStatus       String     @default("APPROVED") // APPROVED, PENDING, REJECTED
+  originalPrice        Float?     // Calculated price before discount
 
-  transfer      Transfer? @relation(fields: [transferId], references: [id], onDelete: Cascade)
-  transferId    String?
+  specialServiceType   String?    // BRACELET, CITY_TAX, AC
+  roomNumber           String?
 
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
+  createdBy            User       @relation(fields: [createdById], references: [id])
+  excursion            Excursion? @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+  transfer             Transfer?  @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  client               Client?    @relation(fields: [clientId], references: [id])
+}
+
+model Client {
+  id          String        @id @default(cuid())
+  firstName   String
+  lastName    String
+  email       String?       
+  phoneNumber String?
+  nationality String?
+  serviceType String?       // EXCURSION, TRANSFER, RENTAL
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  isManuallyContacted Boolean @default(false)
+  lastEmailSentAt     DateTime?
+  participants Participant[]
+  
+  @@unique([email])
 }
 
 model Supplier {
@@ -148,6 +201,4 @@ model Supplier {
   name      String   @unique
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  users     User[]
-  commissions ExcursionCommission[]
 }

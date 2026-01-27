@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from 'react'
 import { Plus, Edit, Trash2, Save, X, Briefcase, Search, AlertCircle } from 'lucide-react'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 
 interface Supplier {
   id: string
@@ -18,6 +20,30 @@ export default function SuppliersPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [formData, setFormData] = useState({ name: '' })
   const [error, setError] = useState('')
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant: 'danger' | 'warning' | 'info'
+    onConfirm: () => Promise<void>
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'danger',
+    onConfirm: async () => {}
+  })
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant: 'success' | 'error' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
   useEffect(() => {
     fetchSuppliers()
@@ -53,23 +79,45 @@ export default function SuppliersPage() {
     setError('')
   }
 
-  const handleDelete = async (id: string) => {
-    if (!confirm('Sei sicuro di voler eliminare questo fornitore?')) return
+  const handleDelete = (id: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'Elimina Fornitore',
+      message: 'Sei sicuro di voler eliminare questo fornitore?',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/suppliers?id=${id}`, {
+            method: 'DELETE'
+          })
 
-    try {
-      const res = await fetch(`/api/suppliers?id=${id}`, {
-        method: 'DELETE'
-      })
-
-      if (res.ok) {
-        fetchSuppliers()
-      } else {
-        const data = await res.json()
-        alert(data.error || 'Errore durante l\'eliminazione')
+          if (res.ok) {
+            fetchSuppliers()
+            setAlertModal({
+              isOpen: true,
+              title: 'Successo',
+              message: 'Fornitore eliminato con successo',
+              variant: 'success'
+            })
+          } else {
+            const data = await res.json()
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante l\'eliminazione',
+              variant: 'error'
+            })
+          }
+        } catch (e) {
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di rete',
+            variant: 'error'
+          })
+        }
       }
-    } catch (e) {
-      alert('Errore di rete')
-    }
+    })
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -109,9 +157,9 @@ export default function SuppliersPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <Briefcase className="w-8 h-8 text-blue-600" />
-            Gestione Rifornitori
+            Gestione Fornitori
           </h1>
-          <p className="text-gray-500 mt-1">Aggiungi, modifica o elimina i rifornitori per le escursioni</p>
+          <p className="text-gray-500 mt-1">Aggiungi, modifica o elimina i fornitori per le escursioni</p>
         </div>
         
         <button
@@ -119,7 +167,7 @@ export default function SuppliersPage() {
           className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 flex items-center gap-2 shadow-md transition-all transform hover:-translate-y-0.5"
         >
           <Plus className="w-5 h-5" />
-          Nuovo Rifornitore
+          Nuovo Fornitore
         </button>
       </div>
 
@@ -129,7 +177,7 @@ export default function SuppliersPage() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input 
               type="text"
-              placeholder="Cerca rifornitore..."
+              placeholder="Cerca fornitore..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-10 w-full border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
@@ -142,7 +190,7 @@ export default function SuppliersPage() {
         ) : filteredSuppliers.length === 0 ? (
           <div className="p-12 text-center flex flex-col items-center text-gray-500">
             <Briefcase className="w-12 h-12 text-gray-300 mb-3" />
-            <p>Nessun rifornitore trovato</p>
+            <p>Nessun fornitore trovato</p>
             {searchTerm && <button onClick={() => setSearchTerm('')} className="text-blue-600 mt-2 hover:underline">Rimuovi filtri</button>}
           </div>
         ) : (
@@ -195,7 +243,7 @@ export default function SuppliersPage() {
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
               <h3 className="text-xl font-bold text-white flex items-center gap-2">
                 {editingId ? <Edit className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
-                {editingId ? 'Modifica Rifornitore' : 'Nuovo Rifornitore'}
+                {editingId ? 'Modifica Fornitore' : 'Nuovo Fornitore'}
               </h3>
               <button 
                 onClick={() => setIsCreating(false)}
@@ -214,7 +262,7 @@ export default function SuppliersPage() {
               )}
               
               <div>
-                <label className="block text-sm font-bold text-gray-900 mb-1">Nome Rifornitore</label>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Nome Fornitore</label>
                 <input
                   type="text"
                   value={formData.name}
@@ -244,6 +292,23 @@ export default function SuppliersPage() {
           </div>
         </div>
       )}
+      
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
     </div>
   )
 }

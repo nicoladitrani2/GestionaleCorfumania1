@@ -5,6 +5,8 @@ import { Plus, Home } from 'lucide-react'
 import Link from 'next/link'
 import { UsersList } from './UsersList'
 import { UserForm } from './UserForm'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 
 export type User = {
   id: string
@@ -14,7 +16,7 @@ export type User = {
   role: string
   code: string
   createdAt: string
-  supplier?: {
+  agency?: {
     id: string
     name: string
   } | null
@@ -25,6 +27,30 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant: 'danger' | 'warning' | 'info'
+    onConfirm: () => Promise<void>
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'danger',
+    onConfirm: async () => {}
+  })
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant: 'success' | 'error' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
   useEffect(() => {
     fetchUsers()
@@ -121,6 +147,23 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
           onSubmit={handleFormSubmit} 
         />
       )}
+
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
     </div>
   )
 }

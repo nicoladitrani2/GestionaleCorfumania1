@@ -4,6 +4,8 @@ import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
 import nodemailer from 'nodemailer'
 
+export const dynamic = 'force-dynamic'
+
 export async function GET(request: Request) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
@@ -20,6 +22,66 @@ export async function GET(request: Request) {
   if (transferId) whereClause.transferId = transferId
   if (isRental) whereClause.isRental = true
 
+  // Auto-expire logic on fetch
+  const now = new Date()
+  if (excursionId) {
+      const excursion = await prisma.excursion.findUnique({
+          where: { id: excursionId },
+          select: { confirmationDeadline: true }
+      })
+      if (excursion?.confirmationDeadline && new Date(excursion.confirmationDeadline) < now) {
+          await prisma.participant.updateMany({
+              where: {
+                  excursionId,
+                  isExpired: false,
+                  OR: [{ isOption: true }, { paymentType: 'DEPOSIT' }]
+              },
+              data: { isExpired: true }
+          })
+      }
+  } else if (transferId) {
+      const transfer = await prisma.transfer.findUnique({
+          where: { id: transferId },
+          select: { date: true }
+      })
+      if (transfer) {
+          const transferDate = new Date(transfer.date)
+          transferDate.setHours(0,0,0,0)
+          const today = new Date()
+          today.setHours(0,0,0,0)
+          
+          if (transferDate < today) {
+              await prisma.participant.updateMany({
+                  where: {
+                      transferId,
+                      isExpired: false,
+                      OR: [{ isOption: true }, { paymentType: 'DEPOSIT' }]
+                  },
+                  data: { isExpired: true }
+              })
+          }
+      }
+  } else if (isRental) {
+      const today = new Date()
+      today.setHours(0, 0, 0, 0)
+      
+      // Update expired rentals (where rentalStartDate < today)
+      // Note: We can't easily filter by date in updateMany with relation/json fields in standard Prisma without raw query or iterating
+      // But for rentals, rentalStartDate is a field on Participant.
+      
+      await prisma.participant.updateMany({
+          where: {
+              isRental: true,
+              rentalStartDate: {
+                  lt: today
+              },
+              isExpired: false,
+              OR: [{ isOption: true }, { paymentType: 'DEPOSIT' }]
+          },
+          data: { isExpired: true }
+      })
+  }
+
   const participants = await prisma.participant.findMany({
     where: whereClause,
     orderBy: { createdAt: 'desc' },
@@ -30,9 +92,14 @@ export async function GET(request: Request) {
           lastName: true, 
           email: true, 
           code: true,
-          supplierId: true,
-          supplier: {
-            select: { name: true }
+          role: true,
+          agencyId: true,
+          agency: {
+            select: { 
+              name: true,
+              defaultCommission: true,
+              commissionType: true
+            }
           }
         } 
       } 
@@ -74,24 +141,65 @@ export async function POST(request: Request) {
       excursionId, transferId, firstName, lastName, nationality, dateOfBirth, 
       docNumber, docType, phoneNumber, email, notes, supplier, isOption,
       paymentType, paymentMethod, depositPaymentMethod, balancePaymentMethod,
-      groupSize, price, deposit, pdfAttachment,
+      groupSize, price, deposit, tax, commissionPercentage, pdfAttachment, pdfAttachmentIT, pdfAttachmentEN,
       pickupLocation, dropoffLocation, pickupTime, returnPickupLocation, returnDate, returnTime,
-      isRental, rentalType, rentalStartDate, rentalEndDate
+      isRental, rentalType, rentalStartDate, rentalEndDate, accommodation,
+      adults, children, needsTransfer,
+      licenseType, insurancePrice, supplementPrice, assistantCommission, assistantCommissionType
     } = body
 
     // Check expiration logic
     let isExpired = false
+    let approvalStatus = 'APPROVED'
+    let originalPrice: number | null = null
+
     if (excursionId) {
         const excursion = await prisma.excursion.findUnique({
           where: { id: excursionId },
-          select: { confirmationDeadline: true }
+          select: { confirmationDeadline: true, priceAdult: true, priceChild: true }
         })
 
-        if (excursion?.confirmationDeadline) {
-          const now = new Date()
-          const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
-          if (isDeadlinePassed && (isOption || paymentType === 'DEPOSIT')) {
-            isExpired = true
+        if (excursion) {
+          // Expiration Logic
+          if (excursion.confirmationDeadline) {
+            const now = new Date()
+            const isDeadlinePassed = new Date(excursion.confirmationDeadline) < now
+            if (isDeadlinePassed && (isOption || paymentType === 'DEPOSIT')) {
+              isExpired = true
+            }
+          }
+
+          // Approval/Draft Logic
+          // Only applies to Excursions for now as requested
+          const calculatedPrice = (parseInt(adults || '0') * (excursion.priceAdult || 0)) + 
+                                  (parseInt(children || '0') * (excursion.priceChild || 0))
+          
+          // Use provided price or 0
+          const currentPrice = parseFloat(String(price)) || 0
+
+          // Check if user is Admin
+          // session.user usually has role if using standard auth, otherwise fetch
+          const user = await prisma.user.findUnique({ 
+              where: { id: session.user.id },
+              select: { role: true } 
+          })
+          
+          const isAdmin = user?.role === 'ADMIN'
+
+          console.log(`[DEBUG_APPROVAL] User: ${session.user.email}, Role: ${user?.role}, CalcPrice: ${calculatedPrice}, CurrPrice: ${currentPrice}`)
+
+          // Validation: Price cannot be higher than calculated for non-admins
+          // Allow a small margin of error for floating point, or strict check
+          if (!isAdmin && currentPrice > calculatedPrice + 0.01) {
+             return NextResponse.json({ error: 'Il prezzo non può essere superiore al prezzo di listino.' }, { status: 400 })
+          }
+
+          // If not Admin and price is lower than calculated (discount)
+          // We use a small tolerance for float comparison if needed, but < is fine
+          if (!isAdmin && currentPrice < calculatedPrice - 0.01) {
+              approvalStatus = 'PENDING'
+              originalPrice = calculatedPrice
+              console.log(`[DEBUG_APPROVAL] Status set to PENDING. Original: ${originalPrice}`)
           }
         }
     } else if (transferId) {
@@ -118,6 +226,61 @@ export async function POST(request: Request) {
         if (isRentalPassed && (isOption || paymentType === 'DEPOSIT')) {
             isExpired = true
         }
+    }
+
+    // Client Management Logic
+    let clientId: string | undefined
+    let serviceType = 'EXCURSION'
+    if (transferId) serviceType = 'TRANSFER'
+    if (isRental) serviceType = 'RENTAL'
+
+    if (email) {
+      // Try to find existing client by email
+      const existingClient = await prisma.client.findUnique({
+        where: { email }
+      })
+      
+      if (existingClient) {
+        clientId = existingClient.id
+        // Update client details if needed (optional, keeping latest info)
+        await prisma.client.update({
+          where: { id: existingClient.id },
+          data: {
+            firstName,
+            lastName,
+            phoneNumber: phoneNumber || existingClient.phoneNumber,
+            nationality: nationality || existingClient.nationality,
+            serviceType
+          }
+        })
+      } else {
+        // Create new client with email
+        const newClient = await prisma.client.create({
+          data: {
+            firstName,
+            lastName,
+            email,
+            phoneNumber,
+            nationality,
+            serviceType
+          }
+        })
+        clientId = newClient.id
+      }
+    } else {
+      // No email provided, create a new client entry
+      // We don't check for duplicates by name/phone to avoid false positives
+      const newClient = await prisma.client.create({
+        data: {
+          firstName,
+          lastName,
+          email: null,
+          phoneNumber,
+          nationality,
+          serviceType
+        }
+      })
+      clientId = newClient.id
     }
 
     const participant = await prisma.participant.create({
@@ -153,12 +316,28 @@ export async function POST(request: Request) {
         rentalType,
         rentalStartDate: rentalStartDate ? new Date(rentalStartDate) : null,
         rentalEndDate: rentalEndDate ? new Date(rentalEndDate) : null,
+        accommodation,
+        needsTransfer: !!needsTransfer,
+
+        licenseType: licenseType || null,
+        insurancePrice: insurancePrice || 0,
+        supplementPrice: supplementPrice || 0,
+        assistantCommission: assistantCommission || 0,
+        assistantCommissionType: assistantCommissionType || 'PERCENTAGE',
 
         groupSize: parseInt(groupSize) || 1,
+        adults: parseInt(adults) || 1,
+        children: parseInt(children) || 0,
         price: price || 0,
         deposit: deposit || 0,
+        tax: tax || 0,
+        commissionPercentage: commissionPercentage || 0,
         isExpired,
-        createdById: session.user.id
+        approvalStatus,
+        originalPrice,
+        createdById: session.user.id,
+        agencyId: session.user.agencyId || null,
+        clientId // Link to client
       }
     })
 
@@ -176,8 +355,11 @@ export async function POST(request: Request) {
             methodLabel += `, Saldo: ${paymentMethodMap[balancePaymentMethod] || balancePaymentMethod}`
         }
     }
+    
+    // Ensure finalGroupSize is defined
+    const finalGroupSize = groupSize || (parseInt(adults || '1') + parseInt(children || '0'));
 
-    const details = `Aggiunto partecipante ${firstName} ${lastName} (Gruppo: ${groupSize}, Prezzo: €${price}, Acconto: €${deposit}, Metodo: ${methodLabel})`
+    const details = `Aggiunto partecipante ${firstName} ${lastName} (Adulti: ${adults || 1}, Bambini: ${children || 0}, Totale: ${finalGroupSize}, Prezzo: €${price}, Acconto: €${deposit}, Metodo: ${methodLabel})`
 
     await createAuditLog(
       session.user.id,
@@ -188,7 +370,9 @@ export async function POST(request: Request) {
     )
 
     // Send Email if email and PDF are provided
-    if (email && pdfAttachment) {
+    const hasAttachments = (pdfAttachmentIT && pdfAttachmentEN) || pdfAttachment
+
+    if (email && hasAttachments) {
       console.log('Tentativo invio email a:', email);
       console.log('Configurazione email user:', process.env.EMAIL_USER ? 'Presente' : 'Mancante');
       
@@ -219,17 +403,29 @@ export async function POST(request: Request) {
             });
         });
 
+        const attachments = []
+        if (pdfAttachmentIT && pdfAttachmentEN) {
+             attachments.push({
+                    filename: `Riepilogo_${firstName}_${lastName}_IT.pdf`,
+                    content: Buffer.from(pdfAttachmentIT, 'base64')
+             })
+             attachments.push({
+                    filename: `Summary_${firstName}_${lastName}_EN.pdf`,
+                    content: Buffer.from(pdfAttachmentEN, 'base64')
+             })
+        } else if (pdfAttachment) {
+             attachments.push({
+                    filename: `Riepilogo_${firstName}_${lastName}.pdf`,
+                    content: Buffer.from(pdfAttachment, 'base64')
+             })
+        }
+
         const info = await transporter.sendMail({
             from: `"Corfumania" <${process.env.EMAIL_USER}>`,
             to: email,
             subject: 'Conferma Prenotazione - Corfumania',
-            text: `Gentile ${firstName} ${lastName},\n\nIn allegato trovi il riepilogo della tua prenotazione.\n\nCordiali saluti,\nTeam Corfumania`,
-            attachments: [
-                {
-                    filename: `Riepilogo_${firstName}_${lastName}.pdf`,
-                    content: Buffer.from(pdfAttachment, 'base64')
-                }
-            ]
+            text: `Gentile ${firstName} ${lastName},\n\nIn allegato trovi il riepilogo della tua prenotazione (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
+            attachments: attachments
         });
 
         console.log('Email inviata con successo:', info.messageId);

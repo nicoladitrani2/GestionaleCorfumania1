@@ -8,13 +8,17 @@ import { generateParticipantPDF } from '@/lib/pdf-generator'
 import { ParticipantDetailsModal } from '../excursions/ParticipantDetailsModal'
 import { RefundModal } from '../excursions/RefundModal'
 import { DeleteChoiceModal } from '../excursions/DeleteChoiceModal'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 
 // --- Helpers ---
 
 const getStatusColor = (p: any) => {
   if (p.paymentType === 'REFUNDED') return 'bg-gray-100 text-gray-500 border-gray-200'
   if (p.isOption) return 'bg-red-50 text-red-700 border-red-100'
-  if (p.paymentType === 'DEPOSIT') return 'bg-orange-50 text-orange-700 border-orange-100'
+  // Only show Deposit style if it's a CAR rental or standard participant, otherwise (Moto/Boat) show Confirmed style
+  if (p.paymentType === 'DEPOSIT' && p.rentalType === 'CAR') return 'bg-orange-50 text-orange-700 border-orange-100'
+  if (p.paymentType === 'DEPOSIT' && p.rentalType !== 'CAR') return 'bg-green-50 text-green-700 border-green-100'
   if (p.paymentType === 'BALANCE') return 'bg-green-50 text-green-700 border-green-100'
   return 'bg-gray-50 text-gray-700 border-gray-100'
 }
@@ -22,7 +26,8 @@ const getStatusColor = (p: any) => {
 const getStatusIcon = (p: any) => {
   if (p.paymentType === 'REFUNDED') return <RotateCcw className="w-3 h-3 mr-1" />
   if (p.isOption) return <Clock className="w-3 h-3 mr-1" />
-  if (p.paymentType === 'DEPOSIT') return <AlertCircle className="w-3 h-3 mr-1" />
+  if (p.paymentType === 'DEPOSIT' && p.rentalType === 'CAR') return <AlertCircle className="w-3 h-3 mr-1" />
+  if (p.paymentType === 'DEPOSIT' && p.rentalType !== 'CAR') return <CheckCircle className="w-3 h-3 mr-1" />
   if (p.paymentType === 'BALANCE') return <CheckCircle className="w-3 h-3 mr-1" />
   return null
 }
@@ -30,7 +35,9 @@ const getStatusIcon = (p: any) => {
 const getStatusText = (p: any) => {
   if (p.paymentType === 'REFUNDED') return 'Rimborsato'
   if (p.isOption) return 'Non pagato'
-  if (p.paymentType === 'DEPOSIT') return 'Acconto'
+  // Explicit check for CAR. If rentalType is undefined/null (legacy) or not CAR, show Confermato
+  if (p.paymentType === 'DEPOSIT' && p.rentalType === 'CAR') return 'Acconto'
+  if (p.paymentType === 'DEPOSIT') return 'Confermato' // Fallback for non-CAR rentals
   if (p.paymentType === 'BALANCE') return 'Confermato'
   return 'N/A'
 }
@@ -38,7 +45,9 @@ const getStatusText = (p: any) => {
 const getRowBackground = (p: any) => {
   if (p.paymentType === 'REFUNDED') return 'bg-gray-50/50 hover:bg-gray-100/50 opacity-75'
   if (p.isOption) return 'bg-red-50/50 hover:bg-red-100/50'
-  if (p.paymentType === 'DEPOSIT') return 'bg-orange-50/50 hover:bg-orange-100/50'
+  // Only show orange for CAR deposits
+  if (p.paymentType === 'DEPOSIT' && p.rentalType === 'CAR') return 'bg-orange-50/50 hover:bg-orange-100/50'
+  if (p.paymentType === 'DEPOSIT') return 'bg-green-50/50 hover:bg-green-100/50' // Green for other rentals
   if (p.paymentType === 'BALANCE') return 'bg-green-50/50 hover:bg-green-100/50'
   return 'hover:bg-gray-50'
 }
@@ -46,6 +55,26 @@ const getRowBackground = (p: any) => {
 const formatDate = (dateString: string) => {
   if (!dateString) return '-'
   return new Date(dateString).toLocaleDateString('it-IT')
+}
+
+const getCommissionDisplay = (p: any) => {
+  let val = p.commissionPercentage
+  let type = p.createdBy?.agency?.commissionType || 'PERCENTAGE'
+  
+  // If stored value is 0, try to infer from context
+  if (!val || val === 0) {
+    if (p.createdBy?.agency) {
+      val = p.createdBy.agency.defaultCommission
+    } else if (p.createdBy?.role === 'ADMIN') {
+      val = 1
+      type = 'FIXED'
+    }
+  }
+  
+  if (val > 0) {
+    return { val, type }
+  }
+  return null
 }
 
 const thClassName = "px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
@@ -117,13 +146,14 @@ const RentalsTable = ({
         </thead>
         <tbody className="bg-white divide-y divide-gray-100">
           {data.map((p) => {
-            const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
-            
-            return (
-              <tr 
-                key={p.id} 
-                className={`transition-colors border-b border-gray-100 last:border-0 ${getRowBackground(p)}`}
-              >
+        const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
+        const isManaged = p.rentalType === 'CAR'
+        
+        return (
+          <tr 
+            key={p.id} 
+            className={`transition-colors border-b border-gray-100 last:border-0 ${getRowBackground(p)}`}
+          >
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                   <div className="flex flex-col">
                     <span>{p.firstName} {p.lastName}</span>
@@ -155,7 +185,24 @@ const RentalsTable = ({
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">
                     <div className="flex flex-col">
                         <span>€ {p.price?.toFixed(2) || '0.00'}</span>
-                        <span className="text-xs text-gray-400">Acc: € {p.deposit?.toFixed(2) || '0.00'}</span>
+                        {p.rentalType === 'CAR' && (
+                          <span className="text-xs text-gray-400">Acc: € {p.deposit?.toFixed(2) || '0.00'}</span>
+                        )}
+                        {p.tax > 0 && (
+                            <span className="text-xs text-red-500">Tasse: € {p.tax.toFixed(2)}</span>
+                        )}
+                        {(() => {
+                          const comm = getCommissionDisplay(p)
+                          if (comm) {
+                            return (
+                              <span className="text-xs text-blue-500">
+                                Comm: {comm.val}
+                                {comm.type === 'FIXED' ? '€' : '%'}
+                              </span>
+                            )
+                          }
+                          return null
+                        })()}
                     </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
@@ -176,7 +223,7 @@ const RentalsTable = ({
 
                     {canEdit && (
                       <>
-                        {(p.paymentType === 'DEPOSIT' || p.isOption) && (
+                        {isManaged && (p.paymentType === 'DEPOSIT' || p.isOption) && (
                           <button
                             onClick={() => onSettleBalance(p)}
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md transition-colors border border-green-200"
@@ -185,7 +232,7 @@ const RentalsTable = ({
                             <Euro className="w-3.5 h-3.5" />
                           </button>
                         )}
-                        {p.deposit > 0 && (
+                        {isManaged && p.deposit > 0 && (
                           <button
                             onClick={() => onRefund(p)}
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-md transition-colors border border-orange-200"
@@ -236,6 +283,7 @@ const RentalsTable = ({
     <div className="md:hidden divide-y divide-gray-100">
       {data.map((p) => {
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
+        const isManaged = p.rentalType === 'CAR'
         
         return (
           <div 
@@ -275,10 +323,12 @@ const RentalsTable = ({
                      <span className="text-xs text-gray-400">Prezzo</span>
                      <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
                   </div>
-                  <div className="flex flex-col">
-                     <span className="text-xs text-gray-400">Acconto</span>
-                     <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
-                  </div>
+                  {p.rentalType === 'CAR' && (
+                    <div className="flex flex-col">
+                       <span className="text-xs text-gray-400">Acconto</span>
+                       <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
+                    </div>
+                  )}
                </div>
                
                <div className="flex gap-2">
@@ -291,7 +341,7 @@ const RentalsTable = ({
                   </button>
                   {canEdit && (
                       <>
-                           {(p.paymentType === 'DEPOSIT' || p.isOption) && (
+                           {isManaged && (p.paymentType === 'DEPOSIT' || p.isOption) && (
                               <button
                                 onClick={() => onSettleBalance(p)}
                                 className="p-2 text-green-700 bg-green-50 rounded-lg border border-green-200"
@@ -300,7 +350,7 @@ const RentalsTable = ({
                                 <Euro className="w-4 h-4" />
                               </button>
                             )}
-                            {p.deposit > 0 && (
+                            {isManaged && p.deposit > 0 && (
                               <button
                                 onClick={() => onRefund(p)}
                                 className="p-2 text-orange-700 bg-orange-50 rounded-lg border border-orange-200"
@@ -368,6 +418,31 @@ export function RentalsList({
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
   const [showDeleteChoice, setShowDeleteChoice] = useState(false)
   const [participantToDelete, setParticipantToDelete] = useState<any>(null)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'warning' | 'info'
+    onConfirm: () => void
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    variant: 'danger'
+  })
+
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'success' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
   const fetchParticipants = async () => {
     try {
@@ -397,6 +472,16 @@ export function RentalsList({
   useEffect(() => {
     fetchParticipants()
   }, [refreshTrigger])
+
+  if (loading) return (
+    <div className="flex justify-center items-center py-12">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+  )
+
+  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED')
+  const expiredParticipants = participants.filter(p => p.isExpired && p.paymentType !== 'REFUNDED')
+  const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
 
   const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
@@ -454,49 +539,76 @@ export function RentalsList({
     }
   }
 
-  const handleSettleBalance = async (p: any) => {
+  const handleSettleBalance = (p: any) => {
     const remainingAmount = (p.price || 0) - (p.deposit || 0)
-    if (!confirm(`Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`)) return
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Conferma Saldo',
+      message: `Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`,
+      variant: 'info',
+      onConfirm: async () => {
+        try {
+          // Generate updated PDF
+          const updatedParticipant = {
+            ...p,
+            paymentType: 'BALANCE',
+            deposit: p.price,
+            isOption: false
+          }
 
-    try {
-      // Generate updated PDF
-      const updatedParticipant = {
-        ...p,
-        paymentType: 'BALANCE',
-        deposit: p.price,
-        isOption: false
+          const eventData = {
+            type: 'RENTAL',
+            name: `Noleggio ${p.rentalType}`,
+            date: p.rentalStartDate,
+            pickupLocation: p.pickupLocation,
+            dropoffLocation: p.dropoffLocation
+          }
+
+          const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+          const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+
+          const res = await fetch(`/api/participants/${p.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...p,
+              paymentType: 'BALANCE',
+              deposit: p.price, // Set deposit to full price as it's fully paid
+              isOption: false,
+              pdfAttachment: pdfBase64
+            })
+          })
+
+          if (res.ok) {
+            fetchParticipants()
+            if (onUpdate) onUpdate()
+            setAlertModal({
+              isOpen: true,
+              title: 'Successo',
+              message: 'Saldo registrato con successo',
+              variant: 'success'
+            })
+          } else {
+             const data = await res.json()
+             setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante la registrazione del saldo',
+              variant: 'error'
+            })
+          }
+        } catch (error) {
+          console.error('Error settling balance:', error)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'error'
+          })
+        }
       }
-
-      const eventData = {
-        type: 'RENTAL',
-        name: `Noleggio ${p.rentalType}`,
-        date: p.rentalStartDate,
-        pickupLocation: p.pickupLocation,
-        dropoffLocation: p.dropoffLocation
-      }
-
-      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
-      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
-
-      const res = await fetch(`/api/participants/${p.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...p,
-          paymentType: 'BALANCE',
-          deposit: p.price, // Set deposit to full price as it's fully paid
-          isOption: false,
-          pdfAttachment: pdfBase64
-        })
-      })
-
-      if (res.ok) {
-        fetchParticipants()
-        if (onUpdate) onUpdate()
-      }
-    } catch (error) {
-      console.error('Error settling balance:', error)
-    }
+    })
   }
 
   const handleRefund = async (amount: number) => {
@@ -516,8 +628,13 @@ export function RentalsList({
         date: participantToRefund.rentalStartDate
       }
 
-      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
-      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
+      const pdfBlobIT = docIT.output('blob')
+      const pdfBase64IT = await blobToBase64(pdfBlobIT)
+
+      const docEN = generateParticipantPDF(updatedParticipant, eventData as any, 'en')
+      const pdfBlobEN = docEN.output('blob')
+      const pdfBase64EN = await blobToBase64(pdfBlobEN)
 
       const res = await fetch(`/api/participants/${participantToRefund.id}`, {
         method: 'PUT',
@@ -526,7 +643,8 @@ export function RentalsList({
           ...participantToRefund,
           paymentType: 'REFUNDED',
           notes: `${participantToRefund.notes || ''}\n[RIMBORSO] Effettuato rimborso di €${amount.toFixed(2)} il ${new Date().toLocaleDateString('it-IT')}`,
-          pdfAttachment: pdfBase64
+          pdfAttachmentIT: pdfBase64IT,
+          pdfAttachmentEN: pdfBase64EN
         })
       })
 
@@ -542,24 +660,104 @@ export function RentalsList({
   }
 
   return (
-    <div className="space-y-6">
-      <RentalsTable 
-        data={participants}
-        emptyMessage={loading ? "Caricamento noleggi..." : "Nessun noleggio trovato"}
-        userRole={userRole}
-        currentUserId={currentUserId}
-        onEdit={onEdit}
-        onDelete={handleDelete}
-        onSettleBalance={handleSettleBalance}
-        onShowDetails={(p) => {
-          setSelectedParticipant(p)
-          setShowDetails(true)
-        }}
-        onRefund={(p) => {
-          setParticipantToRefund(p)
-          setShowRefund(true)
-        }}
-      />
+    <div className="space-y-8">
+      {/* Active Rentals */}
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1">
+          <div className="flex items-center gap-2">
+            <CheckCircle className="w-5 h-5 text-green-600" />
+            <h3 className="text-lg font-bold text-gray-800">Noleggi Attivi</h3>
+            <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-green-200">
+              {activeParticipants.length}
+            </span>
+          </div>
+        </div>
+        <RentalsTable 
+          data={activeParticipants}
+          emptyMessage="Nessun noleggio attivo"
+          userRole={userRole}
+          currentUserId={currentUserId}
+          onEdit={onEdit}
+          onDelete={handleDelete}
+          onSettleBalance={handleSettleBalance}
+          onShowDetails={(p) => {
+            setSelectedParticipant(p)
+            setShowDetails(true)
+          }}
+          onRefund={(p) => {
+            setParticipantToRefund(p)
+            setShowRefund(true)
+          }}
+        />
+      </div>
+
+      {/* Expired Rentals */}
+      {expiredParticipants.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <Clock className="w-5 h-5 text-red-600" />
+              <h3 className="text-lg font-bold text-gray-800">Noleggi Scaduti / Completati</h3>
+              <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
+                {expiredParticipants.length}
+              </span>
+            </div>
+          </div>
+          <div className="opacity-75 hover:opacity-100 transition-opacity">
+            <RentalsTable 
+              data={expiredParticipants}
+              emptyMessage="Nessun noleggio scaduto"
+              userRole={userRole}
+              currentUserId={currentUserId}
+              onEdit={onEdit}
+              onDelete={handleDelete}
+              onSettleBalance={handleSettleBalance}
+              onShowDetails={(p) => {
+                setSelectedParticipant(p)
+                setShowDetails(true)
+              }}
+              onRefund={(p) => {
+                setParticipantToRefund(p)
+                setShowRefund(true)
+              }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Refunded Rentals */}
+      {refundedParticipants.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <RotateCcw className="w-5 h-5 text-gray-600" />
+              <h3 className="text-lg font-bold text-gray-800">Noleggi Rimborsati</h3>
+              <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-gray-200">
+                {refundedParticipants.length}
+              </span>
+            </div>
+          </div>
+          <div className="opacity-75 hover:opacity-100 transition-opacity">
+            <RentalsTable 
+              data={refundedParticipants}
+              emptyMessage="Nessun noleggio rimborsato"
+              userRole={userRole}
+              currentUserId={currentUserId}
+              onEdit={onEdit}
+              onDelete={handleDelete}
+              onSettleBalance={handleSettleBalance}
+              onShowDetails={(p) => {
+                setSelectedParticipant(p)
+                setShowDetails(true)
+              }}
+              onRefund={(p) => {
+                setParticipantToRefund(p)
+                setShowRefund(true)
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       <ParticipantDetailsModal 
         isOpen={showDetails}
@@ -591,6 +789,23 @@ export function RentalsList({
         onDelete={executeDelete}
         onRefund={handleRequestRefund}
         participant={participantToDelete}
+      />
+
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
       />
     </div>
   )

@@ -34,7 +34,7 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
   }, [excursion.id])
 
   const leaderboardStats = useMemo(() => {
-    if (!participants.length || !excursion?.commissions) return []
+    if (!participants.length) return []
 
     const statsMap = new Map()
 
@@ -49,8 +49,8 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
         statsMap.set(userId, {
           userId,
           userName: `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.trim() || p.createdBy?.email || 'Sconosciuto',
-          supplierName: p.createdBy?.supplier?.name || '-',
-          supplierId: p.createdBy?.supplierId,
+          agencyName: p.createdBy?.agency?.name || '-',
+          agencyId: p.createdBy?.agencyId,
           totalSales: 0,
           totalCommission: 0,
           count: 0
@@ -68,12 +68,32 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
       stats.totalSales += amountPaid
       stats.count += 1
 
-      // Calculate commission
-      if (stats.supplierId) {
-        const commConfig = excursion.commissions.find((c: any) => c.supplierId === stats.supplierId)
-        if (commConfig) {
-           stats.totalCommission += amountPaid * (commConfig.commissionPercentage / 100)
-        }
+      // Calculate commission logic
+      const agency = p.createdBy?.agency
+      const agencyId = p.createdBy?.agencyId
+
+      if (agencyId) {
+          let ruleType = agency?.commissionType || 'PERCENTAGE'
+          let ruleValue = agency?.defaultCommission || 0
+
+          // Check override
+          if (excursion?.commissions) {
+             const commConfig = excursion.commissions.find((c: any) => c.agencyId === agencyId)
+             if (commConfig) {
+                 ruleValue = commConfig.commissionPercentage
+                 ruleType = commConfig.commissionType || ruleType
+             }
+          }
+
+          if (ruleType === 'FIXED') {
+              const adults = (p.adults || 0)
+              const children = (p.children || 0)
+              const count = (adults + children) > 0 ? (adults + children) : (p.groupSize || 1)
+              stats.totalCommission += count * ruleValue
+          } else {
+              // PERCENTAGE
+              stats.totalCommission += amountPaid * (ruleValue / 100)
+          }
       }
     })
 
@@ -118,7 +138,7 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
                     Assistente
                   </th>
                   <th className="px-6 py-4 text-left text-xs font-semibold text-amber-800 uppercase tracking-wider">
-                    Fornitore
+                    Agenzia
                   </th>
                   <th className="px-6 py-4 text-right text-xs font-semibold text-amber-800 uppercase tracking-wider">
                     Vendite Totali
@@ -156,7 +176,7 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex items-center gap-2 text-gray-600">
                         <Store className="w-4 h-4 text-gray-400" />
-                        {stat.supplierName}
+                        {stat.agencyName}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-right">

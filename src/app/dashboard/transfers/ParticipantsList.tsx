@@ -4,9 +4,13 @@ import { useState, useEffect } from 'react'
 import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Map as MapIcon } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { generateParticipantPDF } from '@/lib/pdf-generator'
+import { generateParticipantPDF, generateParticipantsListPDF } from '@/lib/pdf-generator'
 import { ParticipantDetailsModal } from '../excursions/ParticipantDetailsModal'
 import { RefundModal } from '../excursions/RefundModal'
+import { DeleteChoiceModal } from '../excursions/DeleteChoiceModal'
+import { ExportParticipantsModal } from '../excursions/ExportParticipantsModal'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 
 interface ParticipantsListProps {
   onEdit: (participant: any) => void
@@ -23,17 +27,47 @@ export function ParticipantsList({
   refreshTrigger, 
   currentUserId, 
   userRole, 
-  transfer
-}: ParticipantsListProps) {
-  const transferId = transfer.id
-  const transferName = transfer.name
-  const transferDate = transfer.date
+  eventId,
+  eventType,
+  transferName,
+  transferDate
+}: any) {
+  const transferId = eventId
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
   const [showDetails, setShowDetails] = useState(false)
   const [showRefund, setShowRefund] = useState(false)
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
+  const [showDeleteChoice, setShowDeleteChoice] = useState(false)
+  const [participantToDelete, setParticipantToDelete] = useState<any>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [listToExport, setListToExport] = useState<any[] | null>(null)
+  const [exportFilename, setExportFilename] = useState('')
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant: 'danger' | 'warning' | 'info'
+    onConfirm: () => Promise<void>
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'danger',
+    onConfirm: async () => {}
+  })
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant: 'success' | 'error' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
   const fetchParticipants = async () => {
     try {
@@ -62,19 +96,75 @@ export function ParticipantsList({
     fetchParticipants()
   }, [transferId, refreshTrigger])
 
-  const handleDelete = async (id: string) => {
+  const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
-    if (!confirm('Sei sicuro di voler eliminare questo partecipante?')) return
+    if (p) {
+      setParticipantToDelete(p)
+      setShowDeleteChoice(true)
+    }
+  }
+
+  const executeDelete = async () => {
+    if (!participantToDelete) return
 
     try {
       // Generate PDF for cancellation email
       let pdfBase64 = undefined
-      if (p && p.email) {
+      if (participantToDelete.email) {
           const updatedParticipant = {
-            ...p,
+            ...participantToDelete,
             paymentType: 'CANCELLED',
             isOption: false
           }
+          const eventData = {
+            type: 'TRANSFER',
+            name: transferName,
+            date: transferDate,
+            pickupLocation: participantToDelete.pickupLocation,
+            dropoffLocation: participantToDelete.dropoffLocation,
+            pickupTime: participantToDelete.pickupTime,
+            returnDate: participantToDelete.returnDate,
+            returnTime: participantToDelete.returnTime,
+            returnPickupLocation: participantToDelete.returnPickupLocation
+          }
+          const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+          pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      }
+
+      const res = await fetch(`/api/participants/${participantToDelete.id}`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pdfAttachment: pdfBase64 })
+      })
+      if (res.ok) {
+        setShowDeleteChoice(false)
+        setParticipantToDelete(null)
+        fetchParticipants()
+        if (onUpdate) onUpdate()
+      }
+    } catch (error) {
+      console.error('Error deleting participant:', error)
+    }
+  }
+
+  const handleSettleBalance = (p: any) => {
+    const remainingAmount = (p.price || 0) - (p.deposit || 0)
+    
+    setConfirmModal({
+      isOpen: true,
+      title: 'Conferma Saldo',
+      message: `Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`,
+      variant: 'info',
+      onConfirm: async () => {
+        try {
+          // Generate updated PDF
+          const updatedParticipant = {
+            ...p,
+            paymentType: 'BALANCE',
+            deposit: p.price,
+            isOption: false
+          }
+
           const eventData = {
             type: 'TRANSFER',
             name: transferName,
@@ -86,71 +176,51 @@ export function ParticipantsList({
             returnTime: p.returnTime,
             returnPickupLocation: p.returnPickupLocation
           }
+
           const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
-          pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+          const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+
+          const res = await fetch(`/api/participants/${p.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...p,
+              paymentType: 'BALANCE',
+              deposit: p.price, // Set deposit to full price as it's fully paid
+              isOption: false,
+              pdfAttachment: pdfBase64
+            })
+          })
+
+          if (res.ok) {
+            fetchParticipants()
+            if (onUpdate) onUpdate()
+            setAlertModal({
+              isOpen: true,
+              title: 'Successo',
+              message: 'Saldo registrato con successo',
+              variant: 'success'
+            })
+          } else {
+             const data = await res.json()
+             setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: data.error || 'Errore durante la registrazione del saldo',
+              variant: 'error'
+            })
+          }
+        } catch (error) {
+          console.error('Error settling balance:', error)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di connessione',
+            variant: 'error'
+          })
+        }
       }
-
-      const res = await fetch(`/api/participants/${id}`, {
-        method: 'DELETE',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pdfAttachment: pdfBase64 })
-      })
-      if (res.ok) {
-        fetchParticipants()
-        if (onUpdate) onUpdate()
-      }
-    } catch (error) {
-      console.error('Error deleting participant:', error)
-    }
-  }
-
-  const handleSettleBalance = async (p: any) => {
-    const remainingAmount = (p.price || 0) - (p.deposit || 0)
-    if (!confirm(`Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`)) return
-
-    try {
-      // Generate updated PDF
-      const updatedParticipant = {
-        ...p,
-        paymentType: 'BALANCE',
-        deposit: p.price,
-        isOption: false
-      }
-
-      const eventData = {
-        type: 'TRANSFER',
-        name: transferName,
-        date: transferDate,
-        pickupLocation: p.pickupLocation,
-        dropoffLocation: p.dropoffLocation,
-        pickupTime: p.pickupTime,
-        returnDate: p.returnDate,
-        returnTime: p.returnTime,
-        returnPickupLocation: p.returnPickupLocation
-      }
-
-      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
-      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
-
-      const res = await fetch(`/api/participants/${p.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...p,
-          paymentType: 'BALANCE',
-          deposit: p.price, // Set deposit to full price as it's fully paid
-          isOption: false,
-          pdfAttachment: pdfBase64
-        })
-      })
-
-      if (res.ok) {
-        fetchParticipants()
-        if (onUpdate) onUpdate()
-      }
-    } catch (error) {
-      console.error('Error settling balance:', error)
-    }
+    })
   }
 
   const handleRefund = async (participantId: string, amount: number, method: string, notes: string) => {
@@ -203,14 +273,48 @@ export function ParticipantsList({
         setShowRefund(false)
         fetchParticipants()
         if (onUpdate) onUpdate()
+        setAlertModal({
+          isOpen: true,
+          title: 'Successo',
+          message: 'Rimborso registrato con successo',
+          variant: 'success'
+        })
       } else {
         const errorData = await res.json()
-        alert(`Errore: ${errorData.error}`)
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: `Errore: ${errorData.error}`,
+          variant: 'error'
+        })
       }
     } catch (error) {
       console.error('Refund error:', error)
-      alert('Errore di connessione')
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: 'Errore di connessione',
+        variant: 'error'
+      })
     }
+  }
+
+  // --- Helpers ---
+
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(blob)
+      reader.onloadend = () => {
+        const result = reader.result?.toString()
+        if (result) {
+          resolve(result.split(',')[1])
+        } else {
+          reject(new Error("Failed to convert PDF to Base64"))
+        }
+      }
+      reader.onerror = error => reject(error)
+    })
   }
 
   const getStatusColor = (p: any) => {
@@ -283,9 +387,9 @@ export function ParticipantsList({
       }
     }
 
-    // Columns: Nome, Posti, Nazionalità, Andata, Ritorno, Telefono, Note
+    // Columns: Nome, Posti, Nazionalità, Partenza, Destinazione, Telefono, Note
     const tableData = list.map(p => {
-      // Andata (Arrival) Details
+      // Partenza (Pickup) Details
       const arrivalDateStr = transferDate ? new Date(transferDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' }) : ''
       // Fallback to transfer time if participant time is missing
       let arrivalTimeStr = p.pickupTime || ''
@@ -301,49 +405,36 @@ export function ParticipantsList({
       const arrivalDateTime = arrivalParts.join(' ')
       const arrivalDetails = arrivalDateTime ? `${arrivalLocStr}\n${arrivalDateTime}` : arrivalLocStr
 
-      // Ritorno (Return) Details
+      // Destinazione (Dropoff) Details
       let returnDetails = '-'
       
-      // Get return date from participant or fallback to transfer's end date
-      let returnDateStr = ''
-      if (p.returnDate) {
-        returnDateStr = new Date(p.returnDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
-      } else if (transfer.endDate) {
-        returnDateStr = new Date(transfer.endDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
-      }
-
-      // Get return time from participant or fallback to transfer end date's time
-      let returnTimeStr = p.returnTime || ''
-      if (!returnTimeStr && transfer.endDate) {
-        returnTimeStr = new Date(transfer.endDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
-      }
-
-      // User stated deposit coincides with return, so we use dropoffLocation if returnPickupLocation is missing
-      const returnLocStr = p.returnPickupLocation || p.dropoffLocation || '-'
+      // Use dropoffLocation as primary for "Destinazione"
+      const dropoffLocStr = p.dropoffLocation || '-'
       
-      const returnParts = []
-      if (returnDateStr) returnParts.push(returnDateStr)
-      if (returnTimeStr) returnParts.push(returnTimeStr)
-      const returnDateTime = returnParts.join(' ')
+      // If we have return date/time, we can show it, but for Transfer PDF usually Destination is just Location.
+      // But let's check if return info is relevant. The original code used it for 'Ritorno'.
+      // If we rename 'Ritorno' to 'Destinazione', we should show the Dropoff Location.
       
-      // If we have any return info (date/time or location), show it
-      if (returnDateTime || (returnLocStr && returnLocStr !== '-')) {
-        returnDetails = returnDateTime ? `${returnLocStr}\n${returnDateTime}` : returnLocStr
-      }
-
+      returnDetails = dropoffLocStr
+      
+      // If there is a return date (e.g. Round Trip), we might want to show it?
+      // But "Destinazione" usually implies where they are going NOW.
+      // The user said "ritiro e deposito le possiamo chiamare partenza e destinazione".
+      // So Partenza = Pickup, Destinazione = Dropoff.
+      
       return [
         `${p.firstName} ${p.lastName}`,
         p.groupSize?.toString() || '1',
         p.nationality || '-',
-        arrivalDetails,
-        returnDetails,
+        arrivalDetails, // Partenza
+        returnDetails,  // Destinazione
         p.phoneNumber || '-',
         p.notes || '-'
       ]
     })
 
     autoTable(doc, {
-      head: [['Nome', 'Pax', 'Naz.', 'Andata', 'Ritorno', 'Tel', 'Note']],
+      head: [['Nome', 'Pax', 'Naz.', 'Partenza', 'Destinazione', 'Tel', 'Note']],
       body: tableData,
       startY: 50,
       styles: { fontSize: 8, cellPadding: 2 },
@@ -373,12 +464,28 @@ export function ParticipantsList({
     </div>
   )
 
-  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED')
-  const expiredParticipants = participants.filter(p => p.isExpired && p.paymentType !== 'REFUNDED')
+  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED' && p.approvalStatus !== 'PENDING' && p.approvalStatus !== 'REJECTED')
+  const expiredParticipants = participants.filter(p => (p.isExpired && p.paymentType !== 'REFUNDED') || p.approvalStatus === 'REJECTED')
   const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
+  const pendingParticipants = participants.filter(p => p.approvalStatus === 'PENDING')
 
-  const exportToPDF = () => {
-    exportListToPDF(activeParticipants, 'Lista Partecipanti Attivi', 'partecipanti-attivi')
+  const handleExportClick = (list: any[], title: string, filename: string) => {
+    setListToExport(list)
+    setExportFilename(filename)
+    setShowExportModal(true)
+  }
+
+  const handleExport = (selectedFields: string[]) => {
+    if (!listToExport) return
+
+    const eventData = {
+      type: 'TRANSFER',
+      name: transferName,
+      date: transferDate
+    }
+
+    const doc = generateParticipantsListPDF(listToExport, eventData as any, selectedFields)
+    doc.save(`${exportFilename}.pdf`)
   }
 
   const thClassName = "px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider"
@@ -401,12 +508,12 @@ export function ParticipantsList({
               </th>
               <th className={thClassName}>
                 <div className="flex items-center gap-2">
-                  <MapIcon className="w-4 h-4" /> Ritiro
+                  <MapIcon className="w-4 h-4" /> Partenza
                 </div>
               </th>
                <th className={thClassName}>
                 <div className="flex items-center gap-2">
-                  <MapIcon className="w-4 h-4" /> Deposito
+                  <MapIcon className="w-4 h-4" /> Destinazione
                 </div>
               </th>
               <th className={thClassName}>
@@ -461,14 +568,43 @@ export function ParticipantsList({
                       </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
-                      <span>{p.dropoffLocation || '-'}</span>
+                      <div className="flex flex-col">
+                          <span>{p.dropoffLocation || '-'}</span>
+                          {p.returnDate && (
+                              <span className="flex items-center gap-1 text-xs text-purple-600 font-bold mt-1 bg-purple-50 px-2 py-0.5 rounded-full w-fit" title={`Ritorno: ${new Date(p.returnDate).toLocaleDateString('it-IT')} ${p.returnTime || ''}`}>
+                                  <RotateCcw className="w-3 h-3" />
+                                  + Ritorno
+                              </span>
+                          )}
+                      </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     <div className="flex flex-col">
-                      <span className="font-bold text-gray-900">{p.createdBy?.code || '-'}</span>
+                      <span className="font-bold text-gray-900">{p.supplier?.name || '-'}</span>
+                      {p.commissionPercentage > 0 && (
+                        <div className="text-xs text-blue-500">
+                          Comm: {p.commissionPercentage}
+                          {(() => {
+                              if (p.createdBy?.agency) {
+                                  return p.createdBy.agency.commissionType === 'FIXED' ? '€' : '%';
+                              }
+                              // Fallback per Admin (Arianna Amministrazione) che ha commissione fissa
+                              const creatorName = `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.toLowerCase();
+                              if (creatorName.includes('arianna') || creatorName.includes('amministrazione') || creatorName.includes('corfumania')) {
+                                  return '€';
+                              }
+                              return '%';
+                          })()}
+                        </div>
+                      )}
                     </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">€ {p.price?.toFixed(2) || '0.00'}</td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">
+                    <div>
+                      € {p.price?.toFixed(2) || '0.00'}
+                      {p.tax > 0 && <div className="text-xs text-red-500 font-normal">Tasse: € {p.tax.toFixed(2)}</div>}
+                    </div>
+                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">€ {p.deposit?.toFixed(2) || '0.00'}</td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm">
                     <span className={`px-2.5 py-1 inline-flex items-center text-xs font-medium rounded-full border ${getStatusColor(p)}`}>
@@ -489,7 +625,7 @@ export function ParticipantsList({
                         <Eye className="w-3.5 h-3.5" />
                         Dettagli
                       </button>
-
+                      
                       {canEdit && (
                         <>
                           {(p.paymentType === 'DEPOSIT' || p.isOption) && (
@@ -502,6 +638,7 @@ export function ParticipantsList({
                               Saldo
                             </button>
                           )}
+                          
                           {p.deposit > 0 && (
                             <button
                               onClick={() => {
@@ -515,6 +652,7 @@ export function ParticipantsList({
                               Rimborso
                             </button>
                           )}
+                          
                           <button 
                             onClick={() => onEdit(p)} 
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-700 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors border border-indigo-200"
@@ -523,6 +661,7 @@ export function ParticipantsList({
                             <Edit className="w-3.5 h-3.5" />
                             Modifica
                           </button>
+                          
                           <button 
                             onClick={() => handleDelete(p.id)} 
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors border border-red-200"
@@ -683,95 +822,152 @@ export function ParticipantsList({
   )
 
   return (
-    <div className="space-y-8">
-      <div className="flex justify-end px-1">
-        <button
-          onClick={exportToPDF}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm"
-        >
-          <FileDown className="w-4 h-4" />
-          Esporta PDF
-        </button>
-      </div>
-
-      <div className="flex flex-wrap gap-4 text-sm text-gray-600 bg-gray-50 p-3 rounded-lg border border-gray-100">
-        <span className="font-medium text-gray-900">Legenda Azioni:</span>
-        <div className="flex items-center gap-1"><Eye className="w-4 h-4 text-blue-600" /> Dettagli</div>
-        <div className="flex items-center gap-1"><Euro className="w-4 h-4 text-green-600" /> Saldo</div>
-        <div className="flex items-center gap-1"><Edit className="w-4 h-4 text-indigo-600" /> Modifica</div>
-        <div className="flex items-center gap-1"><RotateCcw className="w-4 h-4 text-orange-600" /> Rimborso</div>
-        <div className="flex items-center gap-1"><Trash2 className="w-4 h-4 text-red-600" /> Elimina</div>
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex items-center justify-between px-1">
-          <div className="flex items-center gap-2">
-            <CheckCircle className="w-5 h-5 text-green-600" />
-            <h3 className="text-lg font-bold text-gray-800">Lista Partecipanti Attivi</h3>
-            <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-green-200">
-              {activeParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
-            </span>
-          </div>
+    <div className="space-y-6">
+      {/* Header with Stats and Actions */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <div>
+           <h2 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+             <Users className="w-6 h-6 text-blue-600" />
+             Lista Partecipanti
+             <span className="px-3 py-1 bg-blue-100 text-blue-800 text-sm font-medium rounded-full">
+               {activeParticipants.length}
+             </span>
+           </h2>
+           <p className="text-gray-500 text-sm mt-1">Gestisci i partecipanti e i pagamenti</p>
         </div>
+        <div className="flex gap-2">
+          {activeParticipants.length > 0 && (
+            <button
+              onClick={() => handleExportClick(activeParticipants, 'Lista Partecipanti', 'partecipanti-trasferimento')}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-white bg-blue-600 hover:bg-blue-700 rounded-lg shadow-sm transition-all hover:shadow-md"
+            >
+              <FileDown className="w-4 h-4" />
+              Esporta PDF
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Lists */}
+      <div className="space-y-8">
+        {pendingParticipants.length > 0 && (
+          <div className="opacity-100">
+            <h3 className="text-lg font-semibold text-amber-600 mb-4 flex items-center gap-2">
+               <AlertCircle className="w-5 h-5" />
+               In Attesa di Approvazione
+            </h3>
+            <ParticipantsTable 
+              data={pendingParticipants} 
+              emptyMessage="Nessun partecipante in attesa." 
+            />
+          </div>
+        )}
+
         <ParticipantsTable 
-          data={activeParticipants} 
-          emptyMessage="Nessun partecipante attivo registrato" 
+           data={activeParticipants} 
+           emptyMessage="Nessun partecipante registrato per questo trasferimento." 
         />
+        
+        {expiredParticipants.length > 0 && (
+          <div className="opacity-75">
+            <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+               <Clock className="w-5 h-5" />
+               Scaduti / Non Confermati
+            </h3>
+            <ParticipantsTable 
+              data={expiredParticipants} 
+              emptyMessage="" 
+            />
+          </div>
+        )}
+
+        {refundedParticipants.length > 0 && (
+          <div className="opacity-75">
+            <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
+               <RotateCcw className="w-5 h-5" />
+               Rimborsati
+            </h3>
+            <ParticipantsTable 
+              data={refundedParticipants} 
+              emptyMessage="" 
+            />
+          </div>
+        )}
       </div>
 
-      {refundedParticipants.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
-              <RotateCcw className="w-5 h-5 text-gray-600" />
-              <h3 className="text-lg font-bold text-gray-800">Lista Rimborsati</h3>
-              <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-gray-200">
-                {refundedParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
-              </span>
-            </div>
-          </div>
-          <ParticipantsTable 
-            data={refundedParticipants} 
-            emptyMessage="Nessun partecipante rimborsato" 
-          />
-        </div>
-      )}
-
-      {expiredParticipants.length > 0 && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
-              <Clock className="w-5 h-5 text-red-600" />
-              <h3 className="text-lg font-bold text-gray-800">Scaduti / Non Confermati</h3>
-              <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
-                {expiredParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
-              </span>
-            </div>
-          </div>
-          <ParticipantsTable 
-            data={expiredParticipants} 
-            emptyMessage="Nessun partecipante scaduto" 
-          />
-        </div>
-      )}
-
-      {showDetails && selectedParticipant && (
+      {/* Modals */}
+      {selectedParticipant && (
         <ParticipantDetailsModal
           isOpen={showDetails}
-          onClose={() => setShowDetails(false)}
+          onClose={() => {
+            setShowDetails(false)
+            setSelectedParticipant(null)
+          }}
           participant={selectedParticipant}
-          excursion={transfer}
+          excursion={{
+            id: transferId,
+            name: transferName,
+            date: transferDate,
+            pickupLocation: selectedParticipant.pickupLocation,
+            dropoffLocation: selectedParticipant.dropoffLocation
+          }}
+          canEdit={userRole === 'ADMIN' || selectedParticipant.createdById === currentUserId}
         />
       )}
 
       {showRefund && participantToRefund && (
         <RefundModal
           isOpen={showRefund}
-          onClose={() => setShowRefund(false)}
-          participant={participantToRefund}
+          onClose={() => {
+            setShowRefund(false)
+            setParticipantToRefund(null)
+          }}
           onConfirm={handleRefund}
+          participantName={`${participantToRefund.firstName} ${participantToRefund.lastName}`}
+          maxAmount={participantToRefund.deposit || 0}
         />
       )}
+
+      {showDeleteChoice && participantToDelete && (
+        <DeleteChoiceModal
+          isOpen={showDeleteChoice}
+          onClose={() => {
+             setShowDeleteChoice(false)
+             setParticipantToDelete(null)
+          }}
+          onConfirmDelete={executeDelete}
+          onRequestRefund={() => {
+             setShowDeleteChoice(false)
+             setParticipantToRefund(participantToDelete)
+             setShowRefund(true)
+          }}
+          participantName={`${participantToDelete.firstName} ${participantToDelete.lastName}`}
+        />
+      )}
+
+      {showExportModal && (
+        <ExportParticipantsModal
+          onClose={() => setShowExportModal(false)}
+          onExport={handleExport}
+        />
+      )}
+
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
     </div>
   )
 }

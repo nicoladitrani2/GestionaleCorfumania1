@@ -10,12 +10,20 @@ export async function POST(request: Request) {
     const { email, password } = body
 
     const user = await prisma.user.findUnique({
-      where: { email },
-      include: { supplier: true }
+      where: { email }
     })
 
     if (!user) {
       return NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 })
+    }
+
+    // Fetch agency separately to avoid Prisma Client mismatch issues
+    let agencyName = undefined
+    if (user.agencyId) {
+      const agency = await prisma.agency.findUnique({
+        where: { id: user.agencyId }
+      })
+      agencyName = agency?.name
     }
 
     const isValid = await bcrypt.compare(password, user.password)
@@ -33,8 +41,8 @@ export async function POST(request: Request) {
         lastName: user.lastName,
         code: user.code,
         mustChangePassword: user.mustChangePassword,
-        supplierId: user.supplierId,
-        supplierName: user.supplier?.name
+        agencyId: user.agencyId,
+        agencyName: agencyName
       }
     })
 
@@ -47,8 +55,8 @@ export async function POST(request: Request) {
     })
 
     return NextResponse.json({ success: true })
-  } catch (error) {
+  } catch (error: any) {
     console.error('Login error:', error)
-    return NextResponse.json({ error: 'Errore interno del server' }, { status: 500 })
+    return NextResponse.json({ error: error.message || 'Errore interno del server' }, { status: 500 })
   }
 }

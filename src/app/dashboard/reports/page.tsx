@@ -1,43 +1,54 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar, Filter, Download, DollarSign, Users, Briefcase, PieChart, CheckSquare, Square, RotateCcw, Loader2 } from 'lucide-react'
+import { Calendar, Filter, Download, DollarSign, Users, Briefcase, PieChart, CheckSquare, Square, RotateCcw, Loader2, ShoppingBag } from 'lucide-react'
 import { generateAdvancedReportPDF } from '@/lib/report-pdf-generator'
 
 interface SummaryStats {
   totalRevenue: number
   totalCommission: number
-  netRevenue: number
+  // netRevenue removed from API, calculated on client
   count: number
   totalPax: number
+  totalTax: number
 }
 
 interface BreakdownItem {
   name: string
+  date?: string
   revenue: number
   commission: number
+  assistantCommission?: number
+  supplierShare?: number
   count: number
   pax: number
+  tax: number
 }
 
 interface ReportData {
   summary: SummaryStats
-  bySupplier: BreakdownItem[]
+  byAgency: BreakdownItem[]
+  bySupplier: BreakdownItem[] // Providers
   byAssistant: BreakdownItem[]
   byExcursion: BreakdownItem[]
+  byTransfer: BreakdownItem[]
+  byRental: BreakdownItem[]
+  bySpecialService: BreakdownItem[]
 }
 
 export default function ReportsPage() {
   // Filters State
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
-  const [selectedTypes, setSelectedTypes] = useState<string[]>(['EXCURSION', 'TRANSFER'])
-  const [selectedSuppliers, setSelectedSuppliers] = useState<string[]>([])
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(['EXCURSION', 'TRANSFER', 'RENTAL_CAR', 'RENTAL_MOTO', 'RENTAL_BOAT', 'SPECIAL_BRACELET', 'SPECIAL_CITY_TAX', 'SPECIAL_AC'])
+  const [selectedAgencies, setSelectedAgencies] = useState<string[]>([])
+  const [selectedProviders, setSelectedProviders] = useState<string[]>([])
   const [selectedAssistants, setSelectedAssistants] = useState<string[]>([])
   const [selectedExcursions, setSelectedExcursions] = useState<string[]>([])
 
   // Data State
-  const [suppliers, setSuppliers] = useState<any[]>([])
+  const [agencies, setAgencies] = useState<any[]>([])
+  const [providers, setProviders] = useState<any[]>([])
   const [assistants, setAssistants] = useState<any[]>([])
   const [excursions, setExcursions] = useState<any[]>([])
   const [reportData, setReportData] = useState<ReportData | null>(null)
@@ -47,15 +58,21 @@ export default function ReportsPage() {
   useEffect(() => {
     const fetchOptions = async () => {
       try {
-        const [suppRes, usersRes, excRes] = await Promise.all([
+        const [agencyRes, providerRes, usersRes, excRes] = await Promise.all([
+          fetch('/api/agencies'),
           fetch('/api/suppliers'),
           fetch('/api/users'),
-          fetch('/api/excursions?all=true') // Fetch all excursions (including past/archived) for reporting
+          fetch('/api/excursions?all=true')
         ])
         
-        if (suppRes.ok) {
-          const data = await suppRes.json()
-          setSuppliers(data)
+        if (agencyRes.ok) {
+          const data = await agencyRes.json()
+          setAgencies(data)
+        }
+
+        if (providerRes.ok) {
+            const data = await providerRes.json()
+            setProviders(data)
         }
         
         if (usersRes.ok) {
@@ -65,7 +82,6 @@ export default function ReportsPage() {
 
         if (excRes.ok) {
             const data = await excRes.json()
-            // Assuming the API returns a list of excursions
             setExcursions(data)
         }
       } catch (error) {
@@ -82,7 +98,8 @@ export default function ReportsPage() {
       const params = new URLSearchParams()
       if (startDate) params.append('startDate', startDate)
       if (endDate) params.append('endDate', endDate)
-      if (selectedSuppliers.length) params.append('supplierIds', selectedSuppliers.join(','))
+      if (selectedAgencies.length) params.append('agencyIds', selectedAgencies.join(','))
+      if (selectedProviders.length) params.append('providerIds', selectedProviders.join(','))
       if (selectedAssistants.length) params.append('assistantIds', selectedAssistants.join(','))
       if (selectedExcursions.length) params.append('excursionIds', selectedExcursions.join(','))
       if (selectedTypes.length) params.append('types', selectedTypes.join(','))
@@ -106,13 +123,14 @@ export default function ReportsPage() {
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [startDate, endDate, selectedSuppliers, selectedAssistants, selectedExcursions, selectedTypes])
+  }, [startDate, endDate, selectedAgencies, selectedProviders, selectedAssistants, selectedExcursions, selectedTypes])
 
   const resetFilters = () => {
     setStartDate('')
     setEndDate('')
-    setSelectedTypes(['EXCURSION', 'TRANSFER'])
-    setSelectedSuppliers([])
+    setSelectedTypes(['EXCURSION', 'TRANSFER', 'RENTAL_CAR', 'RENTAL_MOTO', 'RENTAL_BOAT', 'SPECIAL_BRACELET', 'SPECIAL_CITY_TAX', 'SPECIAL_AC'])
+    setSelectedAgencies([])
+    setSelectedProviders([])
     setSelectedAssistants([])
     setSelectedExcursions([])
   }
@@ -123,9 +141,16 @@ export default function ReportsPage() {
     )
   }
 
-  const toggleSupplier = (id: string) => {
-    setSelectedSuppliers(prev => 
+  const toggleAgency = (id: string) => {
+    setSelectedAgencies(prev => 
       prev.includes(id) ? prev.filter(s => s !== id) : [...prev, id]
+    )
+  }
+
+  const toggleProvider = (name: string) => {
+    // Note: We use name for providers/suppliers because it's a string field in Participant
+    setSelectedProviders(prev => 
+      prev.includes(name) ? prev.filter(s => s !== name) : [...prev, name]
     )
   }
 
@@ -147,7 +172,8 @@ export default function ReportsPage() {
         startDate,
         endDate,
         types: selectedTypes,
-        supplierIds: selectedSuppliers,
+        agencyIds: selectedAgencies,
+        providerIds: selectedProviders,
         assistantIds: selectedAssistants,
         excursionIds: selectedExcursions
       })
@@ -213,25 +239,82 @@ export default function ReportsPage() {
                   <span className="text-sm capitalize">{type === 'EXCURSION' ? 'Escursioni' : 'Trasferimenti'}</span>
                 </div>
               ))}
-              {/* Placeholder for Rentals */}
-              <div className="flex items-center gap-2 opacity-50 cursor-not-allowed">
-                <Square className="w-4 h-4 text-gray-300" />
-                <span className="text-sm text-gray-400">Noleggi (Coming Soon)</span>
+              
+              <div className="pt-2 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">Noleggi</div>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('RENTAL_CAR')}>
+                {selectedTypes.includes('RENTAL_CAR') ? 
+                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                  <Square className="w-4 h-4 text-gray-400" />
+                }
+                <span className="text-sm">Auto</span>
+              </div>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('RENTAL_MOTO')}>
+                {selectedTypes.includes('RENTAL_MOTO') ? 
+                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                  <Square className="w-4 h-4 text-gray-400" />
+                }
+                <span className="text-sm">Moto</span>
+              </div>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('RENTAL_BOAT')}>
+                {selectedTypes.includes('RENTAL_BOAT') ? 
+                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                  <Square className="w-4 h-4 text-gray-400" />
+                }
+                <span className="text-sm">Barche</span>
+              </div>
+
+              <div className="pt-2 pb-1 text-xs font-semibold text-gray-500 uppercase tracking-wider">Tasse & Extra</div>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('SPECIAL_BRACELET')}>
+                {selectedTypes.includes('SPECIAL_BRACELET') ? 
+                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                  <Square className="w-4 h-4 text-gray-400" />
+                }
+                <span className="text-sm">Braccialetto</span>
+              </div>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('SPECIAL_CITY_TAX')}>
+                {selectedTypes.includes('SPECIAL_CITY_TAX') ? 
+                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                  <Square className="w-4 h-4 text-gray-400" />
+                }
+                <span className="text-sm">Tassa Soggiorno</span>
+              </div>
+              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('SPECIAL_AC')}>
+                {selectedTypes.includes('SPECIAL_AC') ? 
+                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                  <Square className="w-4 h-4 text-gray-400" />
+                }
+                <span className="text-sm">Aria Condizionata</span>
               </div>
             </div>
           </div>
 
-          {/* Supplier Filter */}
+          {/* Agency Filter */}
           <div className="space-y-2">
-            <label className="text-sm font-medium text-gray-600">Gestori (Agenzie)</label>
+            <label className="text-sm font-medium text-gray-600">Agenzie</label>
             <div className="max-h-40 overflow-y-auto space-y-1 border p-2 rounded-md">
-              {suppliers.map(s => (
-                <div key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded" onClick={() => toggleSupplier(s.id)}>
-                   {selectedSuppliers.includes(s.id) ? 
+              {agencies.map(s => (
+                <div key={s.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded" onClick={() => toggleAgency(s.id)}>
+                   {selectedAgencies.includes(s.id) ? 
                     <CheckSquare className="w-4 h-4 text-blue-600" /> : 
                     <Square className="w-4 h-4 text-gray-400" />
                   }
                   <span className="text-sm truncate">{s.name}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Provider Filter */}
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-600">Fornitori</label>
+            <div className="max-h-40 overflow-y-auto space-y-1 border p-2 rounded-md">
+              {providers.map(p => (
+                <div key={p.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded" onClick={() => toggleProvider(p.name)}>
+                   {selectedProviders.includes(p.name) ? 
+                    <CheckSquare className="w-4 h-4 text-blue-600" /> : 
+                    <Square className="w-4 h-4 text-gray-400" />
+                  }
+                  <span className="text-sm truncate">{p.name}</span>
                 </div>
               ))}
             </div>
@@ -258,15 +341,17 @@ export default function ReportsPage() {
             <div className="space-y-2">
                 <label className="text-sm font-medium text-gray-600">Escursioni Specifiche</label>
                 <div className="max-h-40 overflow-y-auto space-y-1 border p-2 rounded-md">
-                {excursions.map(e => (
+                {excursions.map(e => {
+                    const dateStr = e.startDate ? new Date(e.startDate).toLocaleDateString('it-IT') : 'Data non valida'
+                    return (
                     <div key={e.id} className="flex items-center gap-2 cursor-pointer hover:bg-gray-50 p-1 rounded" onClick={() => toggleExcursion(e.id)}>
                     {selectedExcursions.includes(e.id) ? 
                         <CheckSquare className="w-4 h-4 text-blue-600" /> : 
                         <Square className="w-4 h-4 text-gray-400" />
                     }
-                    <span className="text-sm truncate">{e.name}</span>
+                    <span className="text-sm truncate">{e.name} ({dateStr})</span>
                     </div>
-                ))}
+                )})}
                 </div>
             </div>
           )}
@@ -294,22 +379,28 @@ export default function ReportsPage() {
           )}
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard 
               title="Incasso Totale" 
-              value={`€ ${reportData?.summary.totalRevenue.toFixed(2) || '0.00'}`} 
+              value={`€ ${(reportData?.summary?.totalRevenue ?? 0).toFixed(2)}`} 
               icon={<DollarSign className="w-6 h-6 text-green-600" />}
               bg="bg-green-50"
             />
             <StatCard 
-              title="Commissioni" 
-              value={`€ ${reportData?.summary.totalCommission.toFixed(2) || '0.00'}`} 
+              title="Comm. Agenzia" 
+              value={`€ ${(reportData?.summary?.totalCommission ?? 0).toFixed(2)}`} 
               icon={<Briefcase className="w-6 h-6 text-orange-600" />}
               bg="bg-orange-50"
             />
             <StatCard 
-              title="Incasso Netto" 
-              value={`€ ${reportData?.summary.netRevenue.toFixed(2) || '0.00'}`} 
+              title="Comm. Assistenti" 
+              value={`€ ${(reportData?.summary?.totalAssistantCommission ?? 0).toFixed(2)}`} 
+              icon={<Users className="w-6 h-6 text-indigo-600" />}
+              bg="bg-indigo-50"
+            />
+            <StatCard 
+              title="Netto Agenzia" 
+              value={`€ ${((reportData?.summary?.totalCommission ?? 0) - (reportData?.summary?.totalAssistantCommission ?? 0)).toFixed(2)}`} 
               icon={<PieChart className="w-6 h-6 text-blue-600" />}
               bg="bg-blue-50"
             />
@@ -323,10 +414,10 @@ export default function ReportsPage() {
 
           {/* Tables */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Supplier Table */}
+            {/* Agency Table */}
             <TableCard 
-                title="Performance per Gestore" 
-                data={reportData?.bySupplier} 
+                title="Performance per Agenzia" 
+                data={reportData?.byAgency} 
                 columns={[
                     { header: 'Nome', key: 'name' },
                     { header: 'Pax', key: 'pax', align: 'right' },
@@ -349,13 +440,28 @@ export default function ReportsPage() {
             />
           </div>
 
+          {/* Supplier (Provider) Table */}
+          <div className="grid grid-cols-1 lg:grid-cols-1 gap-6">
+             <TableCard 
+                title="Performance per Fornitore" 
+                data={reportData?.bySupplier} 
+                columns={[
+                    { header: 'Fornitore', key: 'name' },
+                    { header: 'Pax', key: 'pax', align: 'right' },
+                    { header: 'Prenotazioni', key: 'count', align: 'right' },
+                    { header: 'Quota / Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' }
+                ]}
+            />
+          </div>
+
           {/* Excursion Table */}
           {reportData?.byExcursion && reportData.byExcursion.length > 0 && (
              <TableCard 
-                title="Performance per Escursione" 
+                title="Performance Escursioni" 
                 data={reportData?.byExcursion} 
                 columns={[
                     { header: 'Nome Escursione', key: 'name' },
+                    { header: 'Data', key: 'date' },
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
                     { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
@@ -364,11 +470,80 @@ export default function ReportsPage() {
             />
           )}
 
-          {/* Tax section placeholder */}
-          <div className="bg-gray-50 rounded-xl border border-gray-200 border-dashed p-6 text-center">
-            <h3 className="text-lg font-semibold text-gray-500 mb-2">Sezione Tasse & Non Commissionabile</h3>
-            <p className="text-gray-400">Questa sezione è in fase di sviluppo e permetterà di analizzare le tasse portuali e altre voci non soggette a commissione.</p>
-          </div>
+          {/* Transfer Table */}
+          {reportData?.byTransfer && reportData.byTransfer.length > 0 && (
+             <TableCard 
+                title="Performance Transfer" 
+                data={reportData?.byTransfer} 
+                columns={[
+                    { header: 'Tratta', key: 'name' },
+                    { header: 'Pax', key: 'pax', align: 'right' },
+                    { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
+                    { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
+                    { header: 'Netto', key: 'net', align: 'right', format: 'currency', color: 'text-blue-600' }
+                ]}
+            />
+          )}
+
+          {/* Rental Table */}
+          {reportData?.byRental && reportData.byRental.length > 0 && (
+            <div className="bg-white rounded-xl shadow-sm border border-blue-100 overflow-hidden">
+              <div className="p-4 border-b bg-blue-50 font-semibold text-blue-700 flex items-center gap-2">
+                <ShoppingBag className="w-5 h-5" />
+                Noleggi
+              </div>
+              <div className="p-4 space-y-4">
+                {/* Rental Summary Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-blue-600">Totale Netto Agenzia (Noleggi)</p>
+                      <p className="text-2xl font-bold text-blue-700">
+                        € {reportData.byRental.reduce((acc, r) => acc + (r.commission - (r.assistantCommission || 0)), 0).toFixed(2)}
+                      </p>
+                    </div>
+                    <PieChart className="w-8 h-8 text-blue-300" />
+                  </div>
+                  <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-green-600">Totale Quota Fornitore (Noleggi)</p>
+                      <p className="text-2xl font-bold text-green-700">
+                        € {reportData.byRental.reduce((acc, r) => acc + (r.supplierShare || 0), 0).toFixed(2)}
+                      </p>
+                    </div>
+                    <Users className="w-8 h-8 text-green-300" />
+                  </div>
+                </div>
+
+                <TableCard 
+                  title="Performance Noleggi" 
+                  data={reportData?.byRental} 
+                  columns={[
+                      { header: 'Tipo Noleggio', key: 'name' },
+                      { header: 'Pax', key: 'pax', align: 'right' },
+                      { header: 'Comm. Tot.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
+                      { header: 'Comm. Ass.', key: 'assistantCommission', align: 'right', format: 'currency', color: 'text-purple-600' },
+                      { header: 'Netto Agenzia', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' },
+                      { header: 'Quota Fornitore', key: 'supplierShare', align: 'right', format: 'currency', color: 'text-green-600' }
+                  ]}
+                />
+              </div>
+            </div>
+          )}
+
+          {/* Special Services Table */}
+          {reportData?.bySpecialService && reportData.bySpecialService.length > 0 && (
+             <TableCard 
+                title="Performance Tasse & Extra" 
+                data={reportData?.bySpecialService} 
+                columns={[
+                    { header: 'Servizio', key: 'name' },
+                    { header: 'Pax', key: 'pax', align: 'right' },
+                    { header: 'Incasso Totale', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
+                    { header: 'Netto Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-blue-600' }
+                ]}
+            />
+          )}
         </div>
       </div>
     </div>
@@ -411,6 +586,9 @@ function TableCard({ title, data, columns }: { title: string, data?: any[], colu
                                     let value = item[col.key]
                                     if (col.key === 'net') {
                                         value = item.revenue - item.commission
+                                    }
+                                    if (col.key === 'netAgency') {
+                                        value = item.commission - (item.assistantCommission || 0)
                                     }
                                     
                                     if (col.format === 'currency') {

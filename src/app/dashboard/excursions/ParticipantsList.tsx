@@ -4,10 +4,13 @@ import { useState, useEffect } from 'react'
 import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
-import { generateParticipantPDF } from '@/lib/pdf-generator'
+import { generateParticipantPDF, generateParticipantsListPDF } from '@/lib/pdf-generator'
 import { ParticipantDetailsModal } from './ParticipantDetailsModal'
 import { RefundModal } from './RefundModal'
 import { DeleteChoiceModal } from './DeleteChoiceModal'
+import { ExportParticipantsModal } from './ExportParticipantsModal'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+import { AlertModal } from '../components/AlertModal'
 
 // --- Helpers ---
 
@@ -149,6 +152,12 @@ const ParticipantsTable = ({
                   <div className="flex flex-col">
                     <span className="font-medium text-gray-900">{p.createdBy?.code || '-'}</span>
                     <span className="text-xs text-gray-500">{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
+                    {p.commissionPercentage > 0 && (
+                      <div className="text-xs text-blue-500 mt-0.5">
+                        Comm: {p.commissionPercentage}
+                        {p.createdBy?.agency?.commissionType === 'FIXED' ? '€' : '%'}
+                      </div>
+                    )}
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -253,10 +262,17 @@ const ParticipantsTable = ({
               <div>
                 <div className="font-bold text-gray-900">{p.firstName} {p.lastName}</div>
                 <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
-                  <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                     <Users className="w-3 h-3 mr-1" />
-                     {p.groupSize || 1}
-                  </span>
+                  <div className="flex flex-col items-start">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                       <Users className="w-3 h-3 mr-1" />
+                       {p.groupSize || 1}
+                    </span>
+                    {(p.adults !== undefined || p.children !== undefined) && (
+                        <span className="text-[10px] text-gray-500 mt-0.5 ml-1">
+                          {p.adults || 0}A + {p.children || 0}B
+                        </span>
+                    )}
+                  </div>
                   <span>{p.nationality || '-'}</span>
                 </div>
               </div>
@@ -382,6 +398,9 @@ export function ParticipantsList({
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
   const [showDeleteChoice, setShowDeleteChoice] = useState(false)
   const [participantToDelete, setParticipantToDelete] = useState<any>(null)
+  const [showExportModal, setShowExportModal] = useState(false)
+  const [listToExport, setListToExport] = useState<any[] | null>(null)
+  const [exportFilename, setExportFilename] = useState('')
 
 
 
@@ -399,18 +418,27 @@ export function ParticipantsList({
     }
   }
 
-  // Polling for live updates (every 5 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
       fetchParticipants()
     }, 5000)
-
     return () => clearInterval(interval)
   }, [excursionId])
 
   useEffect(() => {
     fetchParticipants()
   }, [excursionId, refreshTrigger])
+
+  if (loading) return (
+    <div className="flex justify-center items-center py-12">
+      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+    </div>
+  )
+
+  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED' && p.approvalStatus !== 'PENDING' && p.approvalStatus !== 'REJECTED')
+  const expiredParticipants = participants.filter(p => (p.isExpired && p.paymentType !== 'REFUNDED') || p.approvalStatus === 'REJECTED')
+  const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
+  const pendingParticipants = participants.filter(p => p.approvalStatus === 'PENDING')
 
   const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
@@ -470,7 +498,7 @@ export function ParticipantsList({
     if (!confirm(`Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`)) return
 
     try {
-      // Generate updated PDF
+      // Generate updated PDFs
       const updatedParticipant = {
         ...p,
         paymentType: 'BALANCE',
@@ -484,8 +512,15 @@ export function ParticipantsList({
         date: excursionDate
       }
 
-      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
-      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+      // Generate Italian PDF
+      const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
+      const pdfBlobIT = docIT.output('blob')
+      const pdfBase64IT = await blobToBase64(pdfBlobIT)
+
+      // Generate English PDF
+      const docEN = generateParticipantPDF(updatedParticipant, eventData as any, 'en')
+      const pdfBlobEN = docEN.output('blob')
+      const pdfBase64EN = await blobToBase64(pdfBlobEN)
 
       const res = await fetch(`/api/participants/${p.id}`, {
         method: 'PUT',
@@ -495,7 +530,8 @@ export function ParticipantsList({
           paymentType: 'BALANCE',
           deposit: p.price, // Set deposit to full price as it's fully paid
           isOption: false,
-          pdfAttachment: pdfBase64
+          pdfAttachmentIT: pdfBase64IT,
+          pdfAttachmentEN: pdfBase64EN
         })
       })
 
@@ -562,102 +598,39 @@ export function ParticipantsList({
     }
   }
 
-  const exportListToPDF = (list: any[], title: string, filenamePrefix: string) => {
-    const doc = new jsPDF()
-    
-    // --- Header Styling ---
-    // Blue header bar
-    doc.setFillColor(37, 99, 235) // Blue-600
-    doc.rect(0, 0, 210, 40, 'F')
-    
-    // Title (White)
-    doc.setTextColor(255, 255, 255)
-    doc.setFontSize(22)
-    doc.setFont('helvetica', 'bold')
-    doc.text(excursionName || 'Dettagli Escursione', 14, 18)
-    
-    // Subtitle (White)
-    doc.setFontSize(14)
-    doc.setFont('helvetica', 'normal')
-    doc.text(title, 14, 26)
-
-    // Date (White, smaller)
-    doc.setFontSize(10)
-    if (excursionDate) {
-      const date = new Date(excursionDate)
-      if (!isNaN(date.getTime())) {
-        const dateStr = date.toLocaleDateString('it-IT', { 
-          weekday: 'long', 
-          year: 'numeric', 
-          month: 'long', 
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        })
-        // Capitalize first letter
-        const formattedDate = dateStr.charAt(0).toUpperCase() + dateStr.slice(1)
-        doc.text(formattedDate, 14, 34)
-      } else {
-        doc.text('Data non valida', 14, 34)
-      }
-    }
-
-    // Prepare table data
-    // Columns: Nome, Posti, Nazionalità, Inserito da, Telefono, Note
-    // Removed: Prezzo, Acconto, Stato (come richiesto)
-    const tableData = list.map(p => [
-      `${p.firstName} ${p.lastName}`,
-      p.groupSize?.toString() || '1',
-      p.nationality || '-',
-      `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.trim() || '-',
-      p.phoneNumber || '-',
-      p.notes || '-'
-    ])
-
-    autoTable(doc, {
-      head: [['Nome', 'Posti', 'Nazionalità', 'Inserito da', 'Telefono', 'Note']],
-      body: tableData,
-      startY: 50,
-      styles: { fontSize: 10, cellPadding: 3 },
-      headStyles: { fillColor: [30, 64, 175], textColor: 255, fontStyle: 'bold' }, // Darker blue header
-      alternateRowStyles: { fillColor: [243, 244, 246] }, // Light gray for alternate rows
-      columnStyles: {
-        0: { fontStyle: 'bold' }, // Name bold
-        1: { halign: 'center' }, // Group size centered
-      }
-    })
-
-    // Footer with generation date
-    const pageCount = doc.getNumberOfPages()
-    doc.setFontSize(8)
-    doc.setTextColor(156, 163, 175) // Gray-400
-    for(let i = 1; i <= pageCount; i++) {
-        doc.setPage(i)
-        doc.text(`Generato il ${new Date().toLocaleDateString('it-IT')} - Pagina ${i} di ${pageCount}`, 14, doc.internal.pageSize.height - 10)
-    }
-
-    doc.save(`${filenamePrefix}-${excursionName || 'escursione'}.pdf`)
+  const openExportModal = (list: any[], filename: string) => {
+    setListToExport(list)
+    setExportFilename(filename)
+    setShowExportModal(true)
   }
 
-  if (loading) return (
-    <div className="flex justify-center items-center py-12">
-      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-    </div>
-  )
-
-  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED')
-  const expiredParticipants = participants.filter(p => p.isExpired && p.paymentType !== 'REFUNDED')
-  const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
-
-  const exportToPDF = () => {
-    exportListToPDF(activeParticipants, 'Lista Partecipanti Attivi', 'partecipanti-attivi')
+  const handleFinalExport = (selectedFields: string[]) => {
+    if (!listToExport) return
+    
+    const eventData = {
+      name: excursionName,
+      date: excursionDate
+    }
+    
+    try {
+      const doc = generateParticipantsListPDF(listToExport, eventData as any, selectedFields)
+      doc.save(`${exportFilename}-${excursionName || 'escursione'}.pdf`)
+    } catch (error) {
+      console.error('Error generating PDF:', error)
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: 'Errore nella generazione del PDF',
+        variant: 'error'
+      })
+    }
   }
 
   return (
     <div className="space-y-8">
       <div className="flex justify-between items-center px-1">
         <button
-          onClick={exportToPDF}
+          onClick={() => openExportModal(activeParticipants, 'lista-partecipanti')}
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm ml-auto"
         >
           <FileDown className="w-4 h-4" />
@@ -674,6 +647,31 @@ export function ParticipantsList({
         <div className="flex items-center gap-1"><RotateCcw className="w-4 h-4 text-orange-600" /> Rimborso</div>
         <div className="flex items-center gap-1"><Trash2 className="w-4 h-4 text-red-600" /> Elimina</div>
       </div>
+
+      {pendingParticipants.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-amber-600" />
+              <h3 className="text-lg font-bold text-gray-800">In Attesa di Approvazione</h3>
+              <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-amber-200">
+                {pendingParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+              </span>
+            </div>
+          </div>
+          <ParticipantsTable 
+            data={pendingParticipants} 
+            emptyMessage="Nessun partecipante in attesa" 
+            userRole={userRole}
+            currentUserId={currentUserId}
+            onEdit={onEdit}
+            onDelete={handleDelete}
+            onSettleBalance={handleSettleBalance}
+            onShowDetails={(p) => { setSelectedParticipant(p); setShowDetails(true); }}
+            onRefund={(p) => { setParticipantToRefund(p); setShowRefund(true); }}
+          />
+        </div>
+      )}
 
       <div className="space-y-4">
         <div className="flex items-center justify-between px-1">
@@ -709,7 +707,7 @@ export function ParticipantsList({
               </span>
             </div>
             <button
-              onClick={() => exportListToPDF(refundedParticipants, 'Lista Rimborsati', 'partecipanti-rimborsati')}
+              onClick={() => openExportModal(refundedParticipants, 'partecipanti-rimborsati')}
               className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
             >
               <FileDown className="w-3.5 h-3.5" />
@@ -737,13 +735,13 @@ export function ParticipantsList({
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
               <Clock className="w-5 h-5 text-red-600" />
-              <h3 className="text-lg font-bold text-gray-800">Lista d'Attesa / Scaduti</h3>
+              <h3 className="text-lg font-bold text-gray-800">Scaduti / Non Confermati</h3>
               <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
                 {expiredParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
               </span>
             </div>
             <button
-              onClick={() => exportListToPDF(expiredParticipants, 'Lista d\'Attesa / Scaduti', 'partecipanti-scaduti')}
+              onClick={() => openExportModal(expiredParticipants, 'partecipanti-scaduti')}
               className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
             >
               <FileDown className="w-3.5 h-3.5" />
@@ -795,6 +793,13 @@ export function ParticipantsList({
         participant={participantToRefund}
         onConfirm={handleRefund}
       />
+
+      {showExportModal && (
+        <ExportParticipantsModal
+          onClose={() => setShowExportModal(false)}
+          onExport={handleFinalExport}
+        />
+      )}
     </div>
   )
 }

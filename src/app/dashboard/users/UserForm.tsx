@@ -18,19 +18,19 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
     lastName: '',
     role: 'USER',
     code: '',
-    supplierId: ''
+    agencyId: ''
   })
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
+  const [agencies, setAgencies] = useState<{ id: string, name: string }[]>([])
 
   useEffect(() => {
-    fetch('/api/suppliers')
+    fetch('/api/agencies')
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
-          setSuppliers(data)
+          setAgencies(data)
         }
       })
       .catch(console.error)
@@ -45,7 +45,7 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
         lastName: user.lastName || '',
         role: user.role,
         code: user.code,
-        supplierId: user.supplier?.id || ''
+        agencyId: user.agency?.id || ''
       })
     } else {
       // Explicitly reset form when user is null (creation mode)
@@ -56,7 +56,7 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
         lastName: '',
         role: 'USER',
         code: '',
-        supplierId: ''
+        agencyId: ''
       })
     }
   }, [user])
@@ -223,20 +223,20 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
                 </div>
               </div>
 
-              {/* Fornitore */}
+              {/* Agenzia */}
               <div className="space-y-2">
-                <label className="text-sm font-semibold text-gray-700">Fornitore</label>
+                <label className="text-sm font-semibold text-gray-700">Agenzia</label>
                 <div className="relative">
                   <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                     <Briefcase className="h-5 w-5 text-gray-400" />
                   </div>
                   <select
                     className="block w-full pl-10 pr-10 py-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-shadow bg-gray-50 focus:bg-white appearance-none"
-                    value={formData.supplierId}
-                    onChange={(e) => setFormData({ ...formData, supplierId: e.target.value })}
+                    value={formData.agencyId}
+                    onChange={(e) => setFormData({ ...formData, agencyId: e.target.value })}
                   >
-                    <option value="">Nessun Fornitore</option>
-                    {suppliers.map(s => (
+                    <option value="">Nessuna Agenzia</option>
+                    {agencies.map(s => (
                       <option key={s.id} value={s.id}>{s.name}</option>
                     ))}
                   </select>
