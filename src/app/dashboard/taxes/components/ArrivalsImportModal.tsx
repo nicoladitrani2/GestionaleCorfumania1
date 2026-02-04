@@ -105,30 +105,59 @@ export function ArrivalsImportModal({ onClose }: { onClose: () => void }) {
       const row = jsonData[i]
       if (!row || row.length === 0) continue
 
-      // Basic validation: Check if Last Name (Index 4) exists
+      // Basic validation: Check if Last Name exists.
+      // After shift: A=0, B=1, C(Leg)=2, D(Pax)=3, E(Last)=4
       if (!row[4]) continue 
 
-      const type = parseInt(row[2]) // Column C
+      const type = parseInt(row[2]) // Column C (Legenda)
       
       const item: ArrivalData = {
         nFile: row[0] || '',
         adv: row[1] || '',
-        type: isNaN(type) ? 0 : type, // Default to 0 if missing/invalid?
-        pax: parseInt(row[3]) || 0,
-        lastName: row[4] || '',
-        firstName: row[5] || '',
-        birthDate: formatDate(row[6]),
-        flightInfo: `${row[7] || ''} ${row[8] || ''} ${row[9] || ''}`, // Date + Volo + Company
-        hotel: row[14] || '', // Adjusted index based on shift?
-        // Let's re-verify indexes if Col C is inserted.
-        // Orig: Hotel was N (13). New: O (14). Correct.
+        type: isNaN(type) ? 0 : type, // Default to 0 if missing/invalid
+        pax: parseInt(row[3]) || 0, // D (Pax)
+        lastName: row[4] || '', // E (Last)
+        firstName: row[5] || '', // F (First)
+        birthDate: formatDate(row[6]), // G (Birth) - Wait, Image F is Birth. 
+        // If F is Birth (Index 5 original). Shifted F is Index 6.
+        // Wait. F is 6th letter. Index 5.
+        // Shifted F -> G. G is 7th letter. Index 6.
+        // So row[6] is correct.
+        
+        // Flight info:
+        // Original: H(7), I(8), J(9).
+        // Shifted: I(8), J(9), K(10).
+        flightInfo: `${formatDate(row[8]) || ''} ${row[9] || ''} ${row[10] || ''}`, 
+        
+        // Hotel:
+        // Original N(13). Shifted O(14).
+        hotel: row[14] || '', 
+        
+        // Room Type:
+        // Original O(14). Shifted P(15).
         roomType: row[15] || '',
-        checkIn: formatDate(row[17]), // R (17)
-        checkOut: formatDate(row[18]), // S (18)
-        transfer: row[19] || '', // T (19)
-        car: row[20] || '', // U (20)
-        phone: row[21] || '', // V (21)
-        notes: row[row.length - 1] || '' // Last column
+        
+        // Check In/Out:
+        // Original R(17), S(18).
+        // Shifted S(18), T(19).
+        checkIn: formatDate(row[18]), 
+        checkOut: formatDate(row[19]), 
+        
+        // Transfer:
+        // Original T(19). Shifted U(20).
+        transfer: row[20] || '', 
+        
+        // Car:
+        // Original U(20). Shifted V(21).
+        car: row[21] || '', 
+        
+        // Phone:
+        // Original V(21). Shifted W(22).
+        phone: row[22] || '', 
+        
+        // Notes:
+        // Original W?(22). Shifted X(23).
+        notes: row[23] || row[row.length - 1] || '' 
       }
 
       if (item.type === 1) {
