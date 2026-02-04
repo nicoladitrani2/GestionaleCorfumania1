@@ -3,7 +3,8 @@
 import { useState } from 'react'
 import { TaxParticipantForm } from './components/TaxParticipantForm'
 import { TaxParticipantsList } from './components/TaxParticipantsList'
-import { Plus, X } from 'lucide-react'
+import { ArrivalsImportModal } from './components/ArrivalsImportModal'
+import { Plus, X, FileSpreadsheet } from 'lucide-react'
 
 interface TaxesManagerProps {
   currentUserId: string
@@ -12,6 +13,7 @@ interface TaxesManagerProps {
 
 export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
   const [showForm, setShowForm] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleSuccess = () => {
@@ -26,14 +28,25 @@ export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
            <h1 className="text-2xl font-bold text-gray-900">Tassa di Soggiorno e Servizi</h1>
            <p className="text-gray-500">Gestione Braccialetti, Tassa di Soggiorno e Aria Condizionata</p>
          </div>
-         <button 
-           onClick={() => setShowForm(!showForm)}
-           className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-         >
-           {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
-           {showForm ? 'Chiudi Form' : 'Aggiungi Partecipante'}
-         </button>
+         <div className="flex gap-2">
+           <button 
+             onClick={() => setShowImport(true)}
+             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+           >
+             <FileSpreadsheet className="w-4 h-4" />
+             Importa Lista Arrivi
+           </button>
+           <button 
+             onClick={() => setShowForm(!showForm)}
+             className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+           >
+             {showForm ? <X className="w-4 h-4" /> : <Plus className="w-4 h-4" />}
+             {showForm ? 'Chiudi Form' : 'Aggiungi Partecipante'}
+           </button>
+         </div>
        </div>
+
+       {showImport && <ArrivalsImportModal onClose={() => setShowImport(false)} />}
 
        {showForm && (
          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm animate-in slide-in-from-top-4">
