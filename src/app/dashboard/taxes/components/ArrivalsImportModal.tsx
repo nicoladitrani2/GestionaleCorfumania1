@@ -95,69 +95,93 @@ export function ArrivalsImportModal({ onClose }: { onClose: () => void }) {
 
     // Start from row 4 (index 3) based on image, but let's be safe and iterate
     // finding rows that look like data.
-    // A valid row should probably have a Last Name or N File.
-    
-    // Find header row or just skip fixed amount?
-    // Image shows headers on Row 1. Data starts Row 4.
-    const START_ROW_INDEX = 3 
+    // Updated logic based on new screenshot
+    // Headers are on Row 1 (Index 0). Data starts Row 3 or 4.
+    // Columns:
+    // A(0): N FILE
+    // B(1): ADV
+    // C(2): LEGENDA (0=Priv, 1=Ag)
+    // D(3): N. PAX
+    // E(4): LAST NAME
+    // F(5): FIRST NAME
+    // G(6): BIRTH DATE
+    // H(7): FLIGHT DATE
+    // I(8): NR VOLO
+    // J(9): COMPANY
+    // K(10): FROM
+    // L(11): TO
+    // M(12): DEPT TIME
+    // N(13): ARRIV TIME
+    // O(14): HOTEL/APARTMENT
+    // P(15): ROOM TYPE
+    // Q(16): TRAT
+    // R(17): IN
+    // S(18): OUT
+    // T(19): TRF
+    // U(20): CAR
+    // V(21): TELEFONO
+    // W(22): NOTE
+
+    const START_ROW_INDEX = 2 // Start scanning from Row 3 (Index 2) to be safe
 
     for (let i = START_ROW_INDEX; i < jsonData.length; i++) {
       const row = jsonData[i]
-      if (!row || row.length === 0) continue
+      if (!row) continue
 
-      // Basic validation: Check if Last Name exists.
-      // After shift: A=0, B=1, C(Leg)=2, D(Pax)=3, E(Last)=4
-      if (!row[4]) continue 
+      // We identify a new booking/entry by the presence of "N FILE" (Col A/0)
+      const nFile = row[0]
+      if (!nFile) continue 
 
-      const type = parseInt(row[2]) // Column C (Legenda)
+      // Skip header row if it was caught (checks if N FILE is "N FILE")
+      if (String(nFile).toUpperCase().includes('FILE')) continue
+
+      // Look for Legenda (Col C/2). 
+      // Sometimes it's on the same row, sometimes on the next row (e.g., merged cells).
+      let type = parseInt(row[2])
       
+      // If type is NaN (empty in this row), check the next row
+      if (isNaN(type) && i + 1 < jsonData.length) {
+         const nextRow = jsonData[i + 1]
+         if (nextRow) {
+             const nextType = parseInt(nextRow[2])
+             if (!isNaN(nextType)) {
+                 type = nextType
+             }
+         }
+      }
+
+      // Default to 0 (Private) if still not found
+      if (isNaN(type)) type = 0
+
+      // Flight Info Construction
+      // Date(7) + Volo(8) + Company(9) + From(10) + To(11) + Time(12/13)
+      const flightDate = formatDate(row[7])
+      const flightNr = row[8] || ''
+      const flightCo = row[9] || ''
+      const flightFrom = row[10] || ''
+      const flightTo = row[11] || ''
+      const flightTime = row[13] || row[12] || '' // Arrival or Dept time
+      
+      const flightInfo = [flightDate, flightNr, flightCo, flightFrom ? `(${flightFrom}-${flightTo})` : '', flightTime]
+        .filter(Boolean).join(' ')
+
       const item: ArrivalData = {
-        nFile: row[0] || '',
-        adv: row[1] || '',
-        type: isNaN(type) ? 0 : type, // Default to 0 if missing/invalid
-        pax: parseInt(row[3]) || 0, // D (Pax)
-        lastName: row[4] || '', // E (Last)
-        firstName: row[5] || '', // F (First)
-        birthDate: formatDate(row[6]), // G (Birth) - Wait, Image F is Birth. 
-        // If F is Birth (Index 5 original). Shifted F is Index 6.
-        // Wait. F is 6th letter. Index 5.
-        // Shifted F -> G. G is 7th letter. Index 6.
-        // So row[6] is correct.
-        
-        // Flight info:
-        // Original: H(7), I(8), J(9).
-        // Shifted: I(8), J(9), K(10).
-        flightInfo: `${formatDate(row[8]) || ''} ${row[9] || ''} ${row[10] || ''}`, 
-        
-        // Hotel:
-        // Original N(13). Shifted O(14).
+        nFile: String(nFile),
+        adv: row[1] || '', // ADV might also be on next row, but usually primary row has it or it's irrelevant if NFile is key
+        type: type,
+        pax: parseInt(row[3]) || 0,
+        lastName: row[4] || '',
+        firstName: row[5] || '',
+        birthDate: formatDate(row[6]), 
+        flightInfo: flightInfo,
         hotel: row[14] || '', 
-        
-        // Room Type:
-        // Original O(14). Shifted P(15).
         roomType: row[15] || '',
-        
-        // Check In/Out:
-        // Original R(17), S(18).
-        // Shifted S(18), T(19).
-        checkIn: formatDate(row[18]), 
-        checkOut: formatDate(row[19]), 
-        
-        // Transfer:
-        // Original T(19). Shifted U(20).
-        transfer: row[20] || '', 
-        
-        // Car:
-        // Original U(20). Shifted V(21).
-        car: row[21] || '', 
-        
-        // Phone:
-        // Original V(21). Shifted W(22).
-        phone: row[22] || '', 
-        
-        // Notes:
-        // Original W?(22). Shifted X(23).
-        notes: row[23] || row[row.length - 1] || '' 
+        checkIn: formatDate(row[17]), 
+        checkOut: formatDate(row[18]), 
+        transfer: row[19] || '', 
+        car: row[20] || '', 
+        phone: row[21] || '', 
+        notes: row[22] || '' 
       }
 
       if (item.type === 1) {
