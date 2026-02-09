@@ -4,7 +4,8 @@ import { useState } from 'react'
 import { TaxParticipantForm } from './components/TaxParticipantForm'
 import { TaxParticipantsList } from './components/TaxParticipantsList'
 import { ArrivalsImportModal } from './components/ArrivalsImportModal'
-import { Plus, X, FileSpreadsheet } from 'lucide-react'
+import { TaxBookingsList } from './components/TaxBookingsList'
+import { Plus, X, FileSpreadsheet, List } from 'lucide-react'
 
 interface TaxesManagerProps {
   currentUserId: string
@@ -14,10 +15,17 @@ interface TaxesManagerProps {
 export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
   const [showForm, setShowForm] = useState(false)
   const [showImport, setShowImport] = useState(false)
+  const [showBookings, setShowBookings] = useState(true)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   const handleSuccess = () => {
     setShowForm(false)
+    setRefreshTrigger(prev => prev + 1)
+  }
+
+  const handleImportSuccess = () => {
+    setShowImport(false)
+    // Force refresh of bookings list if it's open, or just trigger general refresh
     setRefreshTrigger(prev => prev + 1)
   }
 
@@ -30,12 +38,23 @@ export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
          </div>
          <div className="flex gap-2">
            <button 
-             onClick={() => setShowImport(true)}
-             className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+             onClick={() => setShowBookings(!showBookings)}
+             className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors shadow-sm ${showBookings ? 'bg-indigo-700 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}
            >
-             <FileSpreadsheet className="w-4 h-4" />
-             Importa Lista Arrivi
+             <List className="w-4 h-4" />
+             {showBookings ? 'Nascondi Arrivi' : 'Lista Arrivi & Assegnazioni'}
            </button>
+           
+           {userRole === 'ADMIN' && (
+             <button 
+                onClick={() => setShowImport(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"
+             >
+                <FileSpreadsheet className="w-4 h-4" />
+                Importa Lista Arrivi
+             </button>
+           )}
+
            <button 
              onClick={() => setShowForm(!showForm)}
              className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
@@ -46,7 +65,7 @@ export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
          </div>
        </div>
 
-       {showImport && <ArrivalsImportModal onClose={() => setShowImport(false)} />}
+       {showImport && <ArrivalsImportModal onClose={() => setShowImport(false)} onSuccess={handleImportSuccess} />}
 
        {showForm && (
          <div className="bg-white p-6 rounded-xl border border-gray-200 shadow-sm animate-in slide-in-from-top-4">
@@ -58,6 +77,14 @@ export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
            </div>
            <TaxParticipantForm onSuccess={handleSuccess} onCancel={() => setShowForm(false)} />
          </div>
+       )}
+
+       {showBookings && (
+           <TaxBookingsList 
+             currentUserId={currentUserId} 
+             userRole={userRole} 
+             refreshTrigger={refreshTrigger}
+           />
        )}
 
        <div className="grid grid-cols-1 gap-12">

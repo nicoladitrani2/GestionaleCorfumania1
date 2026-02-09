@@ -11,6 +11,8 @@ export default async function DashboardPage() {
 
   // Fetch pending approvals if admin
   let pendingApprovals: any[] = []
+  // Schema changes: approvalStatus removed. Disabling pending approvals for now.
+  /*
   if (isAdmin) {
     pendingApprovals = await prisma.participant.findMany({
       where: { approvalStatus: 'PENDING' },
@@ -22,6 +24,7 @@ export default async function DashboardPage() {
       }
     })
   }
+  */
 
   // Fetch all excursions for calendar
   let excursionsData: any[] = []
@@ -32,8 +35,8 @@ export default async function DashboardPage() {
       orderBy: { startDate: 'asc' },
       include: {
         participants: {
-          where: { isExpired: false },
-          select: { groupSize: true }
+          where: { status: 'ACTIVE' },
+          select: { adults: true, children: true, infants: true }
         }
       }
     })
@@ -43,7 +46,7 @@ export default async function DashboardPage() {
   }
 
   const excursions = excursionsData.map(excursion => {
-    const totalParticipants = excursion.participants.reduce((sum: number, p: any) => sum + (p.groupSize || 1), 0)
+    const totalParticipants = excursion.participants.reduce((sum: number, p: any) => sum + (p.adults || 0) + (p.children || 0) + (p.infants || 0), 0)
     const { participants, ...rest } = excursion
     return {
       ...rest,

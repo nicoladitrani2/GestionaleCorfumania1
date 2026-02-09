@@ -44,7 +44,7 @@ export async function GET(request: Request) {
         const typeConditions = []
         if (types.includes('EXCURSION')) typeConditions.push({ excursionId: { not: null } })
         if (types.includes('TRANSFER')) typeConditions.push({ transferId: { not: null } })
-        if (types.some(t => t.startsWith('RENTAL'))) typeConditions.push({ isRental: true })
+        if (types.some(t => t.startsWith('RENTAL'))) typeConditions.push({ rentalId: { not: null } })
         if (types.some(t => t.startsWith('SPECIAL'))) typeConditions.push({ specialServiceType: { not: null } })
         
         if (typeConditions.length > 0) {
@@ -66,10 +66,10 @@ export async function GET(request: Request) {
 
     // Assistant Filter
     if (assistantIds && assistantIds.length > 0) {
-        if (whereClause.createdBy) {
-            whereClause.createdBy.id = { in: assistantIds }
+        if (whereClause.user) {
+            whereClause.user.id = { in: assistantIds }
         } else {
-             whereClause.createdBy = { id: { in: assistantIds } }
+             whereClause.user = { id: { in: assistantIds } }
         }
     }
 
@@ -81,9 +81,10 @@ export async function GET(request: Request) {
     const participants = await prisma.participant.findMany({
       where: whereClause,
       include: {
-        createdBy: true,
+        user: true,
         excursion: true,
-        transfer: true
+        transfer: true,
+        rental: true
       },
       orderBy: {
         createdAt: 'desc'
@@ -205,17 +206,18 @@ export async function GET(request: Request) {
         }
         
         // --- AGENCY COMMISSION CALCULATION ---
-        let userAgencyId = (p.createdBy as any)?.agencyId
+        let userAgencyId = (p.user as any)?.agencyId
         let agency = userAgencyId ? agencyMap[userAgencyId] : null
 
-        if (!agency && (p.createdBy as any)?.role === 'ADMIN') {
+        if (!agency && (p.user as any)?.role === 'ADMIN') {
             agency = adminAgency
             if (agency) userAgencyId = agency.id
         }
 
-        if (p.isRental) {
+        const isRental = !!p.rentalId
+        if (isRental) {
              // Heuristic for legacy data without rentalType
-             let effectiveRentalType = p.rentalType
+             let effectiveRentalType = p.rental?.type
              if (!effectiveRentalType) {
                  if ((p.insurancePrice || 0) > 0 || (p.supplementPrice || 0) > 0) {
                      effectiveRentalType = 'MOTO'
@@ -231,7 +233,7 @@ export async function GET(request: Request) {
                  const currentRentalType = effectiveRentalType ? `RENTAL_${effectiveRentalType}` : 'RENTAL_CAR'
                  // If the specific rental type is not in the requested types, skip this participant
                  // We only filter if at least one rental type is requested (which is guaranteed if we are here and p.isRental is true, 
-                 // because we only fetched isRental=true if a RENTAL_* type was in types)
+                 // because we only fetched rentalId!=null if a RENTAL_* type was in types)
                  // However, we fetched ALL rentals, so we must filter out the unselected sub-types.
                  if (!types.includes(currentRentalType)) return
              }
@@ -264,7 +266,7 @@ export async function GET(request: Request) {
 
         // STANDARD LOGIC (Excursion, Transfer, Car Rental)
         // Only apply if NOT already processed as Brokerage Rental AND NOT Special Service
-        const isBrokerageRental = p.isRental && p.rentalType && ['MOTO', 'BOAT'].includes(p.rentalType)
+        const isBrokerageRental = isRental && p.rental?.type && ['MOTO', 'BOAT'].includes(p.rental?.type)
         
         if (agency && !isBrokerageRental && !p.specialServiceType) {
             let ruleType = (agency as any).commissionType || 'PERCENTAGE'
@@ -305,9 +307,9 @@ export async function GET(request: Request) {
             // Fallback to Assistant's Agency configuration if not set on participant
             if (!asstCommType || asstCommVal === null || asstCommVal === undefined) {
                  let assistantAgency = null
-                 if ((p.createdBy as any)?.agencyId && agencyMap[(p.createdBy as any).agencyId]) {
-                     assistantAgency = agencyMap[(p.createdBy as any).agencyId]
-                 } else if ((p.createdBy as any)?.role === 'ADMIN') {
+                 if ((p.user as any)?.agencyId && agencyMap[(p.user as any).agencyId]) {
+                     assistantAgency = agencyMap[(p.user as any).agencyId]
+                 } else if ((p.user as any)?.role === 'ADMIN') {
                      // Try to find the specific Admin agency
                      assistantAgency = adminAgency
                  }
@@ -371,7 +373,7 @@ export async function GET(request: Request) {
         
         // Calculate Supplier Share
         let supplierShare = revenue // Default to revenue (Cash Basis) for non-rentals
-        if (p.isRental) {
+        if (isRental) {
             // For Rentals, Supplier gets Total Price minus Agency Commission
             // This applies to both Brokerage (MOTO/BOAT) and Standard (CAR)
             supplierShare = (p.price || 0) - commissionAmount
@@ -384,7 +386,7 @@ export async function GET(request: Request) {
         bySupplier[supplierName].tax += tax
 
         // By Assistant
-        const assistantName = `${p.createdBy.firstName || ''} ${p.createdBy.lastName || ''}`.trim() || p.createdBy.email
+        const assistantName = `${p.user.firstName || ''} ${p.user.lastName || ''}`.trim() || p.user.email
         if (!byAssistant[assistantName]) {
             byAssistant[assistantName] = { name: assistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
         }
@@ -427,8 +429,8 @@ export async function GET(request: Request) {
             byTransfer[transferName].pax += pax
             byTransfer[transferName].tax += tax
 
-        } else if (p.isRental) {
-            const rentalName = `Noleggio: ${p.rentalType || 'Generico'} - ${p.licenseType || ''}`
+        } else if (isRental) {
+            const rentalName = `Noleggio: ${p.rental?.type || 'Generico'} - ${p.rental?.name || ''}`
             
             if (!byRental[rentalName]) {
                 byRental[rentalName] = { name: rentalName, revenue: 0, commission: 0, assistantCommission: 0, supplierShare: 0, count: 0, pax: 0, tax: 0 }
@@ -443,6 +445,115 @@ export async function GET(request: Request) {
         }
     })
 
+    // Fetch Tax Bookings (Gestione Separata)
+    const taxWhereClause: any = {}
+    
+    // Apply Date Filter
+    if (whereClause.createdAt) {
+        taxWhereClause.createdAt = whereClause.createdAt
+    }
+
+    // Apply Assistant Filter
+    if (assistantIds && assistantIds.length > 0) {
+        taxWhereClause.assignedToId = { in: assistantIds }
+    }
+
+    // Apply Type Filter (Service Code)
+    if (types && types.length > 0) {
+        const showBracelet = types.includes('SPECIAL_BRACELET')
+        const showTax = types.includes('SPECIAL_CITY_TAX')
+        // Note: SPECIAL_AC is not currently mapped to TaxBooking (usually in Participants)
+
+        if (!showBracelet && !showTax) {
+            // If types are selected but NO tax types are included, return no tax bookings
+            // But we must be careful: if the user selects ONLY 'EXCURSION', they expect NO taxes.
+            // If they select NOTHING (types is null/empty), we usually show ALL.
+            // Here types has length > 0.
+            taxWhereClause.id = '__NO_MATCH__' // Force empty
+        } else {
+            const allowedCodes = []
+            if (showBracelet) allowedCodes.push(1, 3) // 1=Bracelet, 3=Both
+            if (showTax) allowedCodes.push(2, 3)      // 2=Tax, 3=Both
+            
+            if (allowedCodes.length > 0) {
+                taxWhereClause.serviceCode = { in: [...new Set(allowedCodes)] }
+            }
+        }
+    }
+
+    const taxBookings = await prisma.taxBooking.findMany({
+        where: taxWhereClause,
+        include: {
+            assignedTo: true
+        }
+    })
+
+    // Process Tax Stats
+    const taxStats = {
+        totalPax: 0,
+        totalRevenue: 0,
+        byProvenienza: {
+            AGENZIA: { pax: 0, revenue: 0, count: 0, paidCount: 0, unpaidCount: 0 },
+            PRIVATO: { pax: 0, revenue: 0, count: 0, paidCount: 0, unpaidCount: 0 }
+        },
+        byAssistant: {} as Record<string, { pax: number, revenue: number, count: number, paidCount: number, unpaidCount: number }>,
+        byService: {} as Record<string, { pax: number, revenue: number, count: number }>
+    }
+
+    taxBookings.forEach(b => {
+        // Total
+        taxStats.totalPax += b.pax
+        taxStats.totalRevenue += b.totalAmount
+
+        // MERGE INTO MAIN REPORT (byAssistant)
+        // This ensures the main "Performance per Assistente" table includes these revenues
+        const mainAssistantName = b.assignedTo 
+            ? `${b.assignedTo.firstName || ''} ${b.assignedTo.lastName || ''}`.trim() || b.assignedTo.email
+            : 'Non Assegnato'
+        
+        if (!byAssistant[mainAssistantName]) {
+            byAssistant[mainAssistantName] = { name: mainAssistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+        }
+        // Initialize taxBookingRevenue if not present (we'll need to add this property to the object definition implicitly)
+        if (!(byAssistant[mainAssistantName] as any).taxBookingRevenue) (byAssistant[mainAssistantName] as any).taxBookingRevenue = 0
+        ;(byAssistant[mainAssistantName] as any).taxBookingRevenue += b.totalAmount
+
+        // Provenienza
+        const prov = (b.provenienza === 'AGENZIA' || b.provenienza === '2') ? 'AGENZIA' : 'PRIVATO'
+        taxStats.byProvenienza[prov].pax += b.pax
+        taxStats.byProvenienza[prov].revenue += b.totalAmount
+        taxStats.byProvenienza[prov].count += 1
+        if (b.customerPaid) taxStats.byProvenienza[prov].paidCount += 1
+        else taxStats.byProvenienza[prov].unpaidCount += 1
+
+        // Assistant
+        const assistantName = b.assignedTo 
+            ? `${b.assignedTo.firstName} ${b.assignedTo.lastName}` 
+            : 'Non Assegnato'
+        
+        if (!taxStats.byAssistant[assistantName]) {
+            taxStats.byAssistant[assistantName] = { pax: 0, revenue: 0, count: 0, paidCount: 0, unpaidCount: 0 }
+        }
+        taxStats.byAssistant[assistantName].pax += b.pax
+        taxStats.byAssistant[assistantName].revenue += b.totalAmount
+        taxStats.byAssistant[assistantName].count += 1
+        if (b.customerPaid) taxStats.byAssistant[assistantName].paidCount += 1
+        else taxStats.byAssistant[assistantName].unpaidCount += 1
+
+        // Service
+        let serviceName = 'Sconosciuto'
+        if (b.serviceCode === 1) serviceName = 'Solo Braccialetto'
+        else if (b.serviceCode === 2) serviceName = 'Solo Tassa'
+        else if (b.serviceCode === 3) serviceName = 'Braccialetto + Tassa'
+        
+        if (!taxStats.byService[serviceName]) {
+            taxStats.byService[serviceName] = { pax: 0, revenue: 0, count: 0 }
+        }
+        taxStats.byService[serviceName].pax += b.pax
+        taxStats.byService[serviceName].revenue += b.totalAmount
+        taxStats.byService[serviceName].count += 1
+    })
+
     return NextResponse.json({
       summary: {
         totalRevenue,
@@ -450,9 +561,11 @@ export async function GET(request: Request) {
         totalAssistantCommission, // Assistant Commission
         totalPax,
         totalTax,
+        totalTaxRevenue: taxStats.totalRevenue,
         count: participants.length
       },
-      byAgency: Object.values(byAgency),
+      taxStats, // New field
+      byAgency: Object.values(byAgency).sort((a, b) => b.revenue - a.revenue),
       bySupplier: Object.values(bySupplier),
       byAssistant: Object.values(byAssistant),
       byExcursion: Object.values(byExcursion),

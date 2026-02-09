@@ -38,7 +38,7 @@ export async function GET(request: Request) {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
-        createdBy: {
+        user: {
           select: {
             firstName: true,
             lastName: true
@@ -119,7 +119,7 @@ export async function POST(request: Request) {
           paymentType: 'BALANCE', // Assume paid? Or collected?
           paymentMethod: 'CASH', // Default
           supplier: 'GO4SEA', // Default
-          createdById: session.user.id,
+          userId: session.user.id,
           // Defaults for required fields
           email: '', 
           phoneNumber: '',

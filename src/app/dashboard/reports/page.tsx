@@ -11,6 +11,7 @@ interface SummaryStats {
   count: number
   totalPax: number
   totalTax: number
+  totalTaxRevenue?: number
 }
 
 interface BreakdownItem {
@@ -23,6 +24,7 @@ interface BreakdownItem {
   count: number
   pax: number
   tax: number
+  taxBookingRevenue?: number
 }
 
 interface ReportData {
@@ -34,6 +36,17 @@ interface ReportData {
   byTransfer: BreakdownItem[]
   byRental: BreakdownItem[]
   bySpecialService: BreakdownItem[]
+  taxStats?: {
+      totalPax: number
+      totalRevenue: number
+      byProvenienza: {
+          AGENZIA: { pax: number, revenue: number, count: number, paidCount: number, unpaidCount: number }
+          PRIVATO: { pax: number, revenue: number, count: number, paidCount: number, unpaidCount: number }
+      }
+      byAssistant: Record<string, { pax: number, revenue: number, count: number, paidCount: number, unpaidCount: number }>
+      byService: Record<string, { pax: number, revenue: number, count: number }>
+      byWeek: Record<string, { pax: number, revenue: number, count: number }>
+  }
 }
 
 export default function ReportsPage() {
@@ -382,7 +395,7 @@ export default function ReportsPage() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
             <StatCard 
               title="Incasso Totale" 
-              value={`€ ${(reportData?.summary?.totalRevenue ?? 0).toFixed(2)}`} 
+              value={`€ ${((reportData?.summary?.totalRevenue ?? 0) + (reportData?.summary?.totalTaxRevenue ?? 0)).toFixed(2)}`} 
               icon={<DollarSign className="w-6 h-6 text-green-600" />}
               bg="bg-green-50"
             />
@@ -414,6 +427,114 @@ export default function ReportsPage() {
 
           {/* Tables */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            
+            {/* Tax Booking Stats Section */}
+            {reportData?.taxStats && (
+                <div className="lg:col-span-2 bg-white p-6 rounded-xl shadow-sm border border-orange-100">
+                    <h3 className="font-bold text-lg text-gray-800 flex items-center gap-2 mb-4">
+                        <DollarSign className="w-5 h-5 text-orange-600" />
+                        Tasse di Soggiorno & Braccialetti (Gestione Separata)
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
+                        <div className="bg-orange-50 p-4 rounded-lg">
+                            <div className="text-sm text-gray-600 font-medium">Totale Pax</div>
+                            <div className="text-2xl font-bold text-gray-900">{reportData.taxStats.totalPax}</div>
+                            <div className="text-xs text-gray-500 mt-1">Importo Totale: € {reportData.taxStats.totalRevenue.toFixed(2)}</div>
+                        </div>
+                        
+                        <div className="bg-blue-50 p-4 rounded-lg">
+                            <div className="text-sm text-blue-800 font-medium">Agenzia</div>
+                            <div className="flex justify-between items-end mt-2">
+                                <div>
+                                    <div className="text-xl font-bold text-blue-900">{reportData.taxStats.byProvenienza.AGENZIA.pax} Pax</div>
+                                    <div className="text-xs text-blue-700">€ {reportData.taxStats.byProvenienza.AGENZIA.revenue.toFixed(2)}</div>
+                                </div>
+                                <div className="text-right text-xs">
+                                    <div className="text-green-600 font-bold">{reportData.taxStats.byProvenienza.AGENZIA.paidCount} Pagati</div>
+                                    <div className="text-red-500 font-bold">{reportData.taxStats.byProvenienza.AGENZIA.unpaidCount} Da Pagare</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="bg-purple-50 p-4 rounded-lg">
+                            <div className="text-sm text-purple-800 font-medium">Privati</div>
+                            <div className="flex justify-between items-end mt-2">
+                                <div>
+                                    <div className="text-xl font-bold text-purple-900">{reportData.taxStats.byProvenienza.PRIVATO.pax} Pax</div>
+                                    <div className="text-xs text-purple-700">€ {reportData.taxStats.byProvenienza.PRIVATO.revenue.toFixed(2)}</div>
+                                </div>
+                                <div className="text-right text-xs">
+                                    <div className="text-green-600 font-bold">{reportData.taxStats.byProvenienza.PRIVATO.paidCount} Pagati</div>
+                                    <div className="text-red-500 font-bold">{reportData.taxStats.byProvenienza.PRIVATO.unpaidCount} Da Pagare</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                        {/* Breakdown by Assistant */}
+                        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+                            <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-700">Dettaglio per Assistente</div>
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left">Assistente</th>
+                                        <th className="px-3 py-2 text-right">Pax</th>
+                                        <th className="px-3 py-2 text-right">Incasso</th>
+                                        <th className="px-3 py-2 text-right">Stato</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {Object.entries(reportData.taxStats.byAssistant).map(([name, stats]) => (
+                                        <tr key={name}>
+                                            <td className="px-3 py-2 font-medium">{name}</td>
+                                            <td className="px-3 py-2 text-right">{stats.pax}</td>
+                                            <td className="px-3 py-2 text-right text-green-600 font-bold">€ {stats.revenue.toFixed(2)}</td>
+                                            <td className="px-3 py-2 text-right">
+                                                <div className="text-xs flex flex-col items-end">
+                                                    <span className="text-green-600">{stats.paidCount} Pagati</span>
+                                                    <span className="text-red-500">{stats.unpaidCount} Da Pagare</span>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                                    {Object.keys(reportData.taxStats.byAssistant).length === 0 && (
+                                        <tr><td colSpan={4} className="px-3 py-4 text-center text-gray-400">Nessun dato</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+
+                        {/* Breakdown by Service */}
+                        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden h-fit">
+                            <div className="p-3 bg-gray-50 border-b font-semibold text-sm text-gray-700">Dettaglio per Servizio</div>
+                            <table className="w-full text-sm">
+                                <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                                    <tr>
+                                        <th className="px-3 py-2 text-left">Servizio</th>
+                                        <th className="px-3 py-2 text-right">Pax</th>
+                                        <th className="px-3 py-2 text-right">Incasso</th>
+                                    </tr>
+                                </thead>
+                                <tbody className="divide-y divide-gray-100">
+                                    {Object.entries(reportData.taxStats.byService).map(([name, stats]) => (
+                                        <tr key={name}>
+                                            <td className="px-3 py-2 font-medium">{name}</td>
+                                            <td className="px-3 py-2 text-right">{stats.pax}</td>
+                                            <td className="px-3 py-2 text-right text-green-600 font-bold">€ {stats.revenue.toFixed(2)}</td>
+                                        </tr>
+                                    ))}
+                                    {Object.keys(reportData.taxStats.byService).length === 0 && (
+                                        <tr><td colSpan={3} className="px-3 py-4 text-center text-gray-400">Nessun dato</td></tr>
+                                    )}
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            )}
+
             {/* Agency Table */}
             <TableCard 
                 title="Performance per Agenzia" 
@@ -434,7 +555,21 @@ export default function ReportsPage() {
                 columns={[
                     { header: 'Nome', key: 'name' },
                     { header: 'Pax', key: 'pax', align: 'right' },
-                    { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
+                    { header: 'Incasso Servizi', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
+                    { 
+                        header: 'Incasso Tasse', 
+                        key: 'taxBookingRevenue', 
+                        align: 'right', 
+                        color: 'text-purple-600',
+                        render: (item: any) => `€ ${(item.taxBookingRevenue || 0).toFixed(2)}`
+                    },
+                    { 
+                        header: 'Totale Incassato', 
+                        key: 'totalRevenue', 
+                        align: 'right', 
+                        color: 'text-blue-700 font-bold',
+                        render: (item: any) => `€ ${(item.revenue + (item.taxBookingRevenue || 0)).toFixed(2)}`
+                    },
                     { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' }
                 ]}
             />
@@ -627,7 +762,7 @@ function TableCard({ title, data, columns }: { title: string, data?: any[], colu
 
                                     return (
                                         <td key={cIdx} className={`px-4 py-3 ${col.align === 'right' ? 'text-right' : ''} ${col.color || 'text-gray-900'} ${cIdx === 0 ? 'font-medium' : ''}`}>
-                                            {value}
+                                            {col.render ? col.render(item) : value}
                                         </td>
                                     )
                                 })}

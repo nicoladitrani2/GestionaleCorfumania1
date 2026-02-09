@@ -65,7 +65,9 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
   
   yPos += 10
   const summaryData = [
-    ['Incasso Totale', `€ ${data.summary.totalRevenue.toFixed(2)}`],
+    ['Incasso Totale', `€ ${((data.summary.totalRevenue || 0) + (data.summary.totalTaxRevenue || 0)).toFixed(2)}`],
+    ['Di cui Incasso Servizi', `€ ${data.summary.totalRevenue.toFixed(2)}`],
+    ['Di cui Incasso Tasse / Non Comm.', `€ ${(data.summary.totalTaxRevenue || 0).toFixed(2)}`],
     ['Commissioni Totali', `€ ${data.summary.totalCommission.toFixed(2)}`],
     ['Commissioni Assistenti', `€ ${data.summary.totalAssistantCommission.toFixed(2)}`],
     ['Netto Agenzia', `€ ${(data.summary.totalCommission - data.summary.totalAssistantCommission).toFixed(2)}`],
@@ -157,18 +159,22 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
         a.name,
         a.pax || a.count,
         `€ ${a.revenue.toFixed(2)}`,
+        `€ ${(a.taxBookingRevenue || 0).toFixed(2)}`,
+        `€ ${(a.revenue + (a.taxBookingRevenue || 0)).toFixed(2)}`,
         `€ ${a.commission.toFixed(2)}`
     ])
 
     autoTable(doc, {
         startY: yPos + 5,
-        head: [['Assistente', 'Pax', 'Incasso', 'Comm.']],
+        head: [['Assistente', 'Pax', 'Inc. Servizi', 'Inc. Tasse', 'Totale', 'Comm.']],
         body: assistantRows,
         theme: 'striped',
         headStyles: { fillColor: [249, 115, 22] }, // Orange-500
         columnStyles: {
         2: { halign: 'right' },
-        3: { halign: 'right' }
+        3: { halign: 'right' },
+        4: { halign: 'right', fontStyle: 'bold' },
+        5: { halign: 'right' }
         }
     })
     // @ts-ignore
@@ -279,6 +285,39 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
             4: { halign: 'right' },
             5: { halign: 'right' },
             6: { halign: 'right' }
+        }
+    })
+    // @ts-ignore
+    yPos = doc.lastAutoTable.finalY + 15
+  }
+
+  // --- Special Services / Taxes & Extra Breakdown ---
+  if (data.bySpecialService && data.bySpecialService.length > 0) {
+    // Check page break
+    if (yPos > 250) {
+        doc.addPage()
+        yPos = 20
+    }
+
+    doc.setFontSize(14)
+    doc.text('Dettaglio Tasse & Extra (Prenotazioni)', 14, yPos)
+
+    const specialRows = data.bySpecialService.map((s: any) => [
+        s.name,
+        s.pax || s.count,
+        `€ ${s.revenue.toFixed(2)}`,
+        `€ ${s.commission.toFixed(2)}`
+    ])
+
+    autoTable(doc, {
+        startY: yPos + 5,
+        head: [['Servizio', 'Pax', 'Incasso Totale', 'Netto Agenzia']],
+        body: specialRows,
+        theme: 'striped',
+        headStyles: { fillColor: [139, 92, 246] }, // Violet-500
+        columnStyles: {
+            2: { halign: 'right' },
+            3: { halign: 'right' }
         }
     })
   }
