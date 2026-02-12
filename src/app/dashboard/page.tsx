@@ -3,7 +3,12 @@ import { Map, Users, Settings, Briefcase, Bus, PieChart, Car, AlertTriangle } fr
 import { getSession } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { WeeklyCalendar } from './WeeklyCalendar'
-import { ApprovalsWidget } from './ApprovalsWidget'
+import dynamic from 'next/dynamic'
+
+const ApprovalsWidget = dynamic(() => import('./ApprovalsWidget').then(mod => mod.ApprovalsWidget), {
+  ssr: false,
+  loading: () => null
+})
 
 export default async function DashboardPage() {
   const session = await getSession()
@@ -45,21 +50,21 @@ export default async function DashboardPage() {
     connectionError = true
   }
 
-  const excursions = excursionsData.map(excursion => {
+  const excursions = JSON.parse(JSON.stringify(excursionsData.map(excursion => {
     const totalParticipants = excursion.participants.reduce((sum: number, p: any) => sum + (p.adults || 0) + (p.children || 0) + (p.infants || 0), 0)
     const { participants, ...rest } = excursion
     return {
       ...rest,
-      startDate: rest.startDate.toISOString(),
-      endDate: rest.endDate?.toISOString() || null,
-      confirmationDeadline: rest.confirmationDeadline?.toISOString() || null,
-      createdAt: rest.createdAt.toISOString(),
-      updatedAt: rest.updatedAt.toISOString(),
+      startDate: rest.startDate,
+      endDate: rest.endDate,
+      confirmationDeadline: rest.confirmationDeadline,
+      createdAt: rest.createdAt,
+      updatedAt: rest.updatedAt,
       _count: {
         participants: totalParticipants
       }
     }
-  })
+  })))
 
   // Format pending approvals for widget
   const formattedApprovals = pendingApprovals.map(p => ({
