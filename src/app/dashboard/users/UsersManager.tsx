@@ -76,18 +76,37 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
   }
 
   const handleDelete = async (id: string) => {
-    if (!confirm('Sei sicuro di voler eliminare questo utente?')) return
-
-    try {
-      const res = await fetch(`/api/users/${id}`, {
-        method: 'DELETE'
-      })
-      if (res.ok) {
-        fetchUsers()
+    setConfirmModal({
+      isOpen: true,
+      title: 'Elimina Utente',
+      message: 'Sei sicuro di voler eliminare questo utente?',
+      variant: 'danger',
+      onConfirm: async () => {
+        try {
+          const res = await fetch(`/api/users/${id}`, {
+            method: 'DELETE'
+          })
+          if (res.ok) {
+            fetchUsers()
+          } else {
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: 'Errore durante l\'eliminazione dell\'utente',
+              variant: 'error'
+            })
+          }
+        } catch (error) {
+          console.error('Error deleting user:', error)
+          setAlertModal({
+            isOpen: true,
+            title: 'Errore',
+            message: 'Errore di rete',
+            variant: 'error'
+          })
+        }
       }
-    } catch (error) {
-      console.error('Error deleting user:', error)
-    }
+    })
   }
 
   const handleFormClose = () => {

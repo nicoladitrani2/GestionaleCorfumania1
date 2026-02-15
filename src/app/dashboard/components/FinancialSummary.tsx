@@ -40,9 +40,12 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0 }: Financi
     </div>
   )
 
-  // Filter valid participants (exclude REJECTED)
-  // Only exclude REJECTED as per user request ("solo nella lista dei non confermati")
-  const validParticipants = participants.filter(p => p.approvalStatus !== 'REJECTED')
+  // Escludi dal calcolo:
+  // - partecipanti con sconto rifiutato
+  // - partecipanti con pagamento in attesa di approvazione
+  const validParticipants = participants.filter(
+    (p) => p.paymentStatus !== 'PENDING_APPROVAL' && p.approvalStatus !== 'REJECTED'
+  )
 
   // --- Calculations ---
   
@@ -52,10 +55,11 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0 }: Financi
   // 2. Agencies Map
   const agenciesMap = new Map<string, { name: string, commissionableTotal: number, count: number, commissionType: string, commissionValue: number, retained: number }>()
 
-  validParticipants.forEach(p => {
+    validParticipants.forEach(p => {
     let isRetained = false
     let effectivePrice = p.price || 0
-    let effectiveCount = p.groupSize || 1
+    let effectiveCount = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
+    let tax = p.tax || 0
 
     if (p.paymentType === 'REFUNDED') {
             const deposit = p.deposit || 0
@@ -64,7 +68,7 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0 }: Financi
             if (deposit > 0 && deposit < price) {
                 isRetained = true
                 effectivePrice = deposit
-                effectiveCount = p.groupSize || 1 // Count pax for fixed commissions
+                effectiveCount = (p.adults || 0) + (p.children || 0) + (p.infants || 0) // Count pax for fixed commissions
             } else {
                 return // Skip full refund
             }
@@ -79,14 +83,14 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0 }: Financi
           count: currentSupplier.count + effectiveCount
         })
 
-        // Agencies
-        let agencyName = p.createdBy?.agency?.name
-        let commissionType = p.createdBy?.agency?.commissionType || 'PERCENTAGE'
-        let commissionValue = p.createdBy?.agency?.defaultCommission || 0 
+        const owner = p.assignedTo || p.createdBy
 
-        // Fallback for Admin (Corfumania)
+        let agencyName = owner?.agency?.name
+        let commissionType = owner?.agency?.commissionType || 'PERCENTAGE'
+        let commissionValue = owner?.agency?.defaultCommission || 0 
+        
         if (!agencyName) {
-           if (p.createdBy?.role === 'ADMIN') {
+           if (owner?.role === 'ADMIN') {
                agencyName = 'Corfumania'
                commissionType = 'FIXED'
                commissionValue = 1.0
@@ -106,7 +110,7 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0 }: Financi
         
         agenciesMap.set(agencyName, {
           ...currentAgency,
-          commissionableTotal: currentAgency.commissionableTotal + effectivePrice,
+          commissionableTotal: currentAgency.commissionableTotal + (effectivePrice - tax),
           count: currentAgency.count + effectiveCount,
           retained: 0 
         })

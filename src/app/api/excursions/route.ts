@@ -15,9 +15,19 @@ export async function GET(request: Request) {
   const id = searchParams.get('id')
   const archived = searchParams.get('archived') === 'true'
   const all = searchParams.get('all') === 'true'
+  const cutoffParam = searchParams.get('cutoff')
   const now = new Date()
-  const startOfToday = new Date(now)
-  startOfToday.setHours(0, 0, 0, 0)
+  
+  // Use client-provided cutoff date if available, otherwise server-side start of day
+  let cutoffDate: Date
+  if (cutoffParam) {
+    cutoffDate = new Date(cutoffParam)
+    console.log('[API] Using client cutoff:', cutoffDate.toISOString())
+  } else {
+    cutoffDate = new Date(now)
+    cutoffDate.setHours(0, 0, 0, 0)
+    console.log('[API] Using server cutoff:', cutoffDate.toISOString())
+  }
 
   let currentUserAgencyId: string | null = null
   if (session.user.role !== 'ADMIN') {
@@ -35,32 +45,6 @@ export async function GET(request: Request) {
     }
   }
 
-  // Check for expired deadlines and update participants
-  try {
-    const expiredExcursions = await prisma.excursion.findMany({
-      where: {
-        confirmationDeadline: { lt: now }
-      },
-      select: { id: true }
-    })
-
-    if (expiredExcursions.length > 0) {
-      const expiredIds = expiredExcursions.map(e => e.id)
-      await prisma.participant.updateMany({
-        where: {
-          excursionId: { in: expiredIds },
-          isExpired: false,
-          OR: [
-            { isOption: true },
-            { paymentType: 'DEPOSIT' }
-          ]
-        },
-        data: { isExpired: true }
-      })
-    }
-  } catch (e) {
-    console.error('Error updating expired excursions:', e)
-  }
 
   const whereClause: any = {}
   
@@ -68,14 +52,22 @@ export async function GET(request: Request) {
     whereClause.id = id
   } else if (!all) {
     if (archived) {
-      whereClause.endDate = { lt: startOfToday }
+      whereClause.endDate = { lt: cutoffDate }
     } else {
       whereClause.OR = [
-        { endDate: { gte: startOfToday } },
+        { endDate: { gte: cutoffDate } },
         { endDate: null }
       ]
     }
   }
+
+  console.log('[API] Excursions Query:', { 
+    id, 
+    archived, 
+    all, 
+    cutoff: cutoffDate.toISOString(),
+    whereClause: JSON.stringify(whereClause) 
+  })
 
   try {
     const excursionsData = await prisma.excursion.findMany({
@@ -90,29 +82,36 @@ export async function GET(request: Request) {
         participants: {
           where: { paymentType: { not: 'REFUNDED' } },
           select: { 
-            groupSize: true,
-            deposit: true,
-            isExpired: true,
-            approvalStatus: true
+            adults: true,
+            children: true,
+            infants: true,
+            paidAmount: true,
+            paymentType: true,
+            paymentStatus: true,
           }
         }
       }
     })
 
+    console.log(`[API] Found ${excursionsData.length} excursions matching criteria`)
+
     const excursions = excursionsData.map(excursion => {
       const totalParticipants = excursion.participants
-        .filter(p => !p.isExpired && p.approvalStatus !== 'REJECTED')
-        .reduce((sum, p) => sum + (p.groupSize || 1), 0)
+        .filter(p => {
+          if (!excursion.confirmationDeadline) return true
+          if (p.paymentType === 'BALANCE') return true
+          return now <= excursion.confirmationDeadline
+        })
+        .reduce((sum, p) => sum + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)
       
-      // Calculate total collected (sum of deposits)
-      // Note: deposit field holds the actual paid amount (whether it's deposit or full balance)
-      const totalCollected = excursion.participants.reduce((sum, p) => {
-        // Exclude Rejected participants from revenue
-        if (p.approvalStatus === 'REJECTED') return sum
-        
-        const val = typeof p.deposit === 'number' ? p.deposit : Number(p.deposit)
-        return sum + (isNaN(val) ? 0 : val)
-      }, 0)
+      // Calculate total collected (sum of deposits/paid amounts)
+      // Note: paidAmount field holds the actual paid amount (whether it's deposit or full balance)
+      const totalCollected = excursion.participants
+        .filter(p => p.paymentStatus !== 'PENDING_APPROVAL' && p.paymentStatus !== 'REJECTED')
+        .reduce((sum, p) => {
+          const val = typeof p.paidAmount === 'number' ? p.paidAmount : Number(p.paidAmount)
+          return sum + (isNaN(val) ? 0 : val)
+        }, 0)
 
       const { participants, agencyCommissions, ...rest } = excursion
       
@@ -256,6 +255,8 @@ export async function POST(request: Request) {
       await createAuditLog(
         session.user.id,
         'CREATE_EXCURSION',
+        'EXCURSION',
+        createdExcursions[0].id,
         `Creata escursione "${name}" ${createdExcursions.length > 1 ? `(e altre ${createdExcursions.length - 1} ricorrenze)` : ''}`,
         createdExcursions[0].id
       )
@@ -382,33 +383,25 @@ export async function PUT(request: Request) {
       current.setDate(current.getDate() + 1)
     }
 
-    if (createdExcursions.length > 0) {
-      await createAuditLog(
-        session.user.id,
-        'UPDATE_EXCURSION',
-        `Modificata escursione "${name}" e create ${createdExcursions.length} ricorrenze future`,
-        excursion.id
-      )
+      if (createdExcursions.length > 0) {
+        await createAuditLog(
+          session.user.id,
+          'UPDATE_EXCURSION',
+          'EXCURSION',
+          excursion.id,
+          `Modificata escursione "${name}" e create ${createdExcursions.length} ricorrenze future`,
+          excursion.id
+        )
       return NextResponse.json(excursion)
     }
   }
 
-  // If deadline is extended to the future, reactivate expired participants
-  if (confirmationDeadline && new Date(confirmationDeadline) > new Date()) {
-    await prisma.participant.updateMany({
-      where: {
-        excursionId: id,
-        isExpired: true
-      },
-      data: {
-        isExpired: false
-      }
-    })
-  }
 
   await createAuditLog(
     session.user.id,
     'UPDATE_EXCURSION',
+    'EXCURSION',
+    excursion.id,
     `Modificata escursione "${name}"`,
     excursion.id
   )
@@ -450,6 +443,20 @@ export async function DELETE(request: Request) {
       }, { status: 400 })
     }
 
+    // Check for any activity logged on selected excursions (besides creation)
+    const activityCount = await prisma.auditLog.count({
+      where: {
+        excursionId: { in: bodyIds },
+        action: { not: 'CREATE_EXCURSION' }
+      }
+    })
+
+    if (activityCount > 0) {
+      return NextResponse.json({
+        error: 'Impossibile eliminare: una o più escursioni selezionate hanno attività registrate (modifiche, partecipanti, rimborsi, ecc.).'
+      }, { status: 400 })
+    }
+
     // Bulk delete by IDs
     const result = await prisma.excursion.deleteMany({
       where: { id: { in: bodyIds } }
@@ -458,8 +465,9 @@ export async function DELETE(request: Request) {
     await createAuditLog(
       session.user.id,
       'DELETE_EXCURSION',
-      `Eliminate ${result.count} escursioni selezionate`,
-      null
+      'EXCURSION',
+      'BULK',
+      `Eliminate ${result.count} escursioni selezionate`
     )
     return NextResponse.json({ count: result.count })
   }
@@ -472,15 +480,24 @@ export async function DELETE(request: Request) {
         OR: [
           { endDate: { gte: now } },
           { endDate: null }
-        ]
+        ],
+        participants: {
+          none: {}
+        },
+        auditLogs: {
+          none: {
+            action: { not: 'CREATE_EXCURSION' }
+          }
+        }
       }
     })
     
     await createAuditLog(
       session.user.id,
       'DELETE_EXCURSION',
-      `Eliminate tutte le ${result.count} escursioni attive`,
-      null
+      'EXCURSION',
+      'BULK_ACTIVE',
+      `Eliminate tutte le ${result.count} escursioni attive`
     )
     return NextResponse.json({ count: result.count })
   }
@@ -488,20 +505,33 @@ export async function DELETE(request: Request) {
   if (id) {
     // Delete single excursion
     const excursion = await prisma.excursion.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        participants: true,
+        auditLogs: {
+          select: { action: true }
+        }
+      }
     })
 
     if (!excursion) {
       return NextResponse.json({ error: 'Escursione non trovata' }, { status: 404 })
     }
 
-    // Delete associated data first (audit logs, participants)
-    // Prisma cascade delete should handle this if configured, but let's be safe
-    // Assuming Cascade delete is set up in schema, otherwise we need to delete manually.
-    // Let's check schema.prisma first? No, let's assume standard cascade or manual delete if needed.
-    // But wait, if I don't check schema, it might fail.
-    // Safe bet: just delete the excursion. If it fails, I'll see the error.
-    
+    if (excursion.participants.length > 0) {
+      return NextResponse.json({
+        error: 'Impossibile eliminare: questa escursione contiene partecipanti (attivi, rimborsati o sospesi).'
+      }, { status: 400 })
+    }
+
+    const hasActivity = excursion.auditLogs.some(log => log.action !== 'CREATE_EXCURSION')
+
+    if (hasActivity) {
+      return NextResponse.json({
+        error: 'Impossibile eliminare: su questa escursione sono state registrate operazioni (modifiche, partecipanti, rimborsi, ecc.).'
+      }, { status: 400 })
+    }
+
     await prisma.excursion.delete({
       where: { id }
     })
@@ -509,6 +539,8 @@ export async function DELETE(request: Request) {
     await createAuditLog(
       session.user.id,
       'DELETE_EXCURSION',
+      'EXCURSION',
+      id,
       `Eliminata escursione "${excursion.name}"`,
       id
     )
@@ -518,24 +550,17 @@ export async function DELETE(request: Request) {
     // Clear archive
     const now = new Date()
 
-    // Check for participants in archived excursions
-    const participantCount = await prisma.participant.count({
-      where: {
-        excursion: {
-          endDate: { lt: now }
-        }
-      }
-    })
-
-    if (participantCount > 0) {
-      return NextResponse.json({ 
-        error: 'Impossibile eliminare le escursioni archiviate: sono presenti partecipanti.' 
-      }, { status: 400 })
-    }
-
     const result = await prisma.excursion.deleteMany({
       where: {
-        endDate: { lt: now }
+        endDate: { lt: now },
+        participants: {
+          none: {}
+        },
+        auditLogs: {
+          none: {
+            action: { not: 'CREATE_EXCURSION' }
+          }
+        }
       }
     })
 

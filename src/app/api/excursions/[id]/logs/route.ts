@@ -15,7 +15,15 @@ export async function GET(
 
   try {
     const logs = await prisma.auditLog.findMany({
-      where: { excursionId: id },
+      where: {
+        OR: [
+          { excursionId: id },
+          {
+            entityType: 'EXCURSION',
+            entityId: id
+          }
+        ]
+      },
       include: {
         user: {
           select: {

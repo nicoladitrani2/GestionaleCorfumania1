@@ -1,9 +1,25 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, RefreshCw, Mail, Phone, Calendar, Clock, ChevronRight, Map, Car, Key, Users, CheckCircle } from 'lucide-react'
+import { Search, RefreshCw, Mail, Phone, Calendar, Clock, ChevronRight, Map, Car, Key, Users } from 'lucide-react'
 import { ClientHistoryModal } from './ClientHistoryModal'
 import { EmailModal } from './EmailModal'
+import { ConfirmationModal } from '../components/ConfirmationModal'
+
+interface ClientParticipant {
+  id: string
+  name: string
+  createdAt: string
+  totalPrice: number
+  paidAmount: number
+  paymentType: string
+  notes?: string
+  excursion?: { id: string; name: string; startDate: string }
+  transfer?: { id: string; name: string; date: string }
+  rental?: { id: string; name: string; type: string }
+  pickupLocation?: string
+  dropoffLocation?: string
+}
 
 interface Client {
   id: string
@@ -21,7 +37,7 @@ interface Client {
   }
   associatedNames: string[]
   derivedServiceTypes: string[]
-  participants: any[]
+  participants: ClientParticipant[]
 }
 
 export default function ClientsPage() {
@@ -33,10 +49,12 @@ export default function ClientsPage() {
   
   // Modal states
   const [historyClient, setHistoryClient] = useState<Client | null>(null)
+  const [historyServiceFilter, setHistoryServiceFilter] = useState<'EXCURSION' | 'TRANSFER' | 'RENTAL' | null>(null)
   const [emailClient, setEmailClient] = useState<{ id: string, email: string, name: string } | null>(null)
 
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear())
   const [activeTab, setActiveTab] = useState<'ALL' | 'EXCURSION' | 'TRANSFER' | 'RENTAL'>('ALL')
+  const [showResetModal, setShowResetModal] = useState(false)
 
   useEffect(() => {
     fetchClients()
@@ -46,8 +64,12 @@ export default function ClientsPage() {
     try {
       const res = await fetch('/api/clients', { cache: 'no-store' })
       if (res.ok) {
-        const data = await res.json()
+        const data: Client[] = await res.json()
+        const years = Array.from(new Set(data.map(getLastActivityYear))).sort((a, b) => b - a)
         setClients(data)
+        if (years.length > 0) {
+          setSelectedYear(years[0])
+        }
       }
     } catch (error) {
       console.error('Error fetching clients:', error)
@@ -56,7 +78,7 @@ export default function ClientsPage() {
     }
   }
 
-  const getLastActivityYear = (client: Client): number => {
+  function getLastActivityYear(client: Client): number {
     if (!client.participants || client.participants.length === 0) {
       return new Date(client.createdAt).getFullYear()
     }
@@ -65,7 +87,7 @@ export default function ClientsPage() {
       let dateStr = p.createdAt
       if (p.excursion?.startDate) dateStr = p.excursion.startDate
       else if (p.transfer?.date) dateStr = p.transfer.date
-      else if (p.isRental && p.rentalStartDate) dateStr = p.rentalStartDate
+      else if (p.rental) dateStr = p.createdAt
       
       return new Date(dateStr).getTime()
     })
@@ -74,15 +96,7 @@ export default function ClientsPage() {
     return new Date(maxDate).getFullYear()
   }
 
-  // Get unique sorted years
   const availableYears = Array.from(new Set(clients.map(getLastActivityYear))).sort((a, b) => b - a)
-  
-  // Set default year if not set or invalid
-  useEffect(() => {
-    if (availableYears.length > 0 && !availableYears.includes(selectedYear)) {
-      setSelectedYear(availableYears[0])
-    }
-  }, [clients])
 
   const handleSync = async () => {
     setSyncing(true)
@@ -126,7 +140,16 @@ export default function ClientsPage() {
     
     const matchesYear = getLastActivityYear(client) === selectedYear
 
-    return matchesSearch && matchesYear
+    const serviceTypes = client.derivedServiceTypes.length > 0
+      ? client.derivedServiceTypes
+      : (client.serviceType ? [client.serviceType] : [])
+
+    const matchesTab =
+      activeTab === 'ALL'
+        ? true
+        : serviceTypes.includes(activeTab)
+
+    return matchesSearch && matchesYear && matchesTab
   })
 
   return (
@@ -152,6 +175,15 @@ export default function ClientsPage() {
             <RefreshCw className={`w-4 h-4 ${syncing ? 'animate-spin' : ''}`} />
             {syncing ? 'Sincronizzazione...' : 'Sincronizza DB'}
           </button>
+          {availableYears.length > 0 && (
+            <button
+              onClick={() => setShowResetModal(true)}
+              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-red-300 text-red-700 rounded-lg shadow-sm hover:bg-red-50 hover:border-red-400 transition-all"
+            >
+              <RefreshCw className="w-4 h-4" />
+              Reset contatti anno {selectedYear}
+            </button>
+          )}
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -275,7 +307,7 @@ export default function ClientsPage() {
               ) : filteredClients.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
-                    Nessun cliente trovato. I clienti verranno salvati automaticamente all'aggiunta di una prenotazione.
+                    Nessun cliente trovato. I clienti verranno salvati automaticamente all&apos;aggiunta di una prenotazione.
                   </td>
                 </tr>
               ) : (
@@ -304,10 +336,16 @@ export default function ClientsPage() {
                             </span>
                           </label>
                           {client.lastEmailSentAt && (
-                            <span className="text-xs text-emerald-600 flex items-center gap-1 ml-6 bg-emerald-100/50 px-2 py-0.5 rounded-full w-fit">
-                              <Mail className="w-3 h-3" />
-                              Email inviata
-                            </span>
+                            <div className="flex items-center gap-2 ml-6">
+                              <span className="text-xs text-emerald-700 flex items-center gap-1 bg-emerald-100 px-2 py-0.5 rounded-full w-fit border border-emerald-200">
+                                <Mail className="w-3 h-3" />
+                                Email inviata
+                              </span>
+                              <span className="text-xs text-gray-700 flex items-center gap-1 bg-gray-100 px-2 py-0.5 rounded-full w-fit border border-gray-200">
+                                <Clock className="w-3 h-3" />
+                                {new Date(client.lastEmailSentAt).toLocaleDateString('it-IT')} {new Date(client.lastEmailSentAt).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                            </div>
                           )}
                         </div>
                       </td>
@@ -351,7 +389,10 @@ export default function ClientsPage() {
                         {(client.derivedServiceTypes.length > 0 ? client.derivedServiceTypes : [client.serviceType]).filter(Boolean).map((type, idx) => (
                           <button
                             key={idx}
-                            onClick={() => setHistoryClient(client)}
+                            onClick={() => {
+                              setHistoryClient(client)
+                              setHistoryServiceFilter(type as 'EXCURSION' | 'TRANSFER' | 'RENTAL')
+                            }}
                             className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold uppercase tracking-wide transition-transform hover:scale-105 hover:shadow-sm
                               ${type === 'EXCURSION' ? 'bg-green-100 text-green-700 hover:bg-green-200' : 
                                 type === 'TRANSFER' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 
@@ -387,8 +428,12 @@ export default function ClientsPage() {
 
       {historyClient && (
         <ClientHistoryModal 
-          client={historyClient} 
-          onClose={() => setHistoryClient(null)} 
+          client={historyClient}
+          serviceFilter={historyServiceFilter}
+          onClose={() => {
+            setHistoryClient(null)
+            setHistoryServiceFilter(null)
+          }} 
         />
       )}
 
@@ -401,6 +446,34 @@ export default function ClientsPage() {
           onEmailSent={fetchClients}
         />
       )}
+
+      <ConfirmationModal
+        isOpen={showResetModal}
+        onClose={() => setShowResetModal(false)}
+        onConfirm={async () => {
+          try {
+            const res = await fetch('/api/clients/reset-contact', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ year: selectedYear })
+            })
+
+            if (!res.ok) {
+              console.error('Failed to reset contact status')
+              return
+            }
+
+            fetchClients()
+          } catch (error) {
+            console.error('Error resetting contact status:', error)
+          }
+        }}
+        title="Reset stato contatto"
+        message={`Vuoi resettare lo stato di contatto per tutti i clienti dell'anno ${selectedYear}? Potrai ricontattarli nuovamente in futuro.`}
+        confirmText="Sì, resetta"
+        cancelText="Annulla"
+        variant="warning"
+      />
     </div>
   )
 }

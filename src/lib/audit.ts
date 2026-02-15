@@ -1,32 +1,32 @@
+import type { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 
 export async function createAuditLog(
   userId: string,
   action: string,
+  entityType: string,
+  entityId: string,
   details: string,
   excursionId?: string | null,
-  transferId?: string | null
+  transferId?: string | null,
+  rentalId?: string | null
 ) {
   try {
-    const data: any = {
+    const data: Prisma.AuditLogCreateInput = {
       userId,
       action,
+      entityType,
+      entityId,
       details,
-    }
-
-    if (excursionId) {
-        data.excursionId = excursionId
-    }
-    
-    if (transferId) {
-        data.transferId = transferId
+      ...(excursionId ? { excursionId } : {}),
+      ...(transferId ? { transferId } : {}),
+      ...(rentalId ? { rentalId } : {})
     }
 
     await prisma.auditLog.create({
-      data,
+      data
     })
   } catch (error) {
     console.error('Failed to create audit log:', error)
-    // Don't throw error to avoid breaking the main operation
   }
 }

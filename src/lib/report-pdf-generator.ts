@@ -68,9 +68,9 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
     ['Incasso Totale', `€ ${((data.summary.totalRevenue || 0) + (data.summary.totalTaxRevenue || 0)).toFixed(2)}`],
     ['Di cui Incasso Servizi', `€ ${data.summary.totalRevenue.toFixed(2)}`],
     ['Di cui Incasso Tasse / Non Comm.', `€ ${(data.summary.totalTaxRevenue || 0).toFixed(2)}`],
-    ['Commissioni Totali', `€ ${data.summary.totalCommission.toFixed(2)}`],
+    ['Commissioni Agenzie Esterne', `€ ${(data.summary.totalExternalAgencyCommission || 0).toFixed(2)}`],
     ['Commissioni Assistenti', `€ ${data.summary.totalAssistantCommission.toFixed(2)}`],
-    ['Netto Agenzia', `€ ${(data.summary.totalCommission - data.summary.totalAssistantCommission).toFixed(2)}`],
+    ['Netto Agenzia', `€ ${(data.summary.totalNetAgency || 0).toFixed(2)}`],
     ['Numero Prenotazioni', `${data.summary.count}`],
     ['Pax Totali', `${data.summary.totalPax || 0}`]
   ]

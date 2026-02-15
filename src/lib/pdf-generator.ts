@@ -15,7 +15,9 @@ interface ParticipantData {
   paymentMethod?: string // Legacy or fallback
   depositPaymentMethod?: string
   balancePaymentMethod?: string
-  groupSize: number
+  adults?: number
+  children?: number
+  infants?: number
   isOption: boolean
   notes?: string
   createdBy?: {
@@ -48,7 +50,7 @@ interface TransferData {
 }
 
 interface ExcursionData {
-  type?: 'EXCURSION' // Optional for backward compatibility, defaults to EXCURSION if undefined
+  type?: 'EXCURSION'
   name: string
   date: string | Date
   departureTime?: string
@@ -56,9 +58,27 @@ interface ExcursionData {
 }
 
 interface RentalData extends ExcursionData {
-    pickupLocation?: string
-    dropoffLocation?: string
+  type: 'RENTAL'
+  pickupLocation?: string
+  dropoffLocation?: string
 }
+
+type JsPdfAutoTable = jsPDF & {
+  lastAutoTable?: {
+    finalY?: number
+  }
+}
+
+type AutoTableCell =
+  | string
+  | number
+  | {
+      content: string
+      colSpan?: number
+      styles?: Record<string, unknown>
+    }
+
+type AutoTableRow = AutoTableCell[]
 
 const TRANSLATIONS = {
   it: {
@@ -156,11 +176,12 @@ const TRANSLATIONS = {
 }
 
 export const generateParticipantPDF = (
-  participant: ParticipantData, 
-  event: ExcursionData | TransferData,
+  participant: ParticipantData,
+  event: ExcursionData | TransferData | RentalData,
   language: 'it' | 'en' = 'it'
 ): jsPDF => {
   const doc = new jsPDF()
+  const autoTableDoc = doc as JsPdfAutoTable
   const t = TRANSLATIONS[language]
 
   // --- Header ---
@@ -186,8 +207,7 @@ export const generateParticipantPDF = (
   let statusText = ''
   let statusColor = [0, 0, 0]
   
-  const isRental = (event as any).type === 'RENTAL'
-  const isCarRental = isRental && participant.rentalType === 'CAR'
+  const isRental = (event as RentalData).type === 'RENTAL'
   const isOtherRental = isRental && participant.rentalType !== 'CAR'
 
   if (participant.paymentType === 'REFUNDED') {
@@ -227,7 +247,7 @@ export const generateParticipantPDF = (
   doc.setFillColor(243, 244, 246) // gray-100
   
   // Determine if it's a Transfer or Excursion
-  const isTransfer = (event as any).type === 'TRANSFER'
+  const isTransfer = (event as TransferData).type === 'TRANSFER'
   // isRental already defined above
 
   if (isRental) {
@@ -340,7 +360,7 @@ export const generateParticipantPDF = (
     [t.fields.doc, `${participant.docType} - ${participant.docNumber}`],
     [t.fields.phone, participant.phoneNumber || '-'],
     [t.fields.email, participant.email || '-'],
-    [t.fields.pax, participant.groupSize.toString()],
+    [t.fields.pax, ((participant.adults || 0) + (participant.children || 0) + (participant.infants || 0)).toString()],
     [t.fields.notes, participant.notes || '-']
   ]
 
@@ -358,7 +378,7 @@ export const generateParticipantPDF = (
     margin: { left: 20 }
   })
 
-  yPos = (doc as any).lastAutoTable.finalY + 15
+  yPos = (autoTableDoc.lastAutoTable?.finalY ?? yPos) + 15
 
   // --- Payment Section ---
   doc.setFontSize(12)
@@ -368,14 +388,29 @@ export const generateParticipantPDF = (
 
   yPos += 5
 
+  const rawPrice =
+    typeof participant.price === 'number'
+      ? participant.price
+      : typeof (participant as ParticipantData & { totalPrice?: number }).totalPrice === 'number'
+        ? (participant as ParticipantData & { totalPrice?: number }).totalPrice as number
+        : 0
+
+  const rawDeposit =
+    typeof participant.deposit === 'number'
+      ? participant.deposit
+      : 0
+
+  const priceValue = isNaN(rawPrice) ? 0 : rawPrice
+  const depositValue = isNaN(rawDeposit) ? 0 : rawDeposit
+
   const paymentDetails = [
-    [t.totalPrice, `€ ${participant.price.toFixed(2)}`]
+    [t.totalPrice, `€ ${priceValue.toFixed(2)}`]
   ]
 
   // Only show deposit details if it's NOT an unmanaged rental (i.e. show for CAR or Excursion/Transfer)
   if (!isOtherRental) {
-    paymentDetails.push([t.depositPaid, `€ ${participant.deposit.toFixed(2)}`])
-    paymentDetails.push([t.remaining, `€ ${(participant.price - participant.deposit).toFixed(2)}`])
+    paymentDetails.push([t.depositPaid, `€ ${depositValue.toFixed(2)}`])
+    paymentDetails.push([t.remaining, `€ ${(priceValue - depositValue).toFixed(2)}`])
   }
 
   // Add Payment Methods Details
@@ -429,7 +464,7 @@ export const generateParticipantPDF = (
   
   // Non-refundable Notice
   if (!isOtherRental) {
-    const finalY = (doc as any).lastAutoTable?.finalY || 150
+    const finalY = autoTableDoc.lastAutoTable?.finalY ?? 150
     yPos = finalY + 15
     
     // Check if we need a new page
@@ -463,7 +498,7 @@ export const generateParticipantPDF = (
 }
 
 export const generateParticipantsListPDF = (
-  participants: ParticipantData[], 
+  participants: ParticipantData[],
   event: ExcursionData | TransferData,
   selectedFields: string[]
 ): jsPDF => {
@@ -487,7 +522,7 @@ export const generateParticipantsListPDF = (
   doc.setFont('helvetica', 'normal')
   doc.text(eventDate.charAt(0).toUpperCase() + eventDate.slice(1), 14, 28)
 
-  const totalPax = participants.reduce((acc, p) => acc + (p.groupSize || 1), 0)
+  const totalPax = participants.reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1), 0)
   doc.text(`Totale Partecipanti: ${totalPax}`, 270, 20, { align: 'right' })
   const dateStr = new Date().toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   doc.setFontSize(8)
@@ -496,7 +531,9 @@ export const generateParticipantsListPDF = (
 
   // --- Table Columns ---
   const head = [['#', 'Nome e Cognome', 'Tel.', 'Pax']]
-  const body: any[] = []
+  const body: AutoTableRow[] = []
+
+  const isTransfer = (event as TransferData).type === 'TRANSFER'
 
   // Add dynamic headers
   if (selectedFields.includes('nationality')) head[0].push('Nazionalità')
@@ -513,7 +550,7 @@ export const generateParticipantsListPDF = (
   if (selectedFields.includes('accommodation')) head[0].push('Struttura')
   if (selectedFields.includes('pickupLocation')) head[0].push('Partenza')
   if (selectedFields.includes('pickupTime')) head[0].push('Ora Part.')
-  if (selectedFields.includes('returnDetails')) {
+  if (selectedFields.includes('returnDetails') && isTransfer) {
     head[0].push('Partenza Rit.')
     head[0].push('Destinazione Rit.')
     head[0].push('Data/Ora Rit.')
@@ -525,7 +562,7 @@ export const generateParticipantsListPDF = (
       (index + 1).toString(),
       `${p.firstName} ${p.lastName}`,
       p.phoneNumber || '-',
-      (p.groupSize || 1).toString()
+      ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1).toString()
     ]
 
     if (selectedFields.includes('nationality')) row.push(p.nationality || '-')
@@ -567,17 +604,22 @@ export const generateParticipantsListPDF = (
     if (selectedFields.includes('accommodation')) row.push(p.accommodation || '-')
     if (selectedFields.includes('pickupLocation')) row.push(p.pickupLocation || '-')
     if (selectedFields.includes('pickupTime')) row.push(p.pickupTime || '-')
-    if (selectedFields.includes('returnDetails')) {
-        row.push(p.returnPickupLocation || '-')
-        row.push(p.returnDropoffLocation || '-')
-        let dt = '-'
-        if (p.returnDate) {
-             try {
-                const d = new Date(p.returnDate).toLocaleDateString('it-IT', { day: '2-digit', month: '2-digit' })
-                dt = `${d} ${p.returnTime || ''}`.trim()
-             } catch(e) { dt = p.returnTime || '-' }
+    if (selectedFields.includes('returnDetails') && isTransfer) {
+      row.push(p.returnPickupLocation || '-')
+      row.push(p.returnDropoffLocation || '-')
+      let dt = '-'
+      if (p.returnDate) {
+        try {
+          const d = new Date(p.returnDate).toLocaleDateString('it-IT', {
+            day: '2-digit',
+            month: '2-digit'
+          })
+          dt = `${d} ${p.returnTime || ''}`.trim()
+        } catch {
+          dt = p.returnTime || '-'
         }
-        row.push(dt)
+      }
+      row.push(dt)
     }
 
     return row
@@ -602,7 +644,7 @@ export const generateParticipantsListPDF = (
 
     sortedLocations.forEach(loc => {
       // Add Header Row
-      const groupTotal = groups[loc].reduce((acc, p) => acc + (p.groupSize || 1), 0)
+      const groupTotal = groups[loc].reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)
       body.push([{ 
         content: `Partenza: ${loc} (Pax: ${groupTotal})`, 
         colSpan: head[0].length, 

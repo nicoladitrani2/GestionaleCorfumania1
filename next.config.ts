@@ -21,4 +21,11 @@ const nextConfig: NextConfig = {
   }
 };
 
-export default withPWA(nextConfig);
+const config = withPWA(nextConfig);
+
+// Remove experimental.turbo if injected by next-pwa, as it causes errors in Next.js 16
+if (config.experimental?.turbo) {
+  delete config.experimental.turbo;
+}
+
+export default config;

@@ -2,19 +2,15 @@ import { X, Calendar, MapPin, Tag } from 'lucide-react'
 
 interface Participant {
   id: string
-  firstName: string
-  lastName: string
+  name: string
   createdAt: string
-  price: number
-  deposit: number
+  totalPrice: number
+  paidAmount: number
   paymentType: string
   notes?: string
   excursion?: { id: string; name: string; startDate: string }
   transfer?: { id: string; name: string; date: string }
-  isRental: boolean
-  rentalType?: string
-  rentalStartDate?: string
-  rentalEndDate?: string
+  rental?: { id: string; name: string; type: string }
   pickupLocation?: string
   dropoffLocation?: string
 }
@@ -25,10 +21,11 @@ interface ClientHistoryModalProps {
     lastName: string
     participants: Participant[]
   }
+  serviceFilter: 'EXCURSION' | 'TRANSFER' | 'RENTAL' | null
   onClose: () => void
 }
 
-export function ClientHistoryModal({ client, onClose }: ClientHistoryModalProps) {
+export function ClientHistoryModal({ client, serviceFilter, onClose }: ClientHistoryModalProps) {
   const formatDate = (dateString?: string) => {
     if (!dateString) return '-'
     try {
@@ -40,17 +37,15 @@ export function ClientHistoryModal({ client, onClose }: ClientHistoryModalProps)
         hour: '2-digit',
         minute: '2-digit'
       })
-    } catch (e) {
+    } catch {
       return dateString
     }
   }
 
-  // Flatten and sort history
   const history = client.participants.map(p => {
     let type = 'ALTRO'
     let name = '-'
     let date = p.createdAt
-    let details = ''
 
     if (p.excursion) {
       type = 'ESCURSIONE'
@@ -60,14 +55,29 @@ export function ClientHistoryModal({ client, onClose }: ClientHistoryModalProps)
       type = 'TRASFERIMENTO'
       name = p.transfer.name
       date = p.transfer.date
-    } else if (p.isRental) {
-      type = `NOLEGGIO ${p.rentalType || ''}`
-      name = p.rentalType || 'Noleggio'
-      date = p.rentalStartDate || p.createdAt
+    } else if (p.rental) {
+      type = `NOLEGGIO ${p.rental.type || ''}`
+      name = p.rental.name || p.rental.type || 'Noleggio'
+      date = p.createdAt
     }
 
-    return { ...p, type, name, dateObj: new Date(date), displayDate: date }
+    const price =
+      typeof p.totalPrice === 'number'
+        ? p.totalPrice
+        : typeof p.paidAmount === 'number'
+          ? p.paidAmount
+          : 0
+
+    return { ...p, type, name, dateObj: new Date(date), displayDate: date, price }
   }).sort((a, b) => b.dateObj.getTime() - a.dateObj.getTime())
+
+  const filteredHistory = history.filter(item => {
+    if (!serviceFilter) return true
+    if (serviceFilter === 'EXCURSION') return item.type === 'ESCURSIONE'
+    if (serviceFilter === 'TRANSFER') return item.type === 'TRASFERIMENTO'
+    if (serviceFilter === 'RENTAL') return item.type.startsWith('NOLEGGIO')
+    return true
+  })
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
@@ -86,13 +96,13 @@ export function ClientHistoryModal({ client, onClose }: ClientHistoryModalProps)
         </div>
         
         <div className="p-6 overflow-y-auto bg-gray-50/50">
-          {history.length === 0 ? (
+          {filteredHistory.length === 0 ? (
             <div className="text-center py-12">
                <p className="text-gray-400 text-lg">Nessuna attività registrata per questo cliente.</p>
             </div>
           ) : (
-            <div className="space-y-4">
-              {history.map((item) => (
+              <div className="space-y-4">
+              {filteredHistory.map((item) => (
                 <div key={item.id} className="bg-white border border-gray-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow">
                   <div className="flex justify-between items-start mb-3">
                     <div className="flex items-center gap-3">

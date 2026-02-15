@@ -154,7 +154,7 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
                 <Users className="w-5 h-5 text-gray-600 mt-0.5" />
                 <div>
                   <p className="text-sm font-bold text-gray-700">Numero Persone</p>
-                  <p className="font-bold text-gray-900">{participant.groupSize || 1}</p>
+                  <p className="font-bold text-gray-900">{(participant.adults || 0) + (participant.children || 0) + (participant.infants || 0)}</p>
                 </div>
               </div>
 

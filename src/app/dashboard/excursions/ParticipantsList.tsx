@@ -55,6 +55,7 @@ interface ParticipantsTableProps {
   emptyMessage: string
   userRole: string
   currentUserId: string
+  deadline: Date | null
   onEdit: (p: any) => void
   onDelete: (id: string) => void
   onSettleBalance: (p: any) => void
@@ -62,7 +63,23 @@ interface ParticipantsTableProps {
   onRefund: (p: any) => void
 }
 
-const ParticipantsTable = ({ 
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(blob)
+      reader.onloadend = () => {
+        const result = reader.result?.toString()
+        if (result) {
+          resolve(result.split(',')[1])
+        } else {
+          reject(new Error('Failed to convert PDF to Base64'))
+        }
+      }
+      reader.onerror = error => reject(error)
+    })
+  }
+
+  const ParticipantsTable = ({ 
   data, 
   emptyMessage,
   userRole,
@@ -71,8 +88,12 @@ const ParticipantsTable = ({
   onDelete,
   onSettleBalance,
   onShowDetails,
-  onRefund
-}: ParticipantsTableProps) => (
+  onRefund,
+  deadline
+}: ParticipantsTableProps) => {
+  const now = new Date()
+
+  return (
   <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
     <div className="hidden md:block overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200">
@@ -144,7 +165,7 @@ const ParticipantsTable = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                    {p.groupSize || 1}
+                    {(p.adults || 0) + (p.children || 0) + (p.infants || 0)}
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{p.nationality}</td>
@@ -198,7 +219,7 @@ const ParticipantsTable = ({
                             Saldo
                           </button>
                         )}
-                        {p.deposit > 0 && (
+                        {p.deposit > 0 && (userRole === 'ADMIN' || (p.createdById === currentUserId && (!deadline || now <= deadline))) && (
                           <button
                             onClick={() => onRefund(p)}
                             className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-orange-700 bg-orange-50 hover:bg-orange-100 rounded-md transition-colors border border-orange-200"
@@ -265,7 +286,7 @@ const ParticipantsTable = ({
                   <div className="flex flex-col items-start">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                        <Users className="w-3 h-3 mr-1" />
-                       {p.groupSize || 1}
+                       {(p.adults || 0) + (p.children || 0) + (p.infants || 0)}
                     </span>
                     {(p.adults !== undefined || p.children !== undefined) && (
                         <span className="text-[10px] text-gray-500 mt-0.5 ml-1">
@@ -324,7 +345,7 @@ const ParticipantsTable = ({
                                 <Euro className="w-4 h-4" />
                               </button>
                             )}
-                            {p.deposit > 0 && (
+                            {p.deposit > 0 && (userRole === 'ADMIN' || (p.createdById === currentUserId && (!deadline || now <= deadline))) && (
                               <button
                                 onClick={() => onRefund(p)}
                                 className="p-2 text-orange-700 bg-orange-50 rounded-lg border border-orange-200"
@@ -367,7 +388,7 @@ const ParticipantsTable = ({
       )}
     </div>
   </div>
-)
+)}
 
 interface ParticipantsListProps {
   onEdit: (participant: any) => void
@@ -401,18 +422,25 @@ export function ParticipantsList({
   const [showExportModal, setShowExportModal] = useState(false)
   const [listToExport, setListToExport] = useState<any[] | null>(null)
   const [exportFilename, setExportFilename] = useState('')
+  const [confirmModal, setConfirmModal] = useState<{ isOpen: boolean, title: string, message: string, variant: 'danger' | 'warning' | 'info', onConfirm: () => void }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info',
+    onConfirm: () => {}
+  })
 
 
 
   const fetchParticipants = async () => {
     try {
-      const res = await fetch(`/api/participants?excursionId=${excursionId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setParticipants(data)
-      }
+      const res = await fetch(`/api/participants?excursionId=${excursionId}`, { cache: 'no-store' })
+      if (!res.ok) throw new Error('fetch_failed')
+      const data = await res.json()
+      setParticipants(data)
     } catch (error) {
-      console.error('Error fetching participants:', error)
+      console.warn('Errore nel recupero dei partecipanti:', error)
+      setParticipants([])
     } finally {
       setLoading(false)
     }
@@ -435,10 +463,35 @@ export function ParticipantsList({
     </div>
   )
 
-  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED' && p.approvalStatus !== 'PENDING' && p.approvalStatus !== 'REJECTED')
-  const expiredParticipants = participants.filter(p => (p.isExpired && p.paymentType !== 'REFUNDED') || p.approvalStatus === 'REJECTED')
+  const now = new Date()
+  const deadline = confirmationDeadline ? new Date(confirmationDeadline) : null
+  
+  const getApproval = (p: any) => {
+    if (p.approvalStatus) return p.approvalStatus
+    if (p.paymentStatus === 'PENDING_APPROVAL') return 'PENDING'
+    if (p.paymentStatus === 'REJECTED') return 'REJECTED'
+    return undefined
+  }
+  
+  const pendingParticipants = participants.filter(p => getApproval(p) === 'PENDING')
+  const rejectedParticipants = participants.filter(p => getApproval(p) === 'REJECTED')
   const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
-  const pendingParticipants = participants.filter(p => p.approvalStatus === 'PENDING')
+  
+  const confirmedParticipants = participants.filter(p => p.paymentType === 'BALANCE')
+  
+  const inTimeUnpaid = participants.filter(p => {
+    if (p.paymentType === 'REFUNDED' || p.paymentType === 'BALANCE') return false
+    if (getApproval(p) === 'REJECTED') return false
+    if (!deadline) return true
+    return now <= deadline
+  })
+  
+  const expiredParticipants = participants.filter(p => {
+    if (p.paymentType === 'REFUNDED') return false
+    if (getApproval(p) === 'REJECTED') return false
+    if (!deadline) return false
+    return now > deadline && p.paymentType !== 'BALANCE'
+  })
 
   const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
@@ -495,53 +548,59 @@ export function ParticipantsList({
 
   const handleSettleBalance = async (p: any) => {
     const remainingAmount = (p.price || 0) - (p.deposit || 0)
-    if (!confirm(`Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`)) return
+    setConfirmModal({
+      isOpen: true,
+      title: 'Conferma Saldo',
+      message: `Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`,
+      variant: 'info',
+      onConfirm: async () => {
+        try {
+          // Generate updated PDFs
+          const updatedParticipant = {
+            ...p,
+            paymentType: 'BALANCE',
+            deposit: p.price,
+            isOption: false
+          }
 
-    try {
-      // Generate updated PDFs
-      const updatedParticipant = {
-        ...p,
-        paymentType: 'BALANCE',
-        deposit: p.price,
-        isOption: false
+          const eventData = {
+            type: 'EXCURSION',
+            name: excursionName,
+            date: excursionDate
+          }
+
+          // Generate Italian PDF
+          const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
+          const pdfBlobIT = docIT.output('blob')
+          const pdfBase64IT = await blobToBase64(pdfBlobIT)
+
+          // Generate English PDF
+          const docEN = generateParticipantPDF(updatedParticipant, eventData as any, 'en')
+          const pdfBlobEN = docEN.output('blob')
+          const pdfBase64EN = await blobToBase64(pdfBlobEN)
+
+          const res = await fetch(`/api/participants/${p.id}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...p,
+              paymentType: 'BALANCE',
+              deposit: p.price,
+              isOption: false,
+              pdfAttachmentIT: pdfBase64IT,
+              pdfAttachmentEN: pdfBase64EN
+            })
+          })
+
+          if (res.ok) {
+            fetchParticipants()
+            if (onUpdate) onUpdate()
+          }
+        } catch (error) {
+          console.error('Error settling balance:', error)
+        }
       }
-
-      const eventData = {
-        type: 'EXCURSION',
-        name: excursionName,
-        date: excursionDate
-      }
-
-      // Generate Italian PDF
-      const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
-      const pdfBlobIT = docIT.output('blob')
-      const pdfBase64IT = await blobToBase64(pdfBlobIT)
-
-      // Generate English PDF
-      const docEN = generateParticipantPDF(updatedParticipant, eventData as any, 'en')
-      const pdfBlobEN = docEN.output('blob')
-      const pdfBase64EN = await blobToBase64(pdfBlobEN)
-
-      const res = await fetch(`/api/participants/${p.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...p,
-          paymentType: 'BALANCE',
-          deposit: p.price, // Set deposit to full price as it's fully paid
-          isOption: false,
-          pdfAttachmentIT: pdfBase64IT,
-          pdfAttachmentEN: pdfBase64EN
-        })
-      })
-
-      if (res.ok) {
-        fetchParticipants()
-        if (onUpdate) onUpdate()
-      }
-    } catch (error) {
-      console.error('Error settling balance:', error)
-    }
+    })
   }
 
   const handleRefund = async (participantId: string, amount: number, method: string, notes: string) => {
@@ -630,7 +689,7 @@ export function ParticipantsList({
     <div className="space-y-8">
       <div className="flex justify-between items-center px-1">
         <button
-          onClick={() => openExportModal(activeParticipants, 'lista-partecipanti')}
+          onClick={() => openExportModal(confirmedParticipants, 'lista-partecipanti')}
           className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 hover:text-gray-900 transition-colors shadow-sm ml-auto"
         >
           <FileDown className="w-4 h-4" />
@@ -655,7 +714,7 @@ export function ParticipantsList({
               <AlertCircle className="w-5 h-5 text-amber-600" />
               <h3 className="text-lg font-bold text-gray-800">In Attesa di Approvazione</h3>
               <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-amber-200">
-                {pendingParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+                {pendingParticipants.reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1), 0)}
               </span>
             </div>
           </div>
@@ -664,6 +723,7 @@ export function ParticipantsList({
             emptyMessage="Nessun partecipante in attesa" 
             userRole={userRole}
             currentUserId={currentUserId}
+            deadline={deadline}
             onEdit={onEdit}
             onDelete={handleDelete}
             onSettleBalance={handleSettleBalance}
@@ -677,17 +737,18 @@ export function ParticipantsList({
         <div className="flex items-center justify-between px-1">
           <div className="flex items-center gap-2">
             <CheckCircle className="w-5 h-5 text-green-600" />
-            <h3 className="text-lg font-bold text-gray-800">Lista Partecipanti Attivi</h3>
+            <h3 className="text-lg font-bold text-gray-800">Confermati (Saldato)</h3>
             <span className="bg-green-100 text-green-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-green-200">
-              {activeParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+              {confirmedParticipants.reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)}
             </span>
           </div>
         </div>
         <ParticipantsTable 
-          data={activeParticipants} 
-          emptyMessage="Nessun partecipante attivo registrato" 
+          data={confirmedParticipants} 
+          emptyMessage="Nessun partecipante confermato" 
           userRole={userRole}
           currentUserId={currentUserId}
+          deadline={deadline}
           onEdit={onEdit}
           onDelete={handleDelete}
           onSettleBalance={handleSettleBalance}
@@ -696,18 +757,18 @@ export function ParticipantsList({
         />
       </div>
 
-      {refundedParticipants.length > 0 && (
+      {inTimeUnpaid.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
             <div className="flex items-center gap-2">
-              <RotateCcw className="w-5 h-5 text-gray-600" />
-              <h3 className="text-lg font-bold text-gray-800">Lista Rimborsati</h3>
-              <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-gray-200">
-                {refundedParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+              <Clock className="w-5 h-5 text-orange-600" />
+              <h3 className="text-lg font-bold text-gray-800">Non Saldati (Entro Scadenza)</h3>
+              <span className="bg-orange-100 text-orange-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-orange-200">
+                {inTimeUnpaid.reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)}
               </span>
             </div>
             <button
-              onClick={() => openExportModal(refundedParticipants, 'partecipanti-rimborsati')}
+              onClick={() => openExportModal(inTimeUnpaid, 'partecipanti-non-saldati')}
               className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
             >
               <FileDown className="w-3.5 h-3.5" />
@@ -716,10 +777,46 @@ export function ParticipantsList({
           </div>
           <div className="opacity-75 hover:opacity-100 transition-opacity">
             <ParticipantsTable 
-              data={refundedParticipants} 
-              emptyMessage="Nessun partecipante rimborsato" 
+              data={inTimeUnpaid} 
+              emptyMessage="Nessun partecipante entro scadenza" 
               userRole={userRole}
               currentUserId={currentUserId}
+              deadline={deadline}
+              onEdit={onEdit}
+              onDelete={handleDelete}
+              onSettleBalance={handleSettleBalance}
+              onShowDetails={(p) => { setSelectedParticipant(p); setShowDetails(true); }}
+              onRefund={(p) => { setParticipantToRefund(p); setShowRefund(true); }}
+            />
+          </div>
+        </div>
+      )}
+
+      {rejectedParticipants.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-red-600" />
+              <h3 className="text-lg font-bold text-gray-800">Rifiutati (Sconto non approvato)</h3>
+              <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
+                {rejectedParticipants.reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)}
+              </span>
+            </div>
+            <button
+              onClick={() => openExportModal(rejectedParticipants, 'partecipanti-rifiutati')}
+              className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+            >
+              <FileDown className="w-3.5 h-3.5" />
+              Esporta PDF
+            </button>
+          </div>
+          <div className="opacity-75 hover:opacity-100 transition-opacity">
+            <ParticipantsTable 
+              data={rejectedParticipants} 
+              emptyMessage="Nessun partecipante rifiutato" 
+              userRole={userRole}
+              currentUserId={currentUserId}
+              deadline={deadline}
               onEdit={onEdit}
               onDelete={handleDelete}
               onSettleBalance={handleSettleBalance}
@@ -737,7 +834,7 @@ export function ParticipantsList({
               <Clock className="w-5 h-5 text-red-600" />
               <h3 className="text-lg font-bold text-gray-800">Scaduti / Non Confermati</h3>
               <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
-                {expiredParticipants.reduce((acc, p) => acc + (p.groupSize || 1), 0)}
+                {expiredParticipants.reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)}
               </span>
             </div>
             <button
@@ -754,6 +851,7 @@ export function ParticipantsList({
               emptyMessage="Nessun partecipante scaduto" 
               userRole={userRole}
               currentUserId={currentUserId}
+              deadline={deadline}
               onEdit={onEdit}
               onDelete={handleDelete}
               onSettleBalance={handleSettleBalance}
@@ -800,6 +898,15 @@ export function ParticipantsList({
           onExport={handleFinalExport}
         />
       )}
+      
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
     </div>
   )
 }

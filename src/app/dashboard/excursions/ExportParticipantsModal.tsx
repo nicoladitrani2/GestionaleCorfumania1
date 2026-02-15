@@ -26,14 +26,15 @@ export const EXPORT_FIELDS = [
 ]
 
 export function ExportParticipantsModal({ onClose, onExport }: ExportParticipantsModalProps) {
-  const [selectedFields, setSelectedFields] = useState<string[]>(['nationality', 'notes', 'price', 'deposit', 'paymentType', 'pickupLocation', 'pickupTime'])
+  const [selectedFields, setSelectedFields] = useState<string[]>(EXPORT_FIELDS.map(f => f.id))
 
   const toggleField = (id: string) => {
-    setSelectedFields(prev => 
-      prev.includes(id) 
-        ? prev.filter(f => f !== id)
-        : [...prev, id]
-    )
+    setSelectedFields(prev => {
+      if (prev.includes(id)) {
+        return prev.filter(f => f !== id)
+      }
+      return [...prev, id]
+    })
   }
 
   const handleExport = () => {
@@ -67,24 +68,28 @@ export function ExportParticipantsModal({ onClose, onExport }: ExportParticipant
           <div className="space-y-3 mb-6">
             <label className="text-sm font-bold text-gray-900 block">Seleziona i campi aggiuntivi:</label>
             <div className="grid grid-cols-2 gap-3">
-              {EXPORT_FIELDS.map(field => (
-                <div 
-                  key={field.id}
-                  onClick={() => toggleField(field.id)}
-                  className={`
-                    flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all
-                    ${selectedFields.includes(field.id) 
-                      ? 'bg-blue-50 border-blue-200 text-blue-700' 
-                      : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'}
-                  `}
-                >
-                  {selectedFields.includes(field.id) 
-                    ? <CheckSquare className="w-4 h-4 shrink-0" />
-                    : <Square className="w-4 h-4 shrink-0" />
-                  }
-                  <span className="text-sm font-medium">{field.label}</span>
-                </div>
-              ))}
+              {EXPORT_FIELDS.map(field => {
+                const isSelected = selectedFields.includes(field.id)
+                return (
+                  <div 
+                    key={field.id}
+                    onClick={() => toggleField(field.id)}
+                    className={`
+                      flex items-center gap-2 p-3 rounded-lg border cursor-pointer transition-all
+                      ${isSelected 
+                        ? 'bg-blue-50 border-blue-200 text-blue-700' 
+                        : 'bg-white border-gray-200 text-gray-700 hover:bg-gray-50'}
+                    `}
+                  >
+                    {isSelected ? (
+                      <CheckSquare className="w-4 h-4 shrink-0" />
+                    ) : (
+                      <Square className="w-4 h-4 shrink-0 text-gray-400" />
+                    )}
+                    <span className="text-sm font-medium">{field.label}</span>
+                  </div>
+                )
+              })}
             </div>
           </div>
 

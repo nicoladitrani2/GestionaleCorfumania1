@@ -35,6 +35,8 @@ model User {
   participants       Participant[]
   agency             Agency?       @relation(fields: [agencyId], references: [id])
   assignedTaxBookings TaxBooking[] @relation("AssignedTaxBookings")
+  assignedParticipants Participant[] @relation("AssignedParticipants")
+  createdTransfers   Transfer[]    @relation("UserCreatedTransfers")
 }
 
 model Excursion {
@@ -73,15 +75,21 @@ model Transfer {
   name                 String
   date                 DateTime
   endDate              DateTime?
+  confirmationDeadline DateTime?
   pickupLocation       String?
   dropoffLocation      String?
   supplier             String
+  priceAdult           Float         @default(0)
+  priceChild           Float         @default(0)
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   returnPickupLocation String?
   agencyCommissions    TransferAgencyCommission[]
   auditLogs            AuditLog[]
   participants         Participant[]
+  approvalStatus       String        @default("APPROVED") // PENDING, APPROVED, REJECTED
+  createdById          String?
+  createdBy            User?         @relation("UserCreatedTransfers", fields: [createdById], references: [id])
 }
 
 model TransferAgencyCommission {
@@ -114,42 +122,85 @@ model Rental {
 }
 
 model Participant {
-  id            String   @id @default(cuid())
-  name          String
-  email         String?
-  phone         String?
-  adults        Int
-  children      Int
-  infants       Int
-  totalPrice    Float
-  paidAmount    Float
-  paymentMethod String
-  paymentStatus String   // PENDING, PAID, PARTIAL
-  status        String   // ACTIVE, CANCELLED, REFUNDED
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
-  excursionId   String?
-  userId        String
-  excursion     Excursion? @relation(fields: [excursionId], references: [id])
-  user          User       @relation(fields: [userId], references: [id])
-  pickupLocation String?
-  dropoffLocation String?
-  isRoundTrip   Boolean @default(false)
-  transferId    String?
-  transfer      Transfer? @relation(fields: [transferId], references: [id])
-  rentalId      String?
-  rental        Rental? @relation(fields: [rentalId], references: [id])
-  roomNumber    String?
-  supplier      String?
-  nationality   String?
-  paymentType   String? // FULL_PAYMENT, DEPOSIT, OPTION, REFUNDED
-  ticketNumber  String?
-  bookingDate   DateTime @default(now()) // Cash Basis Date
-  tax           Float    @default(0)     // Tax field
-  specialServiceType String? // BRACELET, CITY_TAX, AC
+  id                    String   @id @default(cuid())
+  name                  String
+  email                 String?
+  phone                 String?
+  adults                Int
+  children              Int
+  infants               Int
+  totalPrice            Float
+  paidAmount            Float
+  paymentMethod         String
+  paymentStatus         String   // PENDING, PAID, PARTIAL
+  status                String   // ACTIVE, CANCELLED, REFUNDED
+  notes                 String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+  excursionId           String?
+  userId                String
+  excursion             Excursion? @relation(fields: [excursionId], references: [id])
+  user                  User       @relation(fields: [userId], references: [id])
+  pickupLocation        String?
+  pickupTime            String?
+  dropoffLocation       String?
+  returnPickupLocation  String?
+  returnDropoffLocation String?
+  returnDate            DateTime?
+  returnTime            String?
+  isRoundTrip           Boolean @default(false)
+  transferId            String?
+  transfer              Transfer? @relation(fields: [transferId], references: [id])
+  rentalId              String?
+  rental                Rental? @relation(fields: [rentalId], references: [id])
+  roomNumber            String?
+  supplier              String?
+  nationality           String?
+  paymentType           String? // FULL_PAYMENT, DEPOSIT, OPTION, REFUNDED
+  ticketNumber          String?
+  bookingDate           DateTime @default(now()) // Cash Basis Date
+  tax                   Float    @default(0)     // Tax field
+  specialServiceType    String? // BRACELET, CITY_TAX, AC
+  clientId              String?
+  client                Client?   @relation(fields: [clientId], references: [id])
+  assignedToId          String?
+  assignedTo            User?    @relation("AssignedParticipants", fields: [assignedToId], references: [id])
+
+  // Campi specifici per i noleggi
+  rentalType             String?
+  rentalStartDate        DateTime?
+  rentalEndDate          DateTime?
+  licenseType            String?
+  insurancePrice         Float    @default(0)
+  supplementPrice        Float    @default(0)
+  assistantCommission    Float    @default(0)
+  assistantCommissionType String?
+  needsTransfer          Boolean  @default(false)
+  commissionPercentage   Float    @default(0)
 }
 
+model Client {
+  id           String        @id @default(cuid())
+  firstName    String
+  lastName     String
+  email        String?
+  phoneNumber  String?
+  nationality  String?
+  serviceType  String?
+  isManuallyContacted Boolean @default(false)
+  lastEmailSentAt DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  participants Participant[]
+  @@unique([email])
+}
+
+model Supplier {
+  id        String   @id @default(cuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
 model AuditLog {
   id          String      @id @default(cuid())
   action      String      // CREATE, UPDATE, DELETE

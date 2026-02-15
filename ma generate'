@@ -1,0 +1,32 @@
+warning: in the working copy of 'prisma/schema.prisma', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/api/excursions/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/api/participants/[id]/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/api/participants/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/api/transfers/route.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/components/FinancialSummary.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/excursions/ExcursionLeaderboard.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/excursions/ExcursionsManager.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/excursions/ParticipantDetailsModal.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/excursions/ParticipantForm.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/excursions/ParticipantsList.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/page.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/transfers/ParticipantsList.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/app/dashboard/transfers/TransfersManager.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'src/lib/pdf-generator.ts', LF will be replaced by CRLF the next time Git touches it
+ prisma/schema.prisma                               | 10 [32m+++++++[m
+ src/app/api/excursions/route.ts                    | 17 [32m+++++++++[m[31m---[m
+ src/app/api/participants/[id]/route.ts             | 22 [32m++++++++++++[m[31m---[m
+ src/app/api/participants/route.ts                  | 31 [32m++++++++++++++++++[m[31m----[m
+ src/app/api/reports/route.ts                       |  4 [32m+[m[31m--[m
+ src/app/api/transfers/route.ts                     | 27 [32m++++++++++++++[m[31m-----[m
+ src/app/dashboard/components/FinancialSummary.tsx  |  4 [32m+[m[31m--[m
+ .../dashboard/excursions/ExcursionLeaderboard.tsx  |  3 [32m++[m[31m-[m
+ src/app/dashboard/excursions/ExcursionsManager.tsx | 11 [32m++++++++[m
+ .../excursions/ParticipantDetailsModal.tsx         |  2 [32m+[m[31m-[m
+ src/app/dashboard/excursions/ParticipantForm.tsx   |  9 [32m+++[m[31m----[m
+ src/app/dashboard/excursions/ParticipantsList.tsx  | 12 [32m++++[m[31m-----[m
+ src/app/dashboard/page.tsx                         |  9 [32m++[m[31m-----[m
+ src/app/dashboard/transfers/ParticipantsList.tsx   |  6 [32m++[m[31m---[m
+ src/app/dashboard/transfers/TransfersManager.tsx   |  2 [32m+[m[31m-[m
+ src/lib/pdf-generator.ts                           | 14 [32m+++++[m[31m-----[m
+ 16 files changed, 128 insertions(+), 55 deletions(-)

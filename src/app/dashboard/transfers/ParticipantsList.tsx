@@ -30,7 +30,8 @@ export function ParticipantsList({
   eventId,
   eventType,
   transferName,
-  transferDate
+  transferDate,
+  transferConfirmationDeadline
 }: any) {
   const transferId = eventId
   const [participants, setParticipants] = useState<any[]>([])
@@ -341,6 +342,13 @@ export function ParticipantsList({
     return 'N/A'
   }
 
+  const getApproval = (p: any) => {
+    if (p.approvalStatus) return p.approvalStatus
+    if (p.paymentStatus === 'PENDING_APPROVAL') return 'PENDING'
+    if (p.paymentStatus === 'REJECTED') return 'REJECTED'
+    return undefined
+  }
+
   const getRowBackground = (p: any) => {
     if (p.paymentType === 'REFUNDED') return 'bg-gray-50/50 hover:bg-gray-100/50 opacity-75'
     if (p.isOption) return 'bg-red-50/50 hover:bg-red-100/50'
@@ -405,26 +413,24 @@ export function ParticipantsList({
       const arrivalDateTime = arrivalParts.join(' ')
       const arrivalDetails = arrivalDateTime ? `${arrivalLocStr}\n${arrivalDateTime}` : arrivalLocStr
 
-      // Destinazione (Dropoff) Details
-      let returnDetails = '-'
-      
-      // Use dropoffLocation as primary for "Destinazione"
       const dropoffLocStr = p.dropoffLocation || '-'
-      
-      // If we have return date/time, we can show it, but for Transfer PDF usually Destination is just Location.
-      // But let's check if return info is relevant. The original code used it for 'Ritorno'.
-      // If we rename 'Ritorno' to 'Destinazione', we should show the Dropoff Location.
-      
-      returnDetails = dropoffLocStr
-      
-      // If there is a return date (e.g. Round Trip), we might want to show it?
-      // But "Destinazione" usually implies where they are going NOW.
-      // The user said "ritiro e deposito le possiamo chiamare partenza e destinazione".
-      // So Partenza = Pickup, Destinazione = Dropoff.
-      
+      let returnDetails = dropoffLocStr
+
+      if (p.returnDate) {
+        const dateStr = new Date(p.returnDate).toLocaleDateString('it-IT', {
+          day: '2-digit',
+          month: '2-digit'
+        })
+        const timeStr = p.returnTime || ''
+        const parts = [dateStr, timeStr].filter(Boolean).join(' ')
+        if (parts) {
+          returnDetails = `${dropoffLocStr}\nRitorno: ${parts}`
+        }
+      }
+
       return [
         `${p.firstName} ${p.lastName}`,
-        p.groupSize?.toString() || '1',
+        ((p.adults || 0) + (p.children || 0) + (p.infants || 0)).toString(),
         p.nationality || '-',
         arrivalDetails, // Partenza
         returnDetails,  // Destinazione
@@ -464,10 +470,27 @@ export function ParticipantsList({
     </div>
   )
 
-  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED' && p.approvalStatus !== 'PENDING' && p.approvalStatus !== 'REJECTED')
-  const expiredParticipants = participants.filter(p => (p.isExpired && p.paymentType !== 'REFUNDED') || p.approvalStatus === 'REJECTED')
+  const now = new Date()
+  const deadline = transferConfirmationDeadline ? new Date(transferConfirmationDeadline) : null
+
+  const isParticipantExpired = (p: any) => {
+    const approval = getApproval(p)
+    if (p.paymentType === 'REFUNDED') return false
+    if (approval === 'REJECTED') return false
+    if (p.paymentType === 'BALANCE') return false
+
+    if (!deadline) {
+      return !!p.isExpired
+    }
+
+    return now > deadline
+  }
+
+  const activeParticipants = participants.filter(p => !isParticipantExpired(p) && p.paymentType === 'BALANCE' && getApproval(p) !== 'PENDING' && getApproval(p) !== 'REJECTED')
+  const depositParticipants = participants.filter(p => !isParticipantExpired(p) && p.paymentType === 'DEPOSIT' && getApproval(p) !== 'PENDING' && getApproval(p) !== 'REJECTED')
+  const expiredParticipants = participants.filter(p => isParticipantExpired(p) && p.paymentType !== 'REFUNDED')
   const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
-  const pendingParticipants = participants.filter(p => p.approvalStatus === 'PENDING')
+  const pendingParticipants = participants.filter(p => getApproval(p) === 'PENDING')
 
   const handleExportClick = (list: any[], title: string, filename: string) => {
     setListToExport(list)
@@ -558,7 +581,7 @@ export function ParticipantsList({
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
                     <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-bold bg-blue-100 text-blue-800">
-                      {p.groupSize || 1}
+                      {(p.adults || 0) + (p.children || 0) + (p.infants || 0)}
                     </span>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
@@ -580,7 +603,10 @@ export function ParticipantsList({
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
                     <div className="flex flex-col">
-                      <span className="font-bold text-gray-900">{p.supplier?.name || '-'}</span>
+                      <span className="font-bold text-gray-900">{p.createdBy?.code || '-'}</span>
+                      <span className="text-xs text-gray-500">
+                        {p.createdBy?.firstName} {p.createdBy?.lastName}
+                      </span>
                       {p.commissionPercentage > 0 && (
                         <div className="text-xs text-blue-500">
                           Comm: {p.commissionPercentage}
@@ -588,7 +614,6 @@ export function ParticipantsList({
                               if (p.createdBy?.agency) {
                                   return p.createdBy.agency.commissionType === 'FIXED' ? '€' : '%';
                               }
-                              // Fallback per Admin (Arianna Amministrazione) che ha commissione fissa
                               const creatorName = `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.toLowerCase();
                               if (creatorName.includes('arianna') || creatorName.includes('amministrazione') || creatorName.includes('corfumania')) {
                                   return '€';
@@ -639,7 +664,7 @@ export function ParticipantsList({
                             </button>
                           )}
                           
-                          {p.deposit > 0 && (
+                      {p.deposit > 0 && (userRole === 'ADMIN' || (p.createdById === currentUserId && (!deadline || now <= deadline))) && (
                             <button
                               onClick={() => {
                                 setParticipantToRefund(p)
@@ -710,7 +735,7 @@ export function ParticipantsList({
                   <div className="text-sm text-gray-500 flex items-center gap-2 mt-1">
                     <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
                        <Users className="w-3 h-3 mr-1" />
-                       {p.groupSize || 1}
+                       {(p.adults || 0) + (p.children || 0) + (p.infants || 0)}
                     </span>
                     <span className="text-xs text-gray-400">{p.phoneNumber || '-'}</span>
                   </div>
@@ -740,7 +765,11 @@ export function ParticipantsList({
               </div>
 
               <div className="flex justify-between items-center pt-2 border-t border-gray-100/50">
-                 <div className="flex gap-3 text-sm">
+                 <div className="flex gap-4 text-sm">
+                    <div className="flex flex-col">
+                       <span className="text-xs text-gray-400">Inserito da</span>
+                       <span>{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
+                    </div>
                     <div className="flex flex-col">
                        <span className="text-xs text-gray-400">Prezzo</span>
                        <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
@@ -852,10 +881,19 @@ export function ParticipantsList({
       <div className="space-y-8">
         {pendingParticipants.length > 0 && (
           <div className="opacity-100">
-            <h3 className="text-lg font-semibold text-amber-600 mb-4 flex items-center gap-2">
-               <AlertCircle className="w-5 h-5" />
-               In Attesa di Approvazione
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-amber-600 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                In Attesa di Approvazione
+              </h3>
+              <button
+                onClick={() => handleExportClick(pendingParticipants, 'Partecipanti in attesa', 'partecipanti-trasferimento-in-attesa')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Esporta PDF
+              </button>
+            </div>
             <ParticipantsTable 
               data={pendingParticipants} 
               emptyMessage="Nessun partecipante in attesa." 
@@ -863,17 +901,65 @@ export function ParticipantsList({
           </div>
         )}
 
-        <ParticipantsTable 
-           data={activeParticipants} 
-           emptyMessage="Nessun partecipante registrato per questo trasferimento." 
-        />
+        <div className="opacity-100">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-green-700 flex items-center gap-2">
+              <CheckCircle className="w-5 h-5" />
+              Attivi (Saldo)
+            </h3>
+            {activeParticipants.length > 0 && (
+              <button
+                onClick={() => handleExportClick(activeParticipants, 'Partecipanti attivi', 'partecipanti-trasferimento-attivi')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Esporta PDF
+              </button>
+            )}
+          </div>
+          <ParticipantsTable 
+            data={activeParticipants} 
+            emptyMessage="Nessun partecipante saldo registrato per questo trasferimento." 
+          />
+        </div>
+
+        <div className="opacity-100">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-semibold text-orange-700 flex items-center gap-2">
+              <AlertCircle className="w-5 h-5" />
+              Acconto
+            </h3>
+            {depositParticipants.length > 0 && (
+              <button
+                onClick={() => handleExportClick(depositParticipants, 'Partecipanti in acconto', 'partecipanti-trasferimento-acconto')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Esporta PDF
+              </button>
+            )}
+          </div>
+          <ParticipantsTable 
+            data={depositParticipants} 
+            emptyMessage="Nessun partecipante in acconto per questo trasferimento." 
+          />
+        </div>
         
         {expiredParticipants.length > 0 && (
           <div className="opacity-75">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
-               <Clock className="w-5 h-5" />
-               Scaduti / Non Confermati
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-700 flex items-center gap-2">
+                <Clock className="w-5 h-5" />
+                Scaduti / Non Confermati
+              </h3>
+              <button
+                onClick={() => handleExportClick(expiredParticipants, 'Partecipanti scaduti', 'partecipanti-trasferimento-scaduti')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Esporta PDF
+              </button>
+            </div>
             <ParticipantsTable 
               data={expiredParticipants} 
               emptyMessage="" 
@@ -883,10 +969,19 @@ export function ParticipantsList({
 
         {refundedParticipants.length > 0 && (
           <div className="opacity-75">
-            <h3 className="text-lg font-semibold text-gray-700 mb-4 flex items-center gap-2">
-               <RotateCcw className="w-5 h-5" />
-               Rimborsati
-            </h3>
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-gray-700 flex items-center gap-2">
+                <RotateCcw className="w-5 h-5" />
+                Rimborsati
+              </h3>
+              <button
+                onClick={() => handleExportClick(refundedParticipants, 'Partecipanti rimborsati', 'partecipanti-trasferimento-rimborsati')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Esporta PDF
+              </button>
+            </div>
             <ParticipantsTable 
               data={refundedParticipants} 
               emptyMessage="" 

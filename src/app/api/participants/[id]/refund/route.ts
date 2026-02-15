@@ -13,7 +13,7 @@ export async function POST(
   const { id } = await params
 
   try {
-    const { refundMethod, refundAmount, notes, pdfAttachment } = await request.json()
+    const { refundMethod, refundAmount, notes, pdfAttachment, pdfAttachmentIT, pdfAttachmentEN } = await request.json()
 
     if (!refundMethod || !refundAmount) {
       return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
@@ -29,6 +29,17 @@ export async function POST(
 
     if (session.user.role !== 'ADMIN' && participant.createdById !== session.user.id) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
+    }
+    
+    if (participant.excursionId) {
+      const excursion = await prisma.excursion.findUnique({
+        where: { id: participant.excursionId },
+        select: { confirmationDeadline: true }
+      })
+      const now = new Date()
+      if (excursion?.confirmationDeadline && new Date(excursion.confirmationDeadline) < now && session.user.role !== 'ADMIN') {
+        return NextResponse.json({ error: 'Rimborso non consentito dopo la scadenza dell\'escursione' }, { status: 403 })
+      }
     }
 
     const methodLabels: Record<string, string> = {
@@ -53,7 +64,9 @@ export async function POST(
 
     await createAuditLog(
       session.user.id,
-      'UPDATE_PARTICIPANT', 
+      'UPDATE_PARTICIPANT',
+      'PARTICIPANT',
+      participant.id,
       details,
       participant.excursionId,
       participant.transferId

@@ -3,6 +3,8 @@ import { User, Users, CheckCircle, Clock, DollarSign, Search, Filter, ChevronDow
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ManualTaxBookingModal } from './ManualTaxBookingModal'
+import { ConfirmationModal } from '../../components/ConfirmationModal'
+import { AlertModal } from '../../components/AlertModal'
 
 interface TaxBooking {
   id: string
@@ -36,6 +38,30 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
   const [loading, setLoading] = useState(true)
   const [assistants, setAssistants] = useState<any[]>([])
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'warning' | 'info'
+    onConfirm: () => void
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'danger',
+    onConfirm: () => {}
+  })
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'success' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
   // Helper to parse participants from rawData
   const getParticipants = (booking: TaxBooking) => {
@@ -93,8 +119,24 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
   }, [refreshTrigger])
 
   const handleBulkAssign = async () => {
-    if (selectedIds.size === 0) return alert('Seleziona almeno una prenotazione')
-    if (!bulkAssistantId) return alert('Seleziona un assistente')
+    if (selectedIds.size === 0) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Selezione richiesta',
+        message: 'Seleziona almeno una prenotazione',
+        variant: 'warning'
+      })
+      return
+    }
+    if (!bulkAssistantId) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Assistente mancante',
+        message: 'Seleziona un assistente',
+        variant: 'warning'
+      })
+      return
+    }
 
     setLoading(true)
     try {
@@ -113,11 +155,21 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
             setBulkAssistantId('')
             fetchBookings()
         } else {
-            alert('Errore durante l\'assegnazione massiva')
+            setAlertModal({
+              isOpen: true,
+              title: 'Errore',
+              message: 'Errore durante l\'assegnazione massiva',
+              variant: 'danger'
+            })
         }
     } catch (error) {
         console.error('Error bulk assigning:', error)
-        alert('Errore di rete')
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: 'Errore di rete',
+          variant: 'danger'
+        })
     } finally {
         setLoading(false)
     }
@@ -208,49 +260,79 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
   }
 
   const handleDelete = async (bookingId: string) => {
-      if (!confirm('Sei sicuro di voler eliminare questa prenotazione?')) return
-      
-      try {
-          const res = await fetch(`/api/taxes/bookings?id=${bookingId}`, {
-              method: 'DELETE'
-          })
-          
-          if (!res.ok) {
-              const text = await res.text()
-              alert(text || 'Errore durante l\'eliminazione')
-              return
+      setConfirmModal({
+        isOpen: true,
+        title: 'Elimina Prenotazione',
+        message: 'Sei sicuro di voler eliminare questa prenotazione?',
+        variant: 'danger',
+        onConfirm: async () => {
+          try {
+              const res = await fetch(`/api/taxes/bookings?id=${bookingId}`, {
+                  method: 'DELETE'
+              })
+              
+              if (!res.ok) {
+                  const text = await res.text()
+                  setAlertModal({
+                    isOpen: true,
+                    title: 'Errore',
+                    message: text || 'Errore durante l\'eliminazione',
+                    variant: 'danger'
+                  })
+                  return
+              }
+              
+              fetchBookings()
+          } catch (error) {
+              console.error('Error deleting:', error)
+              setAlertModal({
+                isOpen: true,
+                title: 'Errore',
+                message: 'Errore di rete',
+                variant: 'danger'
+              })
           }
-          
-          fetchBookings()
-      } catch (error) {
-          console.error('Error deleting:', error)
-          alert('Errore di rete')
-      }
+        }
+      })
   }
 
   const handleDeleteAll = async () => {
-      if (!confirm('ATTENZIONE: Stai per eliminare TUTTE le prenotazioni NON assegnate e NON pagate.\n\nQuesta operazione è utile se hai caricato un file sbagliato.\n\nLe prenotazioni già assegnate o pagate NON verranno eliminate.\n\nSei sicuro di voler procedere?')) return
+      setConfirmModal({
+        isOpen: true,
+        title: 'Eliminazione Massiva',
+        message: 'ATTENZIONE: Eliminerai TUTTE le prenotazioni NON assegnate e NON pagate. Confermi?',
+        variant: 'danger',
+        onConfirm: async () => {
+          setLoading(true)
+          try {
+              const res = await fetch('/api/taxes/bookings?all=true', {
+                  method: 'DELETE'
+              })
 
-      setLoading(true)
-      try {
-          const res = await fetch('/api/taxes/bookings?all=true', {
-              method: 'DELETE'
-          })
-
-          if (!res.ok) {
-              const text = await res.text()
-              alert(text || 'Errore durante l\'eliminazione')
-          } else {
-              const msg = await res.text()
-              // alert(msg) // Optional feedback
-              fetchBookings()
+              if (!res.ok) {
+                  const text = await res.text()
+                  setAlertModal({
+                    isOpen: true,
+                    title: 'Errore',
+                    message: text || 'Errore durante l\'eliminazione',
+                    variant: 'danger'
+                  })
+              } else {
+                  fetchBookings()
+              }
+          } catch (error) {
+              console.error('Error deleting all:', error)
+              setAlertModal({
+                isOpen: true,
+                title: 'Errore',
+                message: 'Errore di rete',
+                variant: 'danger'
+              })
+          } finally {
+              setLoading(false)
           }
-      } catch (error) {
-          console.error('Error deleting all:', error)
-          alert('Errore di rete')
-      } finally {
-          setLoading(false)
-      }
+        }
+      })
   }
 
   const baseFiltered = bookings.filter(b => {
@@ -718,6 +800,21 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
                 }} 
             />
         )}
+      <ConfirmationModal
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.onConfirm}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        variant={confirmModal.variant}
+      />
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
+      />
     </div>
   )
 }

@@ -1,86 +1,115 @@
 import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
+import { Buffer } from 'node:buffer'
 import { getSession } from '@/lib/auth'
+
+export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   const session = await getSession()
-  if (!session) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
-    const { to, subject, text, html } = await request.json()
+    const contentType = request.headers.get('content-type') || ''
 
-    if (!to || !subject || (!text && !html)) {
-      return NextResponse.json(
-        { error: 'Missing required fields (to, subject, text/html)' },
-        { status: 400 }
-      )
+    let to: string | null = null
+    let subject: string | null = null
+    let text: string | null = null
+    const attachments: { filename: string; content: Buffer }[] = []
+
+    if (contentType.includes('application/json')) {
+      const body = await request.json()
+      to = body.to
+      subject = body.subject
+      text = body.text
+    } else {
+      const formData = await request.formData()
+      to = (formData.get('to') as string) || null
+      subject = (formData.get('subject') as string) || null
+      text = (formData.get('text') as string) || null
+
+      const files = formData.getAll('attachments') as File[]
+      for (const file of files) {
+        const arrayBuffer = await file.arrayBuffer()
+        attachments.push({
+          filename: file.name,
+          content: Buffer.from(arrayBuffer)
+        })
+      }
     }
 
-    let transporter = nodemailer.createTransport({
-      host: 'smtp.gmail.com',
-      port: 465,
-      secure: true,
-      auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS
-      },
-      tls: {
-        rejectUnauthorized: false
-      }
-    })
+    if (!to || !subject || !text) {
+      return NextResponse.json({ error: 'Parametri email mancanti' }, { status: 400 })
+    }
 
-    // Verify connection configuration
-    try {
-      await transporter.verify()
-      console.log("Server SMTP (465) pronto per l'invio")
-    } catch (error) {
-      console.error('Errore verifica SMTP su porta 465:', error)
-      
-      // Fallback to port 587
-      console.log('Tentativo fallback su porta 587...')
+    const allowSelfSigned =
+      process.env.SMTP_ALLOW_SELF_SIGNED === 'true' ||
+      process.env.NODE_ENV !== 'production'
+
+    if (allowSelfSigned) {
+      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+    }
+
+    let transporter
+
+    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
       transporter = nodemailer.createTransport({
         host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
+        port: 465,
+        secure: true,
         auth: {
           user: process.env.EMAIL_USER,
           pass: process.env.EMAIL_PASS
         },
         tls: {
-          rejectUnauthorized: false
+          rejectUnauthorized: !allowSelfSigned
         }
       })
-      
-      try {
-        await transporter.verify()
-        console.log("Server SMTP (587) pronto per l'invio")
-      } catch (fallbackError) {
-        console.error('Errore verifica SMTP anche su porta 587:', fallbackError)
-        return NextResponse.json(
-          { error: 'SMTP connection failed (Check Antivirus/Firewall)', details: error },
-          { status: 500 }
-        )
-      }
+    } else if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
+      transporter = nodemailer.createTransport({
+        host: process.env.SMTP_HOST,
+        port: Number(process.env.SMTP_PORT) || 587,
+        secure: false,
+        auth: {
+          user: process.env.SMTP_USER,
+          pass: process.env.SMTP_PASS
+        },
+        tls: allowSelfSigned ? { rejectUnauthorized: false } : undefined
+      })
+    } else {
+      const testAccount = await nodemailer.createTestAccount()
+      transporter = nodemailer.createTransport({
+        host: 'smtp.ethereal.email',
+        port: 587,
+        secure: false,
+        auth: {
+          user: testAccount.user,
+          pass: testAccount.pass
+        }
+      })
     }
 
     const info = await transporter.sendMail({
-      from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+      from: process.env.MAIL_FROM || 'no-reply@localhost',
       to,
       subject,
       text,
-      html
+      attachments: attachments.length > 0 ? attachments : undefined
     })
 
-    console.log('Email inviata con successo:', info.messageId)
+    const previewUrl = nodemailer.getTestMessageUrl(info)
 
-    return NextResponse.json({ success: true, messageId: info.messageId })
-  } catch (error: any) {
-    console.error('Error sending email:', error)
-    return NextResponse.json(
-      { error: 'Failed to send email', details: error.message },
-      { status: 500 }
-    )
+    return NextResponse.json({
+      success: true,
+      messageId: info.messageId,
+      previewUrl
+    })
+  } catch (error) {
+    console.error('Email send error:', error)
+    const message =
+      error instanceof Error
+        ? error.message
+        : 'Invio email fallito'
+    return NextResponse.json({ error: message }, { status: 500 })
   }
 }

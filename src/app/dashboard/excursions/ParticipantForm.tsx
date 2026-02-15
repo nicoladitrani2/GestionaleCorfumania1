@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Save, X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, UserPlus, Map as MapIcon, Plus, Trash2, Home, RotateCcw } from 'lucide-react'
+import { Save, X, User, Calendar, CreditCard, FileText, Phone, Globe, Briefcase, UserPlus, Map as MapIcon, Plus, Trash2, Home, RotateCcw, Baby } from 'lucide-react'
 import { AlertModal } from '../components/AlertModal'
 
 import { generateParticipantPDF } from '@/lib/pdf-generator'
@@ -111,7 +111,7 @@ export function ParticipantForm({
     balancePaymentMethod: '',
     adults: 1,
     children: 0,
-    groupSize: 1,
+    infants: 0,
     price: 0,
     deposit: 0,
     tax: 0,
@@ -132,7 +132,7 @@ export function ParticipantForm({
     insurancePrice: initialData?.insurancePrice || 0,
     supplementPrice: initialData?.supplementPrice || 0,
     assistantCommission: initialData?.assistantCommission ?? agencyDefaultCommission,
-    assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType,
+    assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType
   })
   const [customNationality, setCustomNationality] = useState('')
   const [error, setError] = useState('')
@@ -142,6 +142,7 @@ export function ParticipantForm({
   const [requestReturn, setRequestReturn] = useState(
     !!(initialData?.returnDate || defaultValues?.returnDate)
   )
+  const [assistants, setAssistants] = useState<any[]>([])
 
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean
@@ -201,29 +202,45 @@ export function ParticipantForm({
   }, [initialData, userRole, defaultSupplier])
 
   useEffect(() => {
+    const loadAssistants = async () => {
+      if (userRole !== 'ADMIN') return
+      try {
+        const res = await fetch('/api/users')
+        if (res.ok) {
+          const data = await res.json()
+          setAssistants(Array.isArray(data) ? data : [])
+        }
+      } catch (e) {
+        console.error('Failed to fetch assistants', e)
+      }
+    }
+    loadAssistants()
+  }, [userRole])
+
+  useEffect(() => {
     if (initialData) {
       const isStandard = NATIONALITIES.some(n => n.code === initialData.nationality)
       setFormData({
-        firstName: initialData.firstName,
-        lastName: initialData.lastName,
+        firstName: initialData.firstName || '',
+        lastName: initialData.lastName || '',
         nationality: isStandard ? initialData.nationality : 'OTHER',
         dateOfBirth: !isNaN(new Date(initialData.dateOfBirth).getTime()) 
           ? new Date(initialData.dateOfBirth).toISOString().split('T')[0] 
           : '',
-        docNumber: initialData.docNumber,
-        docType: initialData.docType,
-        phoneNumber: initialData.phoneNumber,
+        docNumber: initialData.docNumber || '',
+        docType: initialData.docType || 'ID_CARD',
+        phoneNumber: initialData.phoneNumber || '',
         email: initialData.email || '',
         notes: initialData.notes || '',
-        supplier: initialData.supplier,
+        supplier: initialData.supplier || 'GO4SEA',
         isOption: initialData.isOption,
         paymentType: initialData.paymentType,
         paymentMethod: initialData.paymentMethod,
         depositPaymentMethod: initialData.depositPaymentMethod || initialData.paymentMethod || 'CASH',
         balancePaymentMethod: initialData.balancePaymentMethod || '',
-        adults: initialData.adults || initialData.groupSize || 1,
+        adults: initialData.adults ?? 1,
         children: initialData.children || 0,
-        groupSize: initialData.groupSize || 1,
+        infants: initialData.infants || 0,
         price: initialData.price || 0,
         deposit: initialData.deposit || 0,
         tax: initialData.tax || 0,
@@ -246,7 +263,7 @@ export function ParticipantForm({
         supplementPrice: (initialData as any).supplementPrice || 0,
         commissionPercentage: (initialData as any).commissionPercentage || 0,
         assistantCommission: (initialData as any).assistantCommission || 0,
-        assistantCommissionType: (initialData as any).assistantCommissionType || 'PERCENTAGE',
+        assistantCommissionType: (initialData as any).assistantCommissionType || 'PERCENTAGE'
       })
       if (!isStandard) {
         setCustomNationality(initialData.nationality)
@@ -267,51 +284,34 @@ export function ParticipantForm({
       setDepositError('')
     }
 
-    // Enforce no deposit for non-Car managed types (Excursions, Transfers)
-    // REMOVED: User requested to allow deposits for all types.
-    /*
-    const allowDeposit = type === 'RENTAL' && (formData as any).rentalType === 'CAR'
-    const isManaged = type !== 'RENTAL' || (formData as any).rentalType === 'CAR'
-    
-    if (isManaged && !allowDeposit && !formData.isOption) {
-        // If not a Car, force BALANCE mode and deposit = price
-        if (formData.paymentType !== 'BALANCE' || Math.abs(deposit - price) > 0.01) {
-             setFormData(prev => ({
-                ...prev,
-                paymentType: 'BALANCE',
-                deposit: prev.price
-            }))
-        }
-    } else if (!isManaged && deposit > 0) {
-        // For unmanaged rentals (Moto/Boat), deposit (Agency Incasso) is 0 (Brokerage)
-        setFormData(prev => ({ ...prev, deposit: 0 }))
-    }
-    */
+    // Depositi abilitati per Escursioni/Trasferimenti e per Noleggio Auto.
+    // Per Moto/Barca il flusso rimane senza acconto (Brokerage).
   }, [formData.deposit, formData.price, formData.isOption, formData.paymentType, type, (formData as any).rentalType])
 
   useEffect(() => {
-    if (!initialData && type === 'EXCURSION' && (priceAdult > 0 || priceChild > 0)) {
-        setFormData(prev => {
-            if (prev.price === 0) {
-                const newPrice = (prev.adults * priceAdult) + (prev.children * priceChild)
-                return { 
-                    ...prev, 
-                    price: newPrice,
-                    deposit: prev.paymentType === 'BALANCE' ? newPrice : prev.deposit
-                }
-            }
-            return prev
-        })
+    if (!initialData && (type === 'EXCURSION' || type === 'TRANSFER') && (priceAdult > 0 || priceChild > 0)) {
+      setFormData(prev => {
+        if (prev.price === 0) {
+          const newPrice = (prev.adults * priceAdult) + (prev.children * priceChild)
+          return { 
+            ...prev, 
+            price: newPrice,
+            deposit: prev.paymentType === 'BALANCE' ? newPrice : prev.deposit
+          }
+        }
+        return prev
+      })
     }
   }, [initialData, type, priceAdult, priceChild])
 
-  const handleCounterChange = (field: 'adults' | 'children', value: number) => {
+  const handleCounterChange = (field: 'adults' | 'children' | 'infants', value: number) => {
     setFormData(prev => {
         const adults = field === 'adults' ? value : prev.adults
         const children = field === 'children' ? value : prev.children
+        const infants = field === 'infants' ? value : prev.infants
         let newPrice = prev.price
         
-        if (type === 'EXCURSION' && (priceAdult > 0 || priceChild > 0)) {
+        if ((type === 'EXCURSION' || type === 'TRANSFER') && (priceAdult > 0 || priceChild > 0)) {
             newPrice = (adults * priceAdult) + (children * priceChild)
         }
 
@@ -319,7 +319,6 @@ export function ParticipantForm({
             ...prev,
             [field]: value,
             price: newPrice,
-            groupSize: adults + children,
             deposit: prev.paymentType === 'BALANCE' ? newPrice : prev.deposit
         }
     })
@@ -333,12 +332,12 @@ export function ParticipantForm({
       setCustomNationality('')
     }
 
-    if (name === 'adults' || name === 'children') {
+    if (name === 'adults' || name === 'children' || name === 'infants') {
         // Handled by handleCounterChange, but if it comes from input (not counter), we need to handle it.
         // We will use custom counters in UI, so this might not be reached for adults/children if we use separate handler.
         // But let's keep it safe.
         const val = parseInt(value) || 0
-        handleCounterChange(name as 'adults' | 'children', val)
+        handleCounterChange(name as 'adults' | 'children' | 'infants', val)
         return
     }
 
@@ -395,6 +394,17 @@ export function ParticipantForm({
     setError('')
     setLoading(true)
 
+    // Transfer requirements for excursions
+    if (type === 'EXCURSION' && (formData as any).needsTransfer) {
+      const changedPickup = excursionTransferDepartureLocation && formData.pickupLocation && formData.pickupLocation.trim() !== excursionTransferDepartureLocation.trim()
+      const changedDropoff = excursionTransferDestinationLocation && formData.dropoffLocation && formData.dropoffLocation.trim() !== excursionTransferDestinationLocation.trim()
+      if ((changedPickup || changedDropoff) && !formData.pickupTime) {
+        setError('Per il trasferimento con partenza/destinazione modificata è obbligatorio indicare l\'orario di partenza.')
+        setLoading(false)
+        return
+      }
+    }
+
     if (!formData.firstName.trim()) {
       setError('Il nome del partecipante è obbligatorio.')
       setLoading(false)
@@ -407,7 +417,7 @@ export function ParticipantForm({
       return
     }
 
-    if (formData.groupSize < 1) {
+    if (((type === 'EXCURSION') ? (formData.adults + formData.children) : (formData.adults + formData.children + formData.infants)) < 1) {
       setError('Il numero di partecipanti deve essere almeno 1.')
       setLoading(false)
       return
@@ -440,6 +450,9 @@ export function ParticipantForm({
         deposit: isManaged ? (parseFloat(String(formData.deposit)) || 0) : 0,
         tax: parseFloat(String((formData as any).tax)) || 0,
         commissionPercentage: parseFloat(String(formData.commissionPercentage)) || 0,
+        adults: formData.adults,
+        children: formData.children,
+        infants: formData.infants,
         excursionId: type === 'EXCURSION' ? excursionId : undefined,
         transferId: type === 'TRANSFER' ? transferId : undefined,
         isRental: type === 'RENTAL',
@@ -475,9 +488,7 @@ export function ParticipantForm({
              entityDate = (formData as any).rentalStartDate
         }
 
-        // Se mancano i dati, logghiamo l'errore ma procediamo senza PDF
         if (!entityName || !entityDate) {
-          console.error("Dati evento mancanti per generazione PDF", { entityName, entityDate });
           await sendData(payload);
           return;
         }
@@ -591,7 +602,12 @@ export function ParticipantForm({
         
         // Check for pending approval
         if (data.approvalStatus === 'PENDING') {
-            alert('Il partecipante è stato salvato come BOZZA perché il prezzo è inferiore a quello calcolato. Richiede approvazione dell\'amministratore.')
+            setAlertModal({
+              isOpen: true,
+              title: 'Approvazione richiesta',
+              message: 'Il partecipante è stato salvato come BOZZA perché il prezzo è inferiore a quello calcolato. Richiede approvazione dell\'amministratore.',
+              variant: 'warning'
+            })
         }
       } else {
         // Se non è JSON, probabilmente è un errore del server o HTML di errore
@@ -641,9 +657,10 @@ export function ParticipantForm({
 
   const inputClassName = "w-full px-3 py-2 bg-white border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
   const labelClassName = "block text-xs font-bold text-gray-900 mb-1 uppercase tracking-wide"
+  const peopleGridClass = "grid grid-cols-2 gap-4"
 
   const isManaged = type !== 'RENTAL' || (formData as any).rentalType === 'CAR'
-  const allowDeposit = true // type === 'RENTAL' && (formData as any).rentalType === 'CAR'
+  const allowDeposit = true
   const isMoto = type === 'RENTAL' && (formData as any).rentalType === 'MOTO'
   const isBoat = type === 'RENTAL' && (formData as any).rentalType === 'BOAT'
   const isRental = type === 'RENTAL'
@@ -673,7 +690,13 @@ export function ParticipantForm({
         assistantAmount = commAmount * (asstCommVal / 100)
     } else {
         // Fixed Amount per Person
-        assistantAmount = asstCommVal * (formData.groupSize || 1)
+        assistantAmount = asstCommVal * ((formData.adults || 0) + (formData.children || 0) + (formData.infants || 0))
+    }
+    
+    const rentalType = (formData as any).rentalType
+    let netAgency = commAmount - assistantAmount
+    if (type === 'RENTAL' && (rentalType === 'MOTO' || rentalType === 'BOAT')) {
+      netAgency = commAmount
     }
     
     return {
@@ -681,7 +704,7 @@ export function ParticipantForm({
         commAmount,
         netSupplier: price - commAmount,
         assistantAmount,
-        netAgency: commAmount - assistantAmount
+        netAgency
     }
   }
 
@@ -811,6 +834,8 @@ export function ParticipantForm({
               <h3 className="text-lg font-semibold text-gray-800">Dati Partecipante</h3>
             </div>
             
+            
+            
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
               <div>
                 <label className={labelClassName}>Nome</label>
@@ -837,8 +862,8 @@ export function ParticipantForm({
                 />
               </div>
 
-              <div className="flex gap-4">
-                <div className="flex-1">
+              <div className={peopleGridClass}>
+                <div>
                     <label className={labelClassName}>Adulti</label>
                     <div className="relative">
                       <input
@@ -852,7 +877,7 @@ export function ParticipantForm({
                       <User className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
                     </div>
                 </div>
-                <div className="flex-1">
+                <div>
                     <label className={labelClassName}>Bambini</label>
                     <div className="relative">
                       <input

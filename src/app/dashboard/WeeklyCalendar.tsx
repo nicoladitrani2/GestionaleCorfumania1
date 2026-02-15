@@ -1,16 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronLeft, ChevronRight, Calendar, Users, Clock, Timer, AlertCircle } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Calendar, Users, Clock, Timer, AlertCircle, Bus, Car } from 'lucide-react'
 
 interface WeeklyCalendarProps {
   excursions: any[]
+  transfers: any[]
 }
 
-export function WeeklyCalendar({ excursions }: WeeklyCalendarProps) {
+export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
   const router = useRouter()
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [rentals, setRentals] = useState<any[]>([])
 
   // Helper to get start of week (Monday)
   const getStartOfWeek = (date: Date) => {
@@ -58,6 +60,25 @@ export function WeeklyCalendar({ excursions }: WeeklyCalendarProps) {
     return `${hours}h${minutes > 0 ? ` ${minutes}m` : ''}`
   }
 
+  useEffect(() => {
+    let cancelled = false
+
+    const loadRentals = async () => {
+      try {
+        const res = await fetch('/api/participants?isRental=true')
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled && Array.isArray(data)) {
+          setRentals(data)
+        }
+      } catch (error) {
+        console.error('Failed to load rentals for calendar:', error)
+      }
+    }
+
+    loadRentals()
+  }, [])
+
   return (
     <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8 transition-all hover:shadow-lg">
       <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-gray-50 to-white">
@@ -88,6 +109,29 @@ export function WeeklyCalendar({ excursions }: WeeklyCalendarProps) {
                        eDate.getMonth() === day.getMonth() &&
                        eDate.getFullYear() === day.getFullYear()
             }).sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+
+            const dayTransfers = transfers.filter(t => {
+                if (!t.date) return false
+                const tDate = new Date(t.date)
+                return tDate.getDate() === day.getDate() &&
+                       tDate.getMonth() === day.getMonth() &&
+                       tDate.getFullYear() === day.getFullYear()
+            }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+
+            const dayRentals = rentals
+              .filter(r => {
+                if (!r.bookingDate) return false
+                const rDate = new Date(r.bookingDate)
+                return (
+                  rDate.getDate() === day.getDate() &&
+                  rDate.getMonth() === day.getMonth() &&
+                  rDate.getFullYear() === day.getFullYear()
+                )
+              })
+              .sort(
+                (a, b) =>
+                  new Date(a.bookingDate).getTime() - new Date(b.bookingDate).getTime()
+              )
 
             const isCurrentDay = isToday(day)
 
@@ -152,7 +196,96 @@ export function WeeklyCalendar({ excursions }: WeeklyCalendarProps) {
                                 </div>
                             )
                         })}
-                        {dayExcursions.length === 0 && (
+                        {dayTransfers.map(tr => {
+                            const duration = getDuration(tr.date, tr.endDate)
+
+                            return (
+                                <div 
+                                    key={tr.id}
+                                    onClick={() => router.push(`/dashboard/transfers?id=${tr.id}`)}
+                                    className="group relative bg-white rounded-xl border border-orange-200 shadow-sm hover:shadow-lg hover:border-orange-400 cursor-pointer transition-all duration-200 overflow-hidden"
+                                >
+                                    <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-orange-500 to-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                    
+                                    <div className="p-3">
+                                        <div className="flex items-center justify-between mb-2">
+                                            <div className="flex items-center gap-1.5 text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                                                <Clock className="w-3 h-3" />
+                                                <span>
+                                                    {new Date(tr.date).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                                                    {tr.endDate && ` - ${new Date(tr.endDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`}
+                                                </span>
+                                            </div>
+                                            {duration && (
+                                                <div className="flex items-center gap-1 text-[10px] text-gray-500 font-medium">
+                                                    <Timer className="w-3 h-3" />
+                                                    {duration}
+                                                </div>
+                                            )}
+                                        </div>
+
+                                        <h4 className="text-sm font-bold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-orange-700 transition-colors">
+                                            {tr.name}
+                                        </h4>
+
+                                        <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                                            <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded-md group-hover:bg-gray-100 transition-colors">
+                                                <Bus className="w-3.5 h-3.5 text-orange-500" />
+                                                <span className="font-semibold">{tr._count?.participants || 0}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            )
+                        })}
+                        {dayRentals.map(r => {
+                            const pax = (r.adults || 0) + (r.children || 0) + (r.infants || 0) || 1
+                            const name =
+                              `${r.firstName || ''} ${r.lastName || ''}`.trim() ||
+                              r.name ||
+                              'Noleggio'
+                            const breakdownParts: string[] = []
+                            if (r.adults) breakdownParts.push(`${r.adults}A`)
+                            if (r.children) breakdownParts.push(`${r.children}B`)
+                            if (r.infants) breakdownParts.push(`${r.infants}I`)
+                            const breakdown =
+                              breakdownParts.length > 0
+                                ? ` (${breakdownParts.join(' ')})`
+                                : ''
+
+                            return (
+                              <div
+                                key={r.id}
+                                onClick={() => router.push('/dashboard/rentals')}
+                                className="group relative bg-white rounded-xl border border-emerald-200 shadow-sm hover:shadow-lg hover:border-emerald-400 cursor-pointer transition-all duration-200 overflow-hidden"
+                              >
+                                <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500 to-green-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                                <div className="p-3">
+                                  <div className="flex items-center justify-between mb-2">
+                                    <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
+                                      <Car className="w-3 h-3" />
+                                      <span>Noleggio</span>
+                                    </div>
+                                  </div>
+
+                                  <h4 className="text-sm font-bold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-emerald-700 transition-colors">
+                                    {name}
+                                  </h4>
+
+                                  <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                                    <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded-md group-hover:bg-gray-100 transition-colors">
+                                      <Users className="w-3.5 h-3.5 text-emerald-500" />
+                                      <span className="font-semibold">
+                                        {pax} pax{breakdown}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            )
+                        })}
+                        {dayExcursions.length === 0 && dayTransfers.length === 0 && dayRentals.length === 0 && (
                             <div className="h-full flex flex-col items-center justify-center min-h-[60px] opacity-0 group-hover:opacity-100 transition-opacity">
                                 <div className="w-1 h-1 bg-gray-300 rounded-full mb-1"></div>
                                 <div className="w-1 h-1 bg-gray-300 rounded-full mb-1"></div>

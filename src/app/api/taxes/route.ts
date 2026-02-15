@@ -111,8 +111,8 @@ export async function POST(request: Request) {
           roomNumber,
           notes: roomNumber ? `Stanza: ${roomNumber}` : undefined,
           specialServiceType: service,
-          price: price,
-          deposit: price, // Full payment? Or "Netto"? Usually these are collected cash?
+          totalPrice: price,
+          paidAmount: price, // Full payment? Or "Netto"? Usually these are collected cash?
           // User said "costi calcolati in automatico senza possibilità di modifica".
           // Assuming full payment or just tracking the cost.
           // Let's set price.

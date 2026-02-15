@@ -190,7 +190,15 @@ export function ExcursionsManager({
     setLoading(true)
     try {
       const params = new URLSearchParams()
+      
+      // Calculate start of today in local time to sync with Calendar
+      const localStartOfToday = new Date()
+      localStartOfToday.setHours(0, 0, 0, 0)
+      params.append('cutoff', localStartOfToday.toISOString())
+
       if (activeTab === 'ARCHIVE') params.append('archived', 'true')
+      if (activeTab === 'ALL') params.append('all', 'true')
+      // Active tab uses cutoff parameter to include same-day excursions correctly
       
       const res = await fetch(`/api/excursions?${params.toString()}`)
       if (res.ok) {
@@ -330,6 +338,12 @@ export function ExcursionsManager({
     setNewEndDate(toLocalISOString(excursion.endDate))
     setNewConfirmationDeadline(toLocalISOString(excursion.confirmationDeadline))
     setSelectedTemplateId('') // Custom edit
+    
+    // Reset recurrence state for edit mode
+    setIsRecurring(false)
+    setRecurrenceFrequency('WEEKLY')
+    setRecurrenceEndDate('')
+    setRecurrenceDays([])
     
     // Populate commissions
     if (excursion.commissions) {
@@ -1169,15 +1183,15 @@ export function ExcursionsManager({
           )}
 
           {viewMode === 'SUMMARY' && userRole === 'ADMIN' && (
-              <FinancialSummary 
-                entityId={selectedExcursion.id}
-                type="EXCURSION"
-                refreshTrigger={refreshParticipantsTrigger}
-              />
-            )}
+            <FinancialSummary 
+              entityId={selectedExcursion.id}
+              type="EXCURSION"
+              refreshTrigger={refreshParticipantsTrigger}
+            />
+          )}
 
-            {viewMode === 'HISTORY' && (
-              <ExcursionHistory excursionId={selectedExcursion.id} />
+          {viewMode === 'HISTORY' && (
+            <AuditLogList excursionId={selectedExcursion.id} />
           )}
         </div>
       ) : (
@@ -1206,6 +1220,16 @@ export function ExcursionsManager({
                   }`}
                 >
                   In Programma
+                </button>
+                <button
+                  onClick={() => setActiveTab('ALL')}
+                  className={`py-2 px-4 rounded-lg font-medium text-sm transition-all ${
+                    activeTab === 'ALL'
+                      ? 'bg-indigo-600 text-white shadow-md'
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  Tutte
                 </button>
                 <button
                   onClick={() => setActiveTab('ARCHIVE')}
@@ -1243,7 +1267,7 @@ export function ExcursionsManager({
                   </button>
                 )}
 
-                {activeTab === 'ACTIVE' && excursions.length > 0 && (
+                {(activeTab === 'ACTIVE' || activeTab === 'ALL') && excursions.length > 0 && (
                     <button
                         onClick={handleSelectAll}
                         className="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center justify-center gap-2 shadow-sm transition-all font-medium w-full sm:w-auto"

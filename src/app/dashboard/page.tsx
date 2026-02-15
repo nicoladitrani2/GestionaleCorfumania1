@@ -6,9 +6,15 @@ import { WeeklyCalendar } from './WeeklyCalendar'
 import dynamic from 'next/dynamic'
 
 const ApprovalsWidget = dynamic(() => import('./ApprovalsWidget').then(mod => mod.ApprovalsWidget), {
-  ssr: false,
   loading: () => null
 })
+
+const PendingTransfersWidget = dynamic(
+  () => import('./PendingTransfersWidget').then(mod => mod.PendingTransfersWidget),
+  {
+    loading: () => null
+  }
+)
 
 export default async function DashboardPage() {
   const session = await getSession()
@@ -16,23 +22,30 @@ export default async function DashboardPage() {
 
   // Fetch pending approvals if admin
   let pendingApprovals: any[] = []
-  // Schema changes: approvalStatus removed. Disabling pending approvals for now.
-  /*
   if (isAdmin) {
     pendingApprovals = await prisma.participant.findMany({
-      where: { approvalStatus: 'PENDING' },
+      where: { paymentStatus: 'PENDING_APPROVAL' },
       orderBy: { createdAt: 'desc' },
       include: {
-        excursion: { select: { name: true, startDate: true } },
-        transfer: { select: { name: true, date: true } },
-        createdBy: { select: { firstName: true, lastName: true, email: true } }
+        excursion: { select: { name: true, startDate: true, priceAdult: true, priceChild: true } },
+        transfer: { select: { name: true, date: true, priceAdult: true, priceChild: true } },
+        rental: { select: { type: true } },
+        user: { select: { firstName: true, lastName: true, email: true } },
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+            phoneNumber: true,
+          }
+        }
       }
     })
   }
-  */
 
   // Fetch all excursions for calendar
   let excursionsData: any[] = []
+  let transfersData: any[] = []
   let connectionError = false
 
   try {
@@ -45,8 +58,20 @@ export default async function DashboardPage() {
         }
       }
     })
+    transfersData = await prisma.transfer.findMany({
+      where: {
+        approvalStatus: 'APPROVED'
+      },
+      orderBy: { date: 'asc' },
+      include: {
+        participants: {
+          where: { status: 'ACTIVE' },
+          select: { adults: true, children: true, infants: true }
+        }
+      }
+    })
   } catch (error) {
-    console.warn('Failed to fetch excursions for dashboard calendar:', error)
+    console.warn('Failed to fetch data for dashboard calendar:', error)
     connectionError = true
   }
 
@@ -66,13 +91,66 @@ export default async function DashboardPage() {
     }
   })))
 
+  const transfers = JSON.parse(JSON.stringify(transfersData.map(transfer => {
+    const totalParticipants = transfer.participants.reduce(
+      (sum: number, p: any) => sum + (p.adults || 0) + (p.children || 0) + (p.infants || 0),
+      0
+    )
+    const { participants, ...rest } = transfer
+    return {
+      ...rest,
+      date: rest.date,
+      endDate: rest.endDate,
+      createdAt: rest.createdAt,
+      updatedAt: rest.updatedAt,
+      _count: {
+        participants: totalParticipants
+      }
+    }
+  })))
+
   // Format pending approvals for widget
-  const formattedApprovals = pendingApprovals.map(p => ({
-    ...p,
-    excursion: p.excursion ? { ...p.excursion, startDate: p.excursion.startDate.toISOString() } : null,
-    transfer: p.transfer ? { ...p.transfer, date: p.transfer.date.toISOString() } : null,
-    rentalStartDate: p.rentalStartDate ? p.rentalStartDate.toISOString() : null,
-  }))
+  const formattedApprovals = pendingApprovals.map(p => {
+    const clientFirstName = p.client?.firstName || ''
+    const clientLastName = p.client?.lastName || ''
+    const [fallbackFirst, ...fallbackRest] = (p.name || '').split(' ')
+    const firstName = clientFirstName || fallbackFirst || ''
+    const lastName = clientLastName || fallbackRest.join(' ') || ''
+
+    let originalPrice: number | null = null
+    const adults = p.adults || 0
+    const children = p.children || 0
+    if (p.excursion) {
+      const priceAdult = p.excursion.priceAdult || 0
+      const priceChild = p.excursion.priceChild || 0
+      originalPrice = adults * priceAdult + children * priceChild
+    } else if (p.transfer) {
+      const priceAdult = p.transfer.priceAdult || 0
+      const priceChild = p.transfer.priceChild || 0
+      originalPrice = adults * priceAdult + children * priceChild
+    }
+
+    return {
+      id: p.id,
+      firstName,
+      lastName,
+      price: p.totalPrice,
+      originalPrice,
+      excursion: p.excursion
+        ? { name: p.excursion.name, startDate: p.excursion.startDate.toISOString() }
+        : null,
+      transfer: p.transfer
+        ? { name: p.transfer.name, date: p.transfer.date.toISOString() }
+        : null,
+      rentalType: p.rental ? p.rental.type : null,
+      rentalStartDate: p.rentalStartDate ? p.rentalStartDate.toISOString() : null,
+      createdBy: {
+        firstName: p.user?.firstName || '',
+        lastName: p.user?.lastName || '',
+        email: p.user?.email || '',
+      },
+    }
+  })
 
   const modules = [
     {
@@ -145,9 +223,14 @@ export default async function DashboardPage() {
         </div>
       )}
       
-      {isAdmin && <ApprovalsWidget participants={formattedApprovals} />}
+      {isAdmin && (
+        <>
+          <PendingTransfersWidget />
+          <ApprovalsWidget participants={formattedApprovals} />
+        </>
+      )}
 
-      <WeeklyCalendar excursions={excursions} />
+      <WeeklyCalendar excursions={excursions} transfers={transfers} />
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         {modules.filter(m => m.visible).map((module) => (

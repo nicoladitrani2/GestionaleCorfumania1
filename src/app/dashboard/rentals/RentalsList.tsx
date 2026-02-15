@@ -52,6 +52,13 @@ const getRowBackground = (p: any) => {
   return 'hover:bg-gray-50'
 }
 
+const getApproval = (p: any) => {
+  if (p.approvalStatus) return p.approvalStatus
+  if (p.paymentStatus === 'PENDING_APPROVAL') return 'PENDING'
+  if (p.paymentStatus === 'REJECTED') return 'REJECTED'
+  return undefined
+}
+
 const formatDate = (dateString: string) => {
   if (!dateString) return '-'
   return new Date(dateString).toLocaleDateString('it-IT')
@@ -103,7 +110,13 @@ const RentalsTable = ({
   onSettleBalance,
   onShowDetails,
   onRefund
-}: RentalsTableProps) => (
+}: RentalsTableProps) => {
+  const totalPrice = data.reduce((sum, p) => sum + (p.price || 0), 0)
+  const totalDeposit = data.reduce((sum, p) => sum + (p.deposit || 0), 0)
+  const totalTax = data.reduce((sum, p) => sum + (p.tax || 0), 0)
+  const totalPax = data.reduce((sum, p) => sum + ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1), 0)
+
+  return (
   <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
     <div className="hidden md:block overflow-x-auto">
       <table className="min-w-full divide-y divide-gray-200">
@@ -148,6 +161,8 @@ const RentalsTable = ({
           {data.map((p) => {
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         const isManaged = p.rentalType === 'CAR'
+        const isOwner = p.createdById === currentUserId
+        const canSeeFinancial = userRole === 'ADMIN' || isOwner
         
         return (
           <tr 
@@ -183,27 +198,60 @@ const RentalsTable = ({
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">
+                  {canSeeFinancial ? (
                     <div className="flex flex-col">
-                        <span>€ {p.price?.toFixed(2) || '0.00'}</span>
-                        {p.rentalType === 'CAR' && (
-                          <span className="text-xs text-gray-400">Acc: € {p.deposit?.toFixed(2) || '0.00'}</span>
-                        )}
-                        {p.tax > 0 && (
-                            <span className="text-xs text-red-500">Tasse: € {p.tax.toFixed(2)}</span>
-                        )}
-                        {(() => {
-                          const comm = getCommissionDisplay(p)
-                          if (comm) {
-                            return (
-                              <span className="text-xs text-blue-500">
-                                Comm: {comm.val}
-                                {comm.type === 'FIXED' ? '€' : '%'}
-                              </span>
-                            )
-                          }
-                          return null
-                        })()}
+                      <span>Prezzo: € {p.price?.toFixed(2) || '0.00'}</span>
+                      {p.rentalType === 'CAR' && (
+                        <>
+                          <span className="text-xs text-green-600">
+                            Incassato: € {(p.deposit || 0).toFixed(2)}
+                          </span>
+                          {p.price > (p.deposit || 0) && (
+                            <span className="text-xs text-orange-600">
+                              Da incassare: € {(p.price - (p.deposit || 0)).toFixed(2)}
+                            </span>
+                          )}
+                        </>
+                      )}
+                      {p.tax > 0 && (
+                        <span className="text-xs text-red-500">
+                          Tasse: € {p.tax.toFixed(2)}
+                        </span>
+                      )}
+                      {p.insurancePrice > 0 && (
+                        <span className="text-xs text-gray-500">
+                          Assicurazione: € {p.insurancePrice.toFixed(2)}
+                        </span>
+                      )}
+                      {p.supplementPrice > 0 && (
+                        <span className="text-xs text-gray-500">
+                          Supplemento: € {p.supplementPrice.toFixed(2)}
+                        </span>
+                      )}
+                      {p.rentalType !== 'BOAT' && p.assistantCommission > 0 && (
+                        <span className="text-xs text-purple-600">
+                          Comm. Assistente: {p.assistantCommission}
+                          {p.assistantCommissionType === 'FIXED' ? '€' : '%'}
+                        </span>
+                      )}
+                      {(() => {
+                        const comm = getCommissionDisplay(p)
+                        if (comm) {
+                          return (
+                            <span className="text-xs text-blue-500">
+                              Comm: {comm.val}
+                              {comm.type === 'FIXED' ? '€' : '%'}
+                            </span>
+                          )
+                        }
+                        return null
+                      })()}
                     </div>
+                  ) : (
+                    <div className="text-xs text-gray-400">
+                      Dati economici non visibili
+                    </div>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <span className={`px-2.5 py-1 inline-flex items-center text-xs font-medium rounded-full border ${getStatusColor(p)}`}>
@@ -279,11 +327,27 @@ const RentalsTable = ({
       </table>
     </div>
 
+    <div className="hidden md:flex items-center justify-between px-6 py-3 bg-gray-50 border-t border-gray-200 text-xs text-gray-600">
+      <div className="flex items-center gap-4">
+        <span className="font-semibold">Totale noleggi: {data.length}</span>
+        <span>Pax: {totalPax}</span>
+      </div>
+      {userRole === 'ADMIN' && (
+        <div className="flex items-center gap-4 font-mono">
+          <span>Prezzo: € {totalPrice.toFixed(2)}</span>
+          <span>Incassato: € {totalDeposit.toFixed(2)}</span>
+          {totalTax > 0 && <span>Tasse: € {totalTax.toFixed(2)}</span>}
+        </div>
+      )}
+    </div>
+
     {/* Mobile Card View */}
     <div className="md:hidden divide-y divide-gray-100">
       {data.map((p) => {
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         const isManaged = p.rentalType === 'CAR'
+        const isOwner = p.createdById === currentUserId
+        const canSeeFinancial = userRole === 'ADMIN' || isOwner
         
         return (
           <div 
@@ -319,16 +383,24 @@ const RentalsTable = ({
 
             <div className="flex justify-between items-center pt-2 border-t border-gray-100/50">
                <div className="flex gap-3 text-sm">
-                  <div className="flex flex-col">
-                     <span className="text-xs text-gray-400">Prezzo</span>
-                     <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
-                  </div>
-                  {p.rentalType === 'CAR' && (
-                    <div className="flex flex-col">
-                       <span className="text-xs text-gray-400">Acconto</span>
-                       <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
-                    </div>
-                  )}
+                 {canSeeFinancial ? (
+                   <>
+                     <div className="flex flex-col">
+                       <span className="text-xs text-gray-400">Prezzo</span>
+                       <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
+                     </div>
+                     {p.rentalType === 'CAR' && (
+                       <div className="flex flex-col">
+                         <span className="text-xs text-gray-400">Acconto</span>
+                         <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
+                       </div>
+                     )}
+                   </>
+                 ) : (
+                   <div className="text-xs text-gray-400">
+                     Dati economici non visibili
+                   </div>
+                 )}
                </div>
                
                <div className="flex gap-2">
@@ -393,7 +465,7 @@ const RentalsTable = ({
       )}
     </div>
   </div>
-)
+)}
 
 interface RentalsListProps {
   onEdit: (participant: any) => void
@@ -401,6 +473,8 @@ interface RentalsListProps {
   refreshTrigger: number
   currentUserId: string
   userRole: string
+  search?: string
+  onLoaded?: (participants: any[]) => void
 }
 
 export function RentalsList({ 
@@ -408,8 +482,10 @@ export function RentalsList({
   onUpdate,
   refreshTrigger, 
   currentUserId, 
-  userRole, 
-}: RentalsListProps) {
+  userRole,
+  search = '',
+  onLoaded,
+  }: RentalsListProps) {
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
@@ -446,12 +522,40 @@ export function RentalsList({
 
   const fetchParticipants = async () => {
     try {
-      const res = await fetch(`/api/participants?isRental=true`)
+      const params = new URLSearchParams()
+      params.set('isRental', 'true')
+      if (search && search.trim()) {
+        params.set('search', search.trim())
+      }
+
+      const res = await fetch(`/api/participants?${params.toString()}`)
       if (res.ok) {
         const data = await res.json()
-        // Sort by rental start date descending
-        data.sort((a: any, b: any) => new Date(b.rentalStartDate).getTime() - new Date(a.rentalStartDate).getTime())
-        setParticipants(data)
+
+        const today = new Date()
+        const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+
+        const enriched = data.map((p: any) => {
+          const end = p.rentalEndDate || p.rentalStartDate || p.bookingDate
+          let isExpired = false
+          if (end) {
+            const d = new Date(end)
+            const endDateOnly = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+            isExpired = endDateOnly < startOfToday
+          }
+          return { ...p, isExpired }
+        })
+
+        enriched.sort(
+          (a: any, b: any) =>
+            new Date(b.rentalStartDate || b.bookingDate).getTime() -
+            new Date(a.rentalStartDate || a.bookingDate).getTime()
+        )
+
+        setParticipants(enriched)
+        if (onLoaded) {
+          onLoaded(enriched)
+        }
       }
     } catch (error) {
       console.error('Error fetching rentals:', error)
@@ -479,9 +583,26 @@ export function RentalsList({
     </div>
   )
 
-  const activeParticipants = participants.filter(p => !p.isExpired && p.paymentType !== 'REFUNDED')
-  const expiredParticipants = participants.filter(p => p.isExpired && p.paymentType !== 'REFUNDED')
-  const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
+  const searchTerm = search.trim().toLowerCase()
+
+  const matchesSearch = (p: any) => {
+    if (!searchTerm) return true
+    const notes = (p.notes || '').toLowerCase()
+    return notes.includes(searchTerm)
+  }
+
+  const activeParticipants = participants
+    .filter(p => !p.isExpired && p.paymentType !== 'REFUNDED' && getApproval(p) !== 'PENDING' && getApproval(p) !== 'REJECTED')
+    .filter(matchesSearch)
+
+  const expiredParticipants = participants
+    .filter(p => p.isExpired && p.paymentType !== 'REFUNDED')
+    .filter(matchesSearch)
+
+  const refundedParticipants = participants
+    .filter(p => p.paymentType === 'REFUNDED')
+    .filter(matchesSearch)
+  const pendingParticipants = participants.filter(p => getApproval(p) === 'PENDING')
 
   const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
@@ -661,6 +782,37 @@ export function RentalsList({
 
   return (
     <div className="space-y-8">
+      {/* Pending Approval */}
+      {pendingParticipants.length > 0 && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between px-1">
+            <div className="flex items-center gap-2">
+              <AlertCircle className="w-5 h-5 text-amber-600" />
+              <h3 className="text-lg font-bold text-gray-800">In Attesa di Approvazione</h3>
+              <span className="bg-amber-100 text-amber-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-amber-200">
+                {pendingParticipants.length}
+              </span>
+            </div>
+          </div>
+          <RentalsTable 
+            data={pendingParticipants}
+            emptyMessage="Nessun partecipante in approvazione"
+            userRole={userRole}
+            currentUserId={currentUserId}
+            onEdit={onEdit}
+            onDelete={handleDelete}
+            onSettleBalance={handleSettleBalance}
+            onShowDetails={(p) => {
+              setSelectedParticipant(p)
+              setShowDetails(true)
+            }}
+            onRefund={(p) => {
+              setParticipantToRefund(p)
+              setShowRefund(true)
+            }}
+          />
+        </div>
+      )}
       {/* Active Rentals */}
       <div className="space-y-4">
         <div className="flex items-center justify-between px-1">

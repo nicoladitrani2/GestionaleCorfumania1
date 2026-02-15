@@ -88,7 +88,7 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
           if (ruleType === 'FIXED') {
               const adults = (p.adults || 0)
               const children = (p.children || 0)
-              const count = (adults + children) > 0 ? (adults + children) : (p.groupSize || 1)
+              const count = (adults + children + (p.infants || 0)) > 0 ? (adults + children + (p.infants || 0)) : 1
               stats.totalCommission += count * ruleValue
           } else {
               // PERCENTAGE

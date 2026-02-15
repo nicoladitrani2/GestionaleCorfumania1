@@ -14,21 +14,24 @@ export function EmailModal({ clientId, clientEmail, clientName, onClose, onEmail
   const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [attachments, setAttachments] = useState<File[]>([])
 
   const handleSend = async () => {
     setSending(true)
     setError(null)
     
     try {
-      // 1. Send email via API
+      const formData = new FormData()
+      formData.append('to', clientEmail)
+      formData.append('subject', subject)
+      formData.append('text', body)
+      attachments.forEach(file => {
+        formData.append('attachments', file)
+      })
+
       const emailRes = await fetch('/api/email/send', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          to: clientEmail,
-          subject: subject,
-          text: body
-        })
+        body: formData
       })
 
       if (!emailRes.ok) {
@@ -50,13 +53,25 @@ export function EmailModal({ clientId, clientEmail, clientName, onClose, onEmail
 
       onEmailSent()
       onClose()
-      alert('Email inviata con successo!')
-    } catch (e: any) {
-      console.error("Failed to send email or update status", e)
-      setError(e.message || "Si è verificato un errore durante l'invio dell'email.")
+    } catch (e) {
+      console.error('Failed to send email or update status', e)
+      setError(
+        e instanceof Error
+          ? e.message
+          : "Si è verificato un errore durante l'invio dell'email."
+      )
     } finally {
       setSending(false)
     }
+  }
+
+  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files
+    if (!files) {
+      setAttachments([])
+      return
+    }
+    setAttachments(Array.from(files))
   }
 
   return (
@@ -112,6 +127,24 @@ export function EmailModal({ clientId, clientEmail, clientName, onClose, onEmail
               className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all disabled:opacity-50 disabled:bg-gray-100"
               placeholder="Scrivi qui il tuo messaggio..."
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Allegati</label>
+            <input
+              type="file"
+              multiple
+              disabled={sending}
+              onChange={handleFileChange}
+              className="block w-full text-sm text-gray-600 file:mr-4 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+            />
+            {attachments.length > 0 && (
+              <ul className="mt-2 text-xs text-gray-500 space-y-1">
+                {attachments.map(file => (
+                  <li key={file.name}>{file.name}</li>
+                ))}
+              </ul>
+            )}
           </div>
         </div>
 

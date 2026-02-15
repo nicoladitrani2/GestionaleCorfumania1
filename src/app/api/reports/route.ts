@@ -137,45 +137,47 @@ export async function GET(request: Request) {
 
     // Process Data
     let totalRevenue = 0
-    let totalCommission = 0 // Agency Commission
+    let totalCommission = 0 // Mixed: agency commissions + brokerage/net components
     let totalAssistantCommission = 0 // Assistant Commission
+    let totalNetAgency = 0
+    let totalExternalAgencyCommission = 0
     let totalPax = 0
     let totalTax = 0
     
-    const byAgency: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
+    const byAgency: Record<string, { name: string, revenue: number, commission: number, assistantCommission?: number, netAgency: number, count: number, pax: number, tax: number }> = {}
     const bySupplier: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byAssistant: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byExcursion: Record<string, { name: string, date: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byTransfer: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
-    const byRental: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
+    const byRental: Record<string, { name: string, revenue: number, commission: number, assistantCommission: number, supplierShare: number, netAgency: number, count: number, pax: number, tax: number }> = {}
     const bySpecialService: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number }> = {}
 
     participants.forEach(p => {
-        // Exclude Rejected participants from reports
-        if (p.approvalStatus === 'REJECTED') return
+        if (p.paymentStatus === 'REJECTED' || p.paymentStatus === 'PENDING_APPROVAL') return
 
         let isRetained = false
-        let revenue = p.deposit || 0 
-        let pax = p.groupSize || 1
+        let revenue = p.paidAmount || 0 
+        let pax = (p.adults + p.children + p.infants) || 1
         const tax = p.tax || 0
         
         // Handle Refunded: Only include if there is a retained deposit (Acconto)
         if (p.paymentType === 'REFUNDED') {
-             const price = p.price || 0
-             const deposit = p.deposit || 0
+             const price = p.totalPrice || 0
+             const deposit = p.paidAmount || 0
              // Logic: If deposit exists and is less than price (Partial), assume it's retained.
              // If deposit == price, assume full refund (exclude).
              if (deposit > 0 && deposit < price) {
                  isRetained = true
                  revenue = deposit
-                 pax = p.groupSize || 1 // Count pax for fixed commissions
+                 pax = (p.adults + p.children + p.infants) // Count pax for fixed commissions
              } else {
                  return // Exclude full refund
              }
         }
 
-        let commissionAmount = 0 // Agency Commission (Netto Agenzia Lordo)
+        let commissionAmount = 0
         let isBrokerageProcessed = false
+        let isExternalAgencyCommission = false
         
         // --- SPECIAL SERVICES ---
         if (p.specialServiceType) {
@@ -215,58 +217,43 @@ export async function GET(request: Request) {
         }
 
         const isRental = !!p.rentalId
+        let effectiveRentalType: string | null = null
+
         if (isRental) {
-             // Heuristic for legacy data without rentalType
-             let effectiveRentalType = p.rental?.type
-             if (!effectiveRentalType) {
-                 if ((p.insurancePrice || 0) > 0 || (p.supplementPrice || 0) > 0) {
-                     effectiveRentalType = 'MOTO'
-                 } else if (p.supplier && (p.deposit || 0) === 0 && (p.price || 0) > 0) {
-                     // If it has a supplier, full price, and 0 deposit, likely a Boat or paid-up rental
-                     // defaulting to BOAT logic (Percentage of Total) is safer than Standard (Deposit based) if Deposit is 0
-                     effectiveRentalType = 'BOAT'
-                 }
-             }
+            effectiveRentalType = ((p as any).rentalType || p.rental?.type || null) as string | null
 
-             // Filter by specific Rental Type
-             if (types && types.length > 0) {
-                 const currentRentalType = effectiveRentalType ? `RENTAL_${effectiveRentalType}` : 'RENTAL_CAR'
-                 // If the specific rental type is not in the requested types, skip this participant
-                 // We only filter if at least one rental type is requested (which is guaranteed if we are here and p.isRental is true, 
-                 // because we only fetched rentalId!=null if a RENTAL_* type was in types)
-                 // However, we fetched ALL rentals, so we must filter out the unselected sub-types.
-                 if (!types.includes(currentRentalType)) return
-             }
+            if (!effectiveRentalType) {
+                if ((p.insurancePrice || 0) > 0 || (p.supplementPrice || 0) > 0) {
+                    effectiveRentalType = 'MOTO'
+                } else if (p.supplier && (p as any).price === 0 && (p.totalPrice || 0) > 0) {
+                    effectiveRentalType = 'BOAT'
+                } else {
+                    effectiveRentalType = 'CAR'
+                }
+            }
 
-             if (effectiveRentalType && ['MOTO', 'BOAT'].includes(effectiveRentalType)) {
-                 // RENTAL BROKERAGE LOGIC (MOTO/BOAT)
-                 isBrokerageProcessed = true
-                 // Revenue (Incasso) for agency is 0 as there is no deposit managed by agency
-                 revenue = 0
-                 
-                 const price = p.price || 0
-                 const commPct = p.commissionPercentage || 0
-                 
-                 if (effectiveRentalType === 'MOTO') {
-                     // Moto: (Price - Insurance - Supplement) * %
-                     const taxable = Math.max(0, price - (p.insurancePrice || 0) - (p.supplementPrice || 0))
-                     commissionAmount = taxable * (commPct / 100)
-                 } else {
-                     // Boat: Price * %
-                     commissionAmount = price * (commPct / 100)
-                 }
-             } else {
-                 // Standard Logic (CAR or undefined treated as CAR)
-                 // Fall through to standard logic below, BUT strictly for CAR rentals
-                 // we usually consider Deposit as the Commission?
-                 // Current Standard Logic uses Agency Commission Rules (Percentage/Fixed).
-                 // If User wants CAR to be treated as Standard (Deposit), we continue.
-             }
+            if (types && types.length > 0) {
+                const currentRentalType = effectiveRentalType ? `RENTAL_${effectiveRentalType}` : 'RENTAL_CAR'
+                if (!types.includes(currentRentalType)) return
+            }
+
+            if (effectiveRentalType && ['MOTO', 'BOAT'].includes(effectiveRentalType)) {
+                isBrokerageProcessed = true
+                revenue = 0
+                
+                const price = p.totalPrice || 0
+                const commPct = p.commissionPercentage || 0
+                
+                if (effectiveRentalType === 'MOTO') {
+                    const taxable = Math.max(0, price - (p.insurancePrice || 0) - (p.supplementPrice || 0))
+                    commissionAmount = taxable * (commPct / 100)
+                } else {
+                    commissionAmount = price * (commPct / 100)
+                }
+            }
         }
 
-        // STANDARD LOGIC (Excursion, Transfer, Car Rental)
-        // Only apply if NOT already processed as Brokerage Rental AND NOT Special Service
-        const isBrokerageRental = isRental && p.rental?.type && ['MOTO', 'BOAT'].includes(p.rental?.type)
+        const isBrokerageRental = isRental && effectiveRentalType && ['MOTO', 'BOAT'].includes(effectiveRentalType)
         
         if (agency && !isBrokerageRental && !p.specialServiceType) {
             let ruleType = (agency as any).commissionType || 'PERCENTAGE'
@@ -295,52 +282,48 @@ export async function GET(request: Request) {
             } else {
                 commissionAmount = (revenue * ruleValue) / 100
             }
+
+            isExternalAgencyCommission = true
         }
 
         // --- ASSISTANT COMMISSION CALCULATION ---
         let assistantCommissionAmount = 0
         
-        // Determine Assistant Commission Type and Value with Fallback to Agency defaults
         let asstCommType = p.assistantCommissionType
-            let asstCommVal = p.assistantCommission
+        let asstCommVal = p.assistantCommission
 
-            // Fallback to Assistant's Agency configuration if not set on participant
-            if (!asstCommType || asstCommVal === null || asstCommVal === undefined) {
-                 let assistantAgency = null
-                 if ((p.user as any)?.agencyId && agencyMap[(p.user as any).agencyId]) {
-                     assistantAgency = agencyMap[(p.user as any).agencyId]
-                 } else if ((p.user as any)?.role === 'ADMIN') {
-                     // Try to find the specific Admin agency
-                     assistantAgency = adminAgency
-                 }
+        let assistantAgency: any = null
+        if ((p.user as any)?.agencyId && agencyMap[(p.user as any).agencyId]) {
+            assistantAgency = agencyMap[(p.user as any).agencyId]
+        } else if ((p.user as any)?.role === 'ADMIN') {
+            assistantAgency = adminAgency
+        }
 
-                 if (assistantAgency) {
-                     // For Rentals, if the user implies they want Percentage, we might need to respect that.
-                     // But strictly following the logic: Use Agency Setting.
-                     // User feedback "risulta ancora 27" implies Fixed is being used but Percentage is desired.
-                     // If the Admin Agency is "Corfumania" and is Fixed 1.0, but for Rentals we want Percentage...
-                     // We can't change the Agency setting here. 
-                     // But we can check if it's a rental and apply a heuristic if requested.
-                     // For now, we respect the DB setting.
-                     if (!asstCommType) asstCommType = (assistantAgency as any).commissionType || 'PERCENTAGE'
-                     if (asstCommVal === null || asstCommVal === undefined) asstCommVal = assistantAgency.defaultCommission || 0
-                 }
+        if (!asstCommType && assistantAgency) {
+            asstCommType = (assistantAgency as any).commissionType || 'PERCENTAGE'
+        }
+
+        if (assistantAgency && (asstCommVal === null || asstCommVal === undefined || asstCommVal === 0)) {
+            asstCommVal = assistantAgency.defaultCommission || 0
+        }
+
+        if (!asstCommType) asstCommType = 'PERCENTAGE'
+        if (asstCommVal === null || asstCommVal === undefined) asstCommVal = 0
+
+        if (asstCommVal > 0) {
+            // Nessuna commissione assistente sui noleggi barca
+            if (isRental && effectiveRentalType === 'BOAT') {
+                assistantCommissionAmount = 0
+            } else if (asstCommType === 'PERCENTAGE') {
+                let baseForAssistant = revenue
+                if (isBrokerageRental || p.specialServiceType) {
+                    baseForAssistant = commissionAmount
+                }
+                assistantCommissionAmount = baseForAssistant * (asstCommVal / 100)
+            } else {
+                assistantCommissionAmount = asstCommVal * pax
             }
-
-            // Default if still missing
-            if (!asstCommType) asstCommType = 'PERCENTAGE'
-            if (asstCommVal === null || asstCommVal === undefined) asstCommVal = 0
-
-            if (asstCommVal > 0) {
-                 if (asstCommType === 'PERCENTAGE') {
-                     // Percentage of AGENCY NET EARNINGS (commissionAmount)
-                     // Ensure commissionAmount is valid
-                     assistantCommissionAmount = commissionAmount * (asstCommVal / 100)
-                 } else {
-                     // Fixed Amount per PAX
-                     assistantCommissionAmount = asstCommVal * pax
-                 }
-            }
+        }
         
         // Aggregates
         totalRevenue += revenue
@@ -349,6 +332,36 @@ export async function GET(request: Request) {
         totalPax += pax
         totalTax += tax
 
+        // Per-row Netto Agenzia (per agenzia)
+        let netAgencyForRow = 0
+        if (isRental) {
+            if (effectiveRentalType === 'BOAT') {
+                // Per le barche: la commissione calcolata è già il netto agenzia,
+                // e non va toccata da commissioni assistente.
+                netAgencyForRow = commissionAmount
+            } else if (isBrokerageRental) {
+                // Per le moto usiamo il totale commissione come netto aziendale,
+                // senza sottrarre eventuali commissioni assistente.
+                if (effectiveRentalType === 'MOTO') {
+                    netAgencyForRow = commissionAmount
+                } else {
+                    netAgencyForRow = commissionAmount - assistantCommissionAmount
+                }
+            } else {
+                netAgencyForRow = revenue * 0.2 - assistantCommissionAmount
+            }
+        } else if (p.specialServiceType) {
+            netAgencyForRow = commissionAmount - assistantCommissionAmount
+        } else {
+            netAgencyForRow = revenue * 0.2 - assistantCommissionAmount
+        }
+
+        totalNetAgency += netAgencyForRow
+
+        if (isExternalAgencyCommission) {
+            totalExternalAgencyCommission += commissionAmount
+        }
+        
         // By Agency
         let agencyName = 'Nessuna Agenzia'
         if (userAgencyId && agencyMap[userAgencyId]) {
@@ -356,11 +369,13 @@ export async function GET(request: Request) {
         }
         
         if (!byAgency[agencyName]) {
-            byAgency[agencyName] = { name: agencyName, revenue: 0, commission: 0, assistantCommission: 0, count: 0, pax: 0, tax: 0 }
+            byAgency[agencyName] = { name: agencyName, revenue: 0, commission: 0, assistantCommission: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
         }
         byAgency[agencyName].revenue += revenue
-        byAgency[agencyName].commission += commissionAmount
+        // For agency-level views, commission represents the sum of assistant quotas
+        byAgency[agencyName].commission += assistantCommissionAmount
         byAgency[agencyName].assistantCommission += assistantCommissionAmount
+        byAgency[agencyName].netAgency += netAgencyForRow
         byAgency[agencyName].count += 1
         byAgency[agencyName].pax += pax
         byAgency[agencyName].tax += tax
@@ -372,11 +387,18 @@ export async function GET(request: Request) {
         }
         
         // Calculate Supplier Share
-        let supplierShare = revenue // Default to revenue (Cash Basis) for non-rentals
+        let supplierShare = revenue
         if (isRental) {
-            // For Rentals, Supplier gets Total Price minus Agency Commission
-            // This applies to both Brokerage (MOTO/BOAT) and Standard (CAR)
-            supplierShare = (p.price || 0) - commissionAmount
+            if (effectiveRentalType === 'CAR') {
+                supplierShare = revenue * 0.8
+            } else if (effectiveRentalType === 'BOAT') {
+                // Per le barche: la percentuale agenzia è già il netto,
+                // quindi la quota fornitore è semplicemente il prezzo totale meno il netto agenzia.
+                const price = p.totalPrice || 0
+                supplierShare = price - commissionAmount
+            } else {
+                supplierShare = ((p.totalPrice as any) || 0) - commissionAmount
+            }
         }
 
         bySupplier[supplierName].revenue += supplierShare
@@ -430,15 +452,20 @@ export async function GET(request: Request) {
             byTransfer[transferName].tax += tax
 
         } else if (isRental) {
-            const rentalName = `Noleggio: ${p.rental?.type || 'Generico'} - ${p.rental?.name || ''}`
+            const rentalLabelType = effectiveRentalType || p.rental?.type || 'Generico'
+            const rentalName = `Noleggio: ${rentalLabelType} - ${p.rental?.name || ''}`
+            const netAgencyForRow = isBrokerageRental
+                ? commissionAmount
+                : revenue * 0.2 - assistantCommissionAmount
             
             if (!byRental[rentalName]) {
-                byRental[rentalName] = { name: rentalName, revenue: 0, commission: 0, assistantCommission: 0, supplierShare: 0, count: 0, pax: 0, tax: 0 }
+                byRental[rentalName] = { name: rentalName, revenue: 0, commission: 0, assistantCommission: 0, supplierShare: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
             }
             byRental[rentalName].revenue += revenue
             byRental[rentalName].commission += commissionAmount
             byRental[rentalName].assistantCommission += assistantCommissionAmount
             byRental[rentalName].supplierShare += supplierShare
+            byRental[rentalName].netAgency += netAgencyForRow
             byRental[rentalName].count += 1
             byRental[rentalName].pax += pax
             byRental[rentalName].tax += tax
@@ -562,7 +589,9 @@ export async function GET(request: Request) {
         totalPax,
         totalTax,
         totalTaxRevenue: taxStats.totalRevenue,
-        count: participants.length
+        count: participants.length,
+        totalNetAgency,
+        totalExternalAgencyCommission
       },
       taxStats, // New field
       byAgency: Object.values(byAgency).sort((a, b) => b.revenue - a.revenue),

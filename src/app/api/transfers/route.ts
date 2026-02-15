@@ -14,6 +14,7 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
   const archived = searchParams.get('archived') === 'true'
+  const pending = searchParams.get('pending') === 'true'
   const now = new Date()
   // Set to beginning of today
   now.setHours(0, 0, 0, 0)
@@ -33,35 +34,14 @@ export async function GET(request: Request) {
     }
   }
 
-  // Check for expired transfers and update participants
-  const expiredTransfers = await prisma.transfer.findMany({
-    where: {
-      date: { lt: now }
-    },
-    select: { id: true }
-  })
-
-  if (expiredTransfers.length > 0) {
-    const expiredIds = expiredTransfers.map(t => t.id)
-    await prisma.participant.updateMany({
-      where: {
-        transferId: { in: expiredIds },
-        isExpired: false,
-        OR: [
-          { isOption: true },
-          { paymentType: 'DEPOSIT' }
-        ]
-      },
-      data: { isExpired: true }
-    })
-  }
-
   const whereClause: any = {}
   
   if (id) {
     whereClause.id = id
   } else {
-    if (archived) {
+    if (pending) {
+      whereClause.approvalStatus = 'PENDING'
+    } else if (archived) {
       whereClause.date = { lt: now }
     } else {
       whereClause.date = { gte: now }
@@ -79,44 +59,66 @@ export async function GET(request: Request) {
       },
       participants: {
         select: { 
-          groupSize: true,
-          deposit: true,
-          price: true,
+          adults: true,
+          children: true,
+          infants: true,
+          paidAmount: true,
+          totalPrice: true,
           paymentType: true,
-          isOption: true,
-          isExpired: true,
-          approvalStatus: true
+          paymentStatus: true
+        }
+      },
+      createdBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true,
+          role: true
         }
       }
     }
   })
 
-  const transfers = transfersData.map(transfer => {
-    // Calculate stats
-    let activeParticipants = 0
-    let countPaid = 0
-    let countDeposit = 0
-    let countRefunded = 0
-    let countOption = 0
-    
-    let totalCollected = 0
+    const transfers = transfersData.map(transfer => {
+      // Calculate stats
+      let activeParticipants = 0
+      let countPaid = 0
+      let countDeposit = 0
+      let countRefunded = 0
+      let countOption = 0
+      
+      let totalCollected = 0
 
-    transfer.participants.forEach(p => {
-        // Exclude Rejected participants from everything
-        if (p.approvalStatus === 'REJECTED') return
+      const transferDate = transfer.date
+      const transferDeadline = transfer.confirmationDeadline
+      const isTransferInPast = transferDate < now
 
-        const size = p.groupSize || 1
-        const dep = typeof p.deposit === 'number' ? p.deposit : Number(p.deposit)
-        const pr = typeof p.price === 'number' ? p.price : Number(p.price)
+      transfer.participants.forEach(p => {
+        // Escludi completamente partecipanti con pagamento in attesa di approvazione
+        if (p.paymentStatus === 'PENDING_APPROVAL') return
+
+        const size = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
+        const dep = typeof p.paidAmount === 'number' ? p.paidAmount : Number(p.paidAmount)
+        const pr = typeof p.totalPrice === 'number' ? p.totalPrice : Number(p.totalPrice)
+        const isOption = p.paymentType === 'OPTION'
+        const isExpired = (() => {
+          if (p.paymentType === 'REFUNDED') return false
+          if (p.paymentType === 'BALANCE') return false
+          if (!transferDeadline) {
+            return isTransferInPast && (isOption || p.paymentType === 'DEPOSIT')
+          }
+          return now > transferDeadline && (isOption || p.paymentType === 'DEPOSIT')
+        })()
         
         if (p.paymentType === 'REFUNDED') {
             countRefunded += size
-        } else if (p.isOption) {
+        } else if (isOption) {
             countOption += size
-            if (!p.isExpired) activeParticipants += size
+            if (!isExpired) activeParticipants += size
         } else {
             // Real payments
-            if (!p.isExpired) activeParticipants += size
+            if (!isExpired) activeParticipants += size
             // Exclude expired from revenue? User said "rejected = no revenue".
             // Logic for expired deposits is ambiguous, but for REJECTED we already returned above.
             totalCollected += (isNaN(dep) ? 0 : dep)
@@ -127,9 +129,9 @@ export async function GET(request: Request) {
                 countDeposit += size
             }
         }
-    })
+      })
 
-    const { participants, agencyCommissions, ...rest } = transfer
+    const { participants, agencyCommissions, createdBy, ...rest } = transfer
     
     const result: any = {
       ...rest,
@@ -141,7 +143,8 @@ export async function GET(request: Request) {
         deposit: countDeposit,
         refunded: countRefunded,
         option: countOption
-      }
+      },
+      createdBy
     }
 
     if (session.user.role === 'ADMIN') {
@@ -169,7 +172,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions } = body
+    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions, priceAdult, priceChild, confirmationDeadline } = body
 
     if (!name || !date || !supplier) {
         return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
@@ -178,32 +181,58 @@ export async function POST(request: Request) {
     const startDate = new Date(date)
     const now = new Date()
     
-    // Validate past date (allow 5 minute buffer)
-    if (startDate < new Date(now.getTime() - 5 * 60 * 1000)) {
-        return NextResponse.json({ error: 'La data di partenza non può essere nel passato.' }, { status: 400 })
+    // Per coerenza con le escursioni:
+    // - gli ADMIN possono creare trasferimenti anche con data nel passato
+    // - per gli altri utenti blocchiamo date nel passato (con 5 minuti di tolleranza)
+    if (session.user.role !== 'ADMIN') {
+      if (startDate < new Date(now.getTime() - 5 * 60 * 1000)) {
+        return NextResponse.json(
+          { error: 'La data di partenza non può essere nel passato.' },
+          { status: 400 }
+        )
+      }
     }
 
     if (endDate && new Date(endDate) < startDate) {
         return NextResponse.json({ error: 'La data di arrivo non può essere precedente alla data di partenza.' }, { status: 400 })
     }
 
+    if (confirmationDeadline) {
+      const deadline = new Date(confirmationDeadline)
+      if (deadline > startDate) {
+        return NextResponse.json(
+          { error: 'La data limite non può essere successiva alla data di partenza.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    const approvalStatus = session.user.role === 'ADMIN' ? 'APPROVED' : 'PENDING'
+
     const transfer = await prisma.transfer.create({
       data: {
         name,
         date: new Date(date),
         endDate: endDate ? new Date(endDate) : undefined,
+        confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null,
         pickupLocation,
         dropoffLocation,
-        supplier
+        supplier,
+        priceAdult: priceAdult ? parseFloat(priceAdult) : 0,
+        priceChild: priceChild ? parseFloat(priceChild) : 0,
+        approvalStatus,
+        createdById: session.user.id
       }
     })
 
     await createAuditLog(
-        session.user.id,
-        'CREATE_TRANSFER',
-        `Creato trasferimento: ${name} (${supplier})`,
-        undefined,
-        transfer.id
+      session.user.id,
+      'CREATE_TRANSFER',
+      'TRANSFER',
+      transfer.id,
+      `Creato trasferimento: ${name} (${supplier})`,
+      undefined,
+      transfer.id
     )
 
     return NextResponse.json(transfer)
@@ -221,7 +250,7 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions } = body
+    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, confirmationDeadline } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
@@ -233,14 +262,37 @@ export async function PUT(request: Request) {
         }
     }
 
+    if (confirmationDeadline && date) {
+      const start = new Date(date)
+      const deadline = new Date(confirmationDeadline)
+      if (deadline > start) {
+        return NextResponse.json(
+          { error: 'La data limite non può essere successiva alla data di partenza.' },
+          { status: 400 }
+        )
+      }
+    }
+
     const updateData: any = {
       name,
       date: date ? new Date(date) : undefined,
       endDate: endDate ? new Date(endDate) : undefined,
+      confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : undefined,
       pickupLocation,
       dropoffLocation,
       returnPickupLocation,
       supplier
+    }
+
+    if (typeof approvalStatus === 'string') {
+      updateData.approvalStatus = approvalStatus
+    }
+
+    if (priceAdult !== undefined) {
+      updateData.priceAdult = parseFloat(priceAdult)
+    }
+    if (priceChild !== undefined) {
+      updateData.priceChild = parseFloat(priceChild)
     }
 
     if (commissions) {
@@ -260,36 +312,23 @@ export async function PUT(request: Request) {
       data: updateData
     })
 
-    // If date is updated to today or future, reactivate expired participants
-    if (date) {
-      const newDate = new Date(date)
-      const now = new Date()
-      now.setHours(0, 0, 0, 0)
-
-      if (newDate >= now) {
-        await prisma.participant.updateMany({
-          where: {
-            transferId: id,
-            isExpired: true
-          },
-          data: {
-            isExpired: false
-          }
-        })
-      }
-    }
-
     await createAuditLog(
       session.user.id,
       'UPDATE_TRANSFER',
+      'TRANSFER',
+      transfer.id,
       `Modificato trasferimento: ${name}`,
       undefined,
       transfer.id
     )
 
     return NextResponse.json(transfer)
-  } catch (error) {
-    return NextResponse.json({ error: 'Errore durante l\'aggiornamento' }, { status: 500 })
+  } catch (error: any) {
+    console.error('Error updating transfer:', error)
+    return NextResponse.json(
+      { error: error?.message || 'Errore durante l\'aggiornamento' },
+      { status: 500 }
+    )
   }
 }
 
@@ -323,11 +362,13 @@ export async function DELETE(request: Request) {
         await prisma.transfer.delete({ where: { id } })
         
         await createAuditLog(
-            session.user.id,
-            'DELETE_TRANSFER',
-            `Eliminato trasferimento: ${transfer.name}`,
-            undefined,
-            id
+          session.user.id,
+          'DELETE_TRANSFER',
+          'TRANSFER',
+          id,
+          `Eliminato trasferimento: ${transfer.name}`,
+          undefined,
+          id
         )
     }
     

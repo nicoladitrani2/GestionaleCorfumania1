@@ -18,11 +18,10 @@ export async function GET(request: Request) {
         participants: {
           select: {
             id: true,
-            firstName: true,
-            lastName: true,
+            name: true,
             createdAt: true,
-            price: true,
-            deposit: true,
+            totalPrice: true,
+            paidAmount: true,
             paymentType: true,
             notes: true,
             excursion: {
@@ -39,10 +38,13 @@ export async function GET(request: Request) {
                 date: true
               }
             },
-            isRental: true,
-            rentalType: true,
-            rentalStartDate: true,
-            rentalEndDate: true,
+            rental: {
+              select: {
+                id: true,
+                name: true,
+                type: true
+              }
+            },
             pickupLocation: true,
             dropoffLocation: true
           }
@@ -50,10 +52,12 @@ export async function GET(request: Request) {
       }
     })
 
+    console.log('[/api/clients] Found clients:', clients.length)
+
     // Transform data to include distinct names list and derived service types
     const enhancedClients = clients.map(client => {
       const distinctNames = client.participants
-        .map(p => `${p.firstName} ${p.lastName}`)
+        .map(p => p.name as string)
         .filter(name => name.toLowerCase() !== `${client.firstName} ${client.lastName}`.toLowerCase())
       
       // Deduplicate strings just in case
@@ -64,7 +68,7 @@ export async function GET(request: Request) {
       client.participants.forEach(p => {
         if (p.excursion) serviceTypes.add('EXCURSION')
         if (p.transfer) serviceTypes.add('TRANSFER')
-        if (p.isRental) serviceTypes.add('RENTAL')
+        if (p.rental) serviceTypes.add('RENTAL')
       })
 
       // If no participants, fallback to client.serviceType

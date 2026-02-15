@@ -12,6 +12,9 @@ interface SummaryStats {
   totalPax: number
   totalTax: number
   totalTaxRevenue?: number
+  totalAssistantCommission?: number
+  totalNetAgency?: number
+  totalExternalAgencyCommission?: number
 }
 
 interface BreakdownItem {
@@ -401,7 +404,7 @@ export default function ReportsPage() {
             />
             <StatCard 
               title="Comm. Agenzia" 
-              value={`€ ${(reportData?.summary?.totalCommission ?? 0).toFixed(2)}`} 
+              value={`€ ${(reportData?.summary?.totalExternalAgencyCommission ?? 0).toFixed(2)}`} 
               icon={<Briefcase className="w-6 h-6 text-orange-600" />}
               bg="bg-orange-50"
             />
@@ -413,7 +416,7 @@ export default function ReportsPage() {
             />
             <StatCard 
               title="Netto Agenzia" 
-              value={`€ ${((reportData?.summary?.totalCommission ?? 0) - (reportData?.summary?.totalAssistantCommission ?? 0)).toFixed(2)}`} 
+              value={`€ ${(reportData?.summary?.totalNetAgency ?? 0).toFixed(2)}`} 
               icon={<PieChart className="w-6 h-6 text-blue-600" />}
               bg="bg-blue-50"
             />
@@ -544,7 +547,7 @@ export default function ReportsPage() {
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
                     { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
-                    { header: 'Netto', key: 'net', align: 'right', format: 'currency', color: 'text-blue-600' }
+                    { header: 'Netto Agenzia', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' }
                 ]}
             />
 
@@ -570,7 +573,7 @@ export default function ReportsPage() {
                         color: 'text-blue-700 font-bold',
                         render: (item: any) => `€ ${(item.revenue + (item.taxBookingRevenue || 0)).toFixed(2)}`
                     },
-                    { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' }
+                    { header: 'Comm. Assistente', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' }
                 ]}
             />
           </div>
@@ -634,7 +637,7 @@ export default function ReportsPage() {
                     <div>
                       <p className="text-sm font-medium text-blue-600">Totale Netto Agenzia (Noleggi)</p>
                       <p className="text-2xl font-bold text-blue-700">
-                        € {reportData.byRental.reduce((acc, r) => acc + (r.commission - (r.assistantCommission || 0)), 0).toFixed(2)}
+                        € {reportData.byRental.reduce((acc, r) => acc + (r.netAgency ?? r.commission), 0).toFixed(2)}
                       </p>
                     </div>
                     <PieChart className="w-8 h-8 text-blue-300" />
@@ -658,7 +661,7 @@ export default function ReportsPage() {
                       { header: 'Pax', key: 'pax', align: 'right' },
                       { header: 'Comm. Tot.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
                       { header: 'Comm. Ass.', key: 'assistantCommission', align: 'right', format: 'currency', color: 'text-purple-600' },
-                      { header: 'Netto Agenzia', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' },
+                    { header: 'Netto Agenzia', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' },
                       { header: 'Quota Fornitore', key: 'supplierShare', align: 'right', format: 'currency', color: 'text-green-600' }
                   ]}
                 />
@@ -753,7 +756,7 @@ function TableCard({ title, data, columns }: { title: string, data?: any[], colu
                                         value = item.revenue - item.commission
                                     }
                                     if (col.key === 'netAgency') {
-                                        value = item.commission - (item.assistantCommission || 0)
+                                        value = item.netAgency ?? item.commission
                                     }
                                     
                                     if (col.format === 'currency') {

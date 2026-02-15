@@ -2,11 +2,12 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, User, Calendar, Clock, Edit, Home, Map as MapIcon, X, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Briefcase, ArrowRight, Percent, BarChart3 } from 'lucide-react'
+import { Plus, Users, User, Calendar, Clock, Edit, Home, Map as MapIcon, X, Check, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Briefcase, ArrowRight, Percent, BarChart3, Award } from 'lucide-react'
 import { ParticipantForm } from '../excursions/ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
 import { AuditLogList } from '../excursions/AuditLogList'
 import { FinancialSummary } from '../components/FinancialSummary'
+import { TransferLeaderboard } from './TransferLeaderboard'
 import { ConfirmationModal } from '../components/ConfirmationModal'
 import { AlertModal } from '../components/AlertModal'
 import Link from 'next/link'
@@ -29,7 +30,7 @@ export function TransfersManager({
   agencyCommissionType
 }: TransfersManagerProps) {
   const [transfers, setTransfers] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState('ACTIVE')
+  const [activeTab, setActiveTab] = useState<'ACTIVE' | 'ARCHIVE' | 'PENDING'>('ACTIVE')
   const [loading, setLoading] = useState(true)
   const [selectedTransfer, setSelectedTransfer] = useState<any>(null)
   
@@ -37,14 +38,17 @@ export function TransfersManager({
   const [isAddingParticipant, setIsAddingParticipant] = useState(false)
   const [editingParticipant, setEditingParticipant] = useState<any>(null)
   
-  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'HISTORY' | 'SUMMARY'>('PARTICIPANTS')
+  const [viewMode, setViewMode] = useState<'PARTICIPANTS' | 'LEADERBOARD' | 'HISTORY' | 'SUMMARY'>('PARTICIPANTS')
   const [newDate, setNewDate] = useState('')
   const [newTransferName, setNewTransferName] = useState('')
   const [newPickupLocation, setNewPickupLocation] = useState('')
   const [newDropoffLocation, setNewDropoffLocation] = useState('')
   const [newReturnPickupLocation, setNewReturnPickupLocation] = useState('')
   const [newEndDate, setNewEndDate] = useState('')
+  const [newConfirmationDeadline, setNewConfirmationDeadline] = useState('')
   const [newSupplier, setNewSupplier] = useState('GO4SEA')
+  const [newPriceAdult, setNewPriceAdult] = useState('')
+  const [newPriceChild, setNewPriceChild] = useState('')
   const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
   
   // Modal States
@@ -172,6 +176,7 @@ export function TransfersManager({
     try {
       const params = new URLSearchParams()
       if (activeTab === 'ARCHIVE') params.append('archived', 'true')
+      if (activeTab === 'PENDING') params.append('pending', 'true')
       
       const res = await fetch(`/api/transfers?${params.toString()}`)
       if (res.ok) {
@@ -231,6 +236,9 @@ export function TransfersManager({
     setNewDropoffLocation('')
     setNewReturnPickupLocation('')
     setNewEndDate('')
+    setNewConfirmationDeadline('')
+    setNewPriceAdult('')
+    setNewPriceChild('')
     
     // Logica di default fornitore
     let defaultSup = 'GO4SEA'
@@ -270,7 +278,18 @@ export function TransfersManager({
     setNewPickupLocation(transfer.pickupLocation || '')
     setNewDropoffLocation(transfer.dropoffLocation || '')
     setNewEndDate(transfer.endDate ? toLocalISOString(transfer.endDate) : '')
+    setNewConfirmationDeadline(transfer.confirmationDeadline ? toLocalISOString(transfer.confirmationDeadline) : '')
     setNewSupplier(transfer.supplier || 'GO4SEA')
+    setNewPriceAdult(
+      typeof transfer.priceAdult === 'number' && !isNaN(transfer.priceAdult)
+        ? transfer.priceAdult.toString()
+        : ''
+    )
+    setNewPriceChild(
+      typeof transfer.priceChild === 'number' && !isNaN(transfer.priceChild)
+        ? transfer.priceChild.toString()
+        : ''
+    )
     
     // Populate commissions
     if (transfer.commissions) {
@@ -300,9 +319,11 @@ export function TransfersManager({
     // Validazione date
     const start = new Date(newDate)
     const end = newEndDate ? new Date(newEndDate) : null
+    const deadline = newConfirmationDeadline ? new Date(newConfirmationDeadline) : null
     const now = new Date()
+    const bufferNow = new Date(now.getTime() - 5 * 60 * 1000)
 
-    if (!editingTransferId && start < now) {
+    if (!editingTransferId && userRole !== 'ADMIN' && start < bufferNow) {
       setError('La data di partenza non può essere nel passato.')
       return
     }
@@ -312,19 +333,41 @@ export function TransfersManager({
       return
     }
 
+    if (deadline && deadline > start) {
+      setError('La data limite non può essere successiva alla data di partenza.')
+      return
+    }
+
+    if (userRole === 'ADMIN') {
+      const pa = parseFloat(newPriceAdult || '0')
+      const pc = parseFloat(newPriceChild || '0')
+      if (isNaN(pa) || isNaN(pc) || (pa <= 0 && pc <= 0)) {
+        setError('Per gli amministratori è obbligatorio impostare almeno un prezzo (adulto o bambino) maggiore di 0.')
+        return
+      }
+    }
+
     try {
       const url = '/api/transfers'
       const method = editingTransferId ? 'PUT' : 'POST'
       
       const generatedName = `${newPickupLocation} -> ${newDropoffLocation}`
       
-      const payload = {
+      const payload: any = {
         name: generatedName,
         date: newDate,
         endDate: newEndDate || undefined,
+        confirmationDeadline: newConfirmationDeadline || newDate,
         pickupLocation: newPickupLocation,
         dropoffLocation: newDropoffLocation,
         supplier: newSupplier,
+      }
+
+      if (userRole === 'ADMIN') {
+        const pa = parseFloat(newPriceAdult || '0')
+        const pc = parseFloat(newPriceChild || '0')
+        payload.priceAdult = isNaN(pa) ? 0 : pa
+        payload.priceChild = isNaN(pc) ? 0 : pc
       }
 
       const body = editingTransferId 
@@ -365,6 +408,37 @@ export function TransfersManager({
     setEditingParticipant(null)
     setRefreshParticipantsTrigger(prev => prev + 1)
     fetchTransfers()
+  }
+
+  const handleApprovalAction = async (transferId: string, status: 'APPROVED' | 'REJECTED') => {
+    try {
+      const res = await fetch('/api/transfers', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ id: transferId, approvalStatus: status })
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Errore durante l\'aggiornamento dello stato')
+      }
+
+      const updated = await res.json()
+
+      if (selectedTransfer && selectedTransfer.id === transferId) {
+        setSelectedTransfer({ ...selectedTransfer, ...updated })
+      }
+
+      fetchTransfers()
+    } catch (e: any) {
+      console.error(e)
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: e.message || 'Errore durante l\'aggiornamento dello stato',
+        variant: 'danger'
+      })
+    }
   }
 
   const formatDateDisplay = (dateStr: string) => {
@@ -487,6 +561,41 @@ export function TransfersManager({
                 </div>
               </div>
 
+              {userRole === 'ADMIN' && (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulto</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={newPriceAdult}
+                        onChange={(e) => setNewPriceAdult(e.target.value)}
+                        className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                        placeholder="Es. 15.00"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambino</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={newPriceChild}
+                        onChange={(e) => setNewPriceChild(e.target.value)}
+                        className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                        placeholder="Es. 10.00"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-bold text-gray-900 mb-1">Data e Ora Partenza</label>
@@ -507,6 +616,16 @@ export function TransfersManager({
                     className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                   />
                 </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-1">Data limite acconti</label>
+                <input
+                  type="datetime-local"
+                  value={newConfirmationDeadline}
+                  onChange={(e) => setNewConfirmationDeadline(e.target.value)}
+                  className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
+                />
               </div>
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
@@ -573,6 +692,35 @@ export function TransfersManager({
                     </div>
                   )}
 
+                  {selectedTransfer.confirmationDeadline && (
+                    <div className="flex items-center gap-2 bg-amber-50 px-3 py-2 rounded-lg text-amber-800 border border-amber-100">
+                      <Clock className="w-4 h-4 text-amber-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-amber-600 font-semibold uppercase tracking-wider">Data limite acconti</span>
+                        <span className="font-medium">{formatDateDisplay(selectedTransfer.confirmationDeadline)}</span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTransfer.approvalStatus === 'PENDING' && (
+                    <div className="flex items-center gap-2 bg-yellow-50 px-3 py-2 rounded-lg text-yellow-800 border border-yellow-200">
+                      <AlertCircle className="w-4 h-4 text-yellow-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-yellow-600 font-semibold uppercase tracking-wider">Stato</span>
+                        <span className="font-medium">In attesa di approvazione</span>
+                      </div>
+                    </div>
+                  )}
+                  {selectedTransfer.approvalStatus === 'REJECTED' && (
+                    <div className="flex items-center gap-2 bg-red-50 px-3 py-2 rounded-lg text-red-800 border border-red-200">
+                      <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-red-600 font-semibold uppercase tracking-wider">Stato</span>
+                        <span className="font-medium">Rifiutato</span>
+                      </div>
+                    </div>
+                  )}
+
                   {(() => {
                     const comm = getTransferCommission(selectedTransfer)
                     if (comm) {
@@ -590,6 +738,18 @@ export function TransfersManager({
                     }
                     return null
                   })()}
+
+                  {userRole === 'ADMIN' && typeof selectedTransfer.totalCollected === 'number' && (
+                    <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
+                      <Euro className="w-4 h-4 text-green-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-green-600 font-semibold uppercase tracking-wider">Incasso</span>
+                        <span className="font-medium font-mono">
+                          € {selectedTransfer.totalCollected.toFixed(2)}
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg text-gray-800 border border-gray-100">
                     <Briefcase className="w-4 h-4 text-gray-600 shrink-0" />
@@ -620,17 +780,46 @@ export function TransfersManager({
                     <div className="flex flex-col">
                         <span className="text-xs text-gray-500 font-medium uppercase">Totale Pax</span>
                         <span className="font-bold text-gray-900 text-lg">
-                            {selectedTransfer.participants?.reduce((acc: number, p: any) => acc + (p.groupSize || 1), 0) || 0}
+                            {selectedTransfer.participants?.reduce((acc: number, p: any) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0) || 0}
                         </span>
                     </div>
                  </div>
                  <button
                   onClick={() => setIsAddingParticipant(true)}
-                  className="flex items-center gap-2 bg-gradient-to-r from-blue-600 to-indigo-600 text-white px-6 py-2.5 rounded-lg hover:from-blue-700 hover:to-indigo-700 font-medium shadow-md hover:shadow-lg transition-all transform hover:-translate-y-0.5"
+                  disabled={userRole !== 'ADMIN' && selectedTransfer.approvalStatus !== 'APPROVED'}
+                  className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium shadow-md transition-all transform hover:-translate-y-0.5 ${
+                    userRole !== 'ADMIN' && selectedTransfer.approvalStatus !== 'APPROVED'
+                      ? 'bg-gray-200 text-gray-500 cursor-not-allowed shadow-none hover:translate-y-0 hover:shadow-none'
+                      : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg'
+                  }`}
                 >
                   <Plus className="w-5 h-5" />
-                  Aggiungi Partecipante
+                  {userRole !== 'ADMIN' && selectedTransfer.approvalStatus !== 'APPROVED'
+                    ? 'In attesa approvazione'
+                    : 'Aggiungi Partecipante'}
                 </button>
+                {userRole === 'ADMIN' && selectedTransfer.approvalStatus === 'PENDING' && (
+                  <div className="flex flex-col gap-2">
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalAction(selectedTransfer.id, 'APPROVED')}
+                        className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium shadow-sm hover:bg-emerald-700 transition-colors"
+                      >
+                        <Check className="w-4 h-4" />
+                        Approva trasferimento
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleApprovalAction(selectedTransfer.id, 'REJECTED')}
+                        className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium shadow-sm hover:bg-red-700 transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                        Rifiuta
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -664,6 +853,21 @@ export function TransfersManager({
                 )}
               </button>
             )}
+            {userRole === 'ADMIN' && (
+              <button
+                onClick={() => setViewMode('LEADERBOARD')}
+                className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
+                  viewMode === 'LEADERBOARD'
+                    ? 'text-amber-600'
+                    : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                Classifica
+                {viewMode === 'LEADERBOARD' && (
+                  <span className="absolute bottom-0 left-0 w-full h-0.5 bg-amber-500 rounded-t-full" />
+                )}
+              </button>
+            )}
             <button
               onClick={() => setViewMode('HISTORY')}
               className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
@@ -686,6 +890,7 @@ export function TransfersManager({
                eventType="TRANSFER"
                transferName={selectedTransfer.name}
                transferDate={selectedTransfer.date}
+               transferConfirmationDeadline={selectedTransfer.confirmationDeadline}
                onEdit={(participant) => {
                  setEditingParticipant(participant)
                  setIsAddingParticipant(true)
@@ -703,6 +908,10 @@ export function TransfersManager({
                 refreshTrigger={refreshParticipantsTrigger}
               />
             )}
+          
+          {viewMode === 'LEADERBOARD' && userRole === 'ADMIN' && (
+            <TransferLeaderboard transfer={selectedTransfer} userRole={userRole} />
+          )}
             
             {viewMode === 'HISTORY' && (
             <div className="mt-6">
@@ -736,6 +945,8 @@ export function TransfersManager({
                 userAgencyId={userAgencyId}
                 agencyDefaultCommission={agencyDefaultCommission}
                 agencyCommissionType={agencyCommissionType}
+                priceAdult={selectedTransfer.priceAdult || 0}
+                priceChild={selectedTransfer.priceChild || 0}
               />
             </div>
           )}
@@ -757,20 +968,29 @@ export function TransfersManager({
           </div>
 
           <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-            {['ACTIVE', 'ARCHIVE'].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`
-                  px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
-                  ${activeTab === tab 
-                    ? 'bg-white text-gray-900 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}
-                `}
-              >
-                {tab === 'ACTIVE' ? 'Attivi' : 'Archivio'}
-              </button>
-            ))}
+            {(['ACTIVE', 'ARCHIVE', 'PENDING'] as const).map((tab) => {
+              const label = tab === 'ACTIVE' ? 'Attivi' : tab === 'ARCHIVE' ? 'Archivio' : 'Da approvare'
+              const isPending = tab === 'PENDING'
+              if (isPending && userRole !== 'ADMIN') return null
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`
+                    px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
+                    ${activeTab === tab 
+                      ? isPending 
+                        ? 'bg-orange-500 text-white shadow-sm' 
+                        : 'bg-white text-gray-900 shadow-sm' 
+                      : isPending
+                        ? 'text-orange-600 hover:text-orange-700 hover:bg-orange-50'
+                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}
+                  `}
+                >
+                  {label}
+                </button>
+              )
+            })}
           </div>
 
           {loading ? (
@@ -826,9 +1046,21 @@ export function TransfersManager({
                       )}
                     </div>
 
-                    <h3 className="text-lg font-bold text-gray-900 mb-2 group-hover:text-blue-600 transition-colors line-clamp-1">
-                      {transfer.name}
-                    </h3>
+                    <div className="flex items-center justify-between mb-2 gap-2">
+                      <h3 className="text-lg font-bold text-gray-900 group-hover:text-blue-600 transition-colors line-clamp-1">
+                        {transfer.name}
+                      </h3>
+                      {transfer.approvalStatus === 'PENDING' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-yellow-50 text-yellow-700 border border-yellow-200 font-semibold">
+                          Da approvare
+                        </span>
+                      )}
+                      {transfer.approvalStatus === 'REJECTED' && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-red-50 text-red-700 border border-red-200 font-semibold">
+                          Rifiutato
+                        </span>
+                      )}
+                    </div>
 
                     <div className="space-y-2 mb-4">
                       <div className="flex items-center text-sm text-gray-500">
