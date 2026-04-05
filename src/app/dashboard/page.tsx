@@ -22,31 +22,67 @@ export default async function DashboardPage() {
 
   // Fetch pending approvals if admin
   let pendingApprovals: any[] = []
+  let connectionError = false
   if (isAdmin) {
-    pendingApprovals = await prisma.participant.findMany({
-      where: { paymentStatus: 'PENDING_APPROVAL' },
-      orderBy: { createdAt: 'desc' },
-      include: {
-        excursion: { select: { name: true, startDate: true, priceAdult: true, priceChild: true } },
-        transfer: { select: { name: true, date: true, priceAdult: true, priceChild: true } },
-        rental: { select: { type: true } },
-        user: { select: { firstName: true, lastName: true, email: true } },
-        client: {
-          select: {
-            firstName: true,
-            lastName: true,
-            email: true,
-            phoneNumber: true,
+    try {
+      const now = new Date()
+      pendingApprovals = await prisma.participant.findMany({
+        where: {
+          paymentStatus: 'PENDING_APPROVAL',
+          OR: [
+            {
+              excursionId: null,
+              transferId: null,
+            },
+            {
+              AND: [
+                { excursionId: { not: null } },
+                {
+                  OR: [
+                    { excursion: { confirmationDeadline: null } },
+                    { excursion: { confirmationDeadline: { gte: now } } },
+                  ],
+                },
+              ],
+            },
+            {
+              AND: [
+                { transferId: { not: null } },
+                {
+                  OR: [
+                    { transfer: { confirmationDeadline: null } },
+                    { transfer: { confirmationDeadline: { gte: now } } },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        orderBy: { createdAt: 'desc' },
+        include: {
+          excursion: { select: { name: true, startDate: true, priceAdult: true, priceChild: true } },
+          transfer: { select: { name: true, date: true, priceAdult: true, priceChild: true } },
+          rental: { select: { type: true } },
+          user: { select: { firstName: true, lastName: true, email: true } },
+          client: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+              phoneNumber: true,
+            }
           }
         }
-      }
-    })
+      })
+    } catch (error) {
+      console.warn('Failed to fetch pending approvals:', error)
+      connectionError = true
+    }
   }
 
   // Fetch all excursions for calendar
   let excursionsData: any[] = []
   let transfersData: any[] = []
-  let connectionError = false
 
   try {
     excursionsData = await prisma.excursion.findMany({
@@ -59,9 +95,6 @@ export default async function DashboardPage() {
       }
     })
     transfersData = await prisma.transfer.findMany({
-      where: {
-        approvalStatus: 'APPROVED'
-      },
       orderBy: { date: 'asc' },
       include: {
         participants: {

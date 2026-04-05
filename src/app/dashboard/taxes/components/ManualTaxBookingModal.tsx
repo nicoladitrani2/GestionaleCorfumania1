@@ -30,22 +30,24 @@ export function ManualTaxBookingModal({ onClose, onSuccess }: ManualTaxBookingMo
       const nFile = `MANUAL_${Date.now()}`
 
       const payload = {
-        bookings: [{
-          nFile,
-          week: formData.week,
-          provenienza: formData.provenienza,
-          serviceCode: formData.serviceCode,
-          pax: Number(formData.pax),
-          leadName: formData.leadName,
-          totalAmount: Number(formData.totalAmount),
-          customerPaid: formData.paid,
-          // Add a clear indicator in rawData that this is manual
-          rawData: JSON.stringify({ 
-              isManual: true, 
-              createdAt: new Date().toISOString(),
-              participants: [] // Empty participants for now
-          })
-        }]
+        bookings: [
+          {
+            nFile,
+            week: formData.week,
+            provenienza: formData.provenienza,
+            serviceCode: formData.serviceCode,
+            pax: Number(formData.pax),
+            leadName: formData.leadName,
+            totalAmount: Number(formData.totalAmount),
+            customerPaid: formData.paid,
+            rawData: JSON.stringify({ 
+                isManual: true, 
+                createdAt: new Date().toISOString(),
+                importSource: 'MANUAL',
+                participants: []
+            })
+          }
+        ]
       }
 
       const res = await fetch('/api/taxes/bookings', {
@@ -134,6 +136,29 @@ export function ManualTaxBookingModal({ onClose, onSuccess }: ManualTaxBookingMo
                 className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
               />
             </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium text-gray-700">Servizio</label>
+              <select
+                value={formData.serviceCode}
+                onChange={e => {
+                  const next = Number(e.target.value)
+                  setFormData(prev => ({
+                    ...prev,
+                    serviceCode: next,
+                    totalAmount: next === 4 ? 50 : prev.totalAmount
+                  }))
+                }}
+                className="w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 outline-none bg-white"
+              >
+                <option value={1}>Solo Braccialetto</option>
+                <option value={2}>Tassa di Soggiorno</option>
+                <option value={3}>Braccialetto + Tassa</option>
+                <option value={4}>Cauzione</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <label className="text-sm font-medium text-gray-700">Importo (€)</label>
               <input

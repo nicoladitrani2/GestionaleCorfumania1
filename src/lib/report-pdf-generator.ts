@@ -266,16 +266,17 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
     const rentalRows = data.byRental.map((r: any) => [
         r.name,
         r.pax || r.count,
-        `€ ${r.revenue.toFixed(2)}`,
-        `€ ${r.commission.toFixed(2)}`,
-        `€ ${(r.assistantCommission || 0).toFixed(2)}`,
-        `€ ${(r.commission - (r.assistantCommission || 0)).toFixed(2)}`,
-        `€ ${(r.supplierShare || 0).toFixed(2)}`
+        `€ ${(r.gross || 0).toFixed(2)}`,
+        `€ ${(r.commissionBase || 0).toFixed(2)}`,
+        `€ ${(r.commission || 0).toFixed(2)}`,
+        `€ ${(r.agentShare || 0).toFixed(2)}`,
+        `€ ${(r.companyShare || 0).toFixed(2)}`,
+        `€ ${(r.go4seaShare || 0).toFixed(2)}`
     ])
 
     autoTable(doc, {
         startY: yPos + 5,
-        head: [['Tipo Noleggio', 'Pax', 'Incasso', 'Comm. Tot.', 'Comm. Ass.', 'Netto Ag.', 'Quota Forn.']],
+        head: [['Tipo Noleggio', 'Pax', 'Lordo', 'Netto', 'Comm. 20%', 'Agente 5% (Futuro)', 'Corfumania', 'Go4Sea']],
         body: rentalRows,
         theme: 'striped',
         headStyles: { fillColor: [59, 130, 246] }, // Blue-500
@@ -284,7 +285,42 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
             3: { halign: 'right' },
             4: { halign: 'right' },
             5: { halign: 'right' },
-            6: { halign: 'right' }
+            6: { halign: 'right' },
+            7: { halign: 'right' }
+        }
+    })
+    // @ts-ignore
+    yPos = doc.lastAutoTable.finalY + 15
+  }
+
+  if (data.byRentalAgent && data.byRentalAgent.length > 0) {
+    if (yPos > 250) {
+        doc.addPage()
+        yPos = 20
+    }
+
+    doc.setFontSize(14)
+    doc.text('Commissioni Agenti (Noleggi)', 14, yPos)
+
+    const agentRows = data.byRentalAgent.map((a: any) => [
+        a.code || '',
+        a.name,
+        a.count,
+        `€ ${(a.gross || 0).toFixed(2)}`,
+        `€ ${(a.commissionBase || 0).toFixed(2)}`,
+        `€ ${(a.agentShare || 0).toFixed(2)}`
+    ])
+
+    autoTable(doc, {
+        startY: yPos + 5,
+        head: [['Codice', 'Agente', 'Noleggi', 'Lordo', 'Netto', 'Quota Agente (5%)']],
+        body: agentRows,
+        theme: 'striped',
+        headStyles: { fillColor: [147, 51, 234] },
+        columnStyles: {
+            3: { halign: 'right' },
+            4: { halign: 'right' },
+            5: { halign: 'right' }
         }
     })
     // @ts-ignore

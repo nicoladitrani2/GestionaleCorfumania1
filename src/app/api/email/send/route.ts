@@ -2,12 +2,23 @@ import { NextResponse } from 'next/server'
 import nodemailer from 'nodemailer'
 import { Buffer } from 'node:buffer'
 import { getSession } from '@/lib/auth'
+import { addRateLimitHeaders, getClientIp, rateLimit } from '@/lib/rateLimit'
+import { enforceSameOrigin } from '@/lib/csrf'
 
 export const dynamic = 'force-dynamic'
 
 export async function POST(request: Request) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const csrf = enforceSameOrigin(request)
+  if (csrf) return csrf
+
+  const ip = getClientIp(request)
+  const rl = rateLimit(`email:send:ip:${ip}:user:${session.user.id}`, 60, 60 * 60 * 1000)
+  if (!rl.allowed) {
+    return addRateLimitHeaders(NextResponse.json({ error: 'Too Many Requests' }, { status: 429 }), rl, 60)
+  }
 
   try {
     const contentType = request.headers.get('content-type') || ''
@@ -39,16 +50,10 @@ export async function POST(request: Request) {
     }
 
     if (!to || !subject || !text) {
-      return NextResponse.json({ error: 'Parametri email mancanti' }, { status: 400 })
+      return addRateLimitHeaders(NextResponse.json({ error: 'Parametri email mancanti' }, { status: 400 }), rl, 60)
     }
 
-    const allowSelfSigned =
-      process.env.SMTP_ALLOW_SELF_SIGNED === 'true' ||
-      process.env.NODE_ENV !== 'production'
-
-    if (allowSelfSigned) {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-    }
+    const allowSelfSigned = process.env.NODE_ENV !== 'production' && process.env.SMTP_ALLOW_SELF_SIGNED === 'true'
 
     let transporter
 
@@ -99,17 +104,14 @@ export async function POST(request: Request) {
 
     const previewUrl = nodemailer.getTestMessageUrl(info)
 
-    return NextResponse.json({
+    const response = NextResponse.json({
       success: true,
       messageId: info.messageId,
       previewUrl
     })
+    return addRateLimitHeaders(response, rl, 60)
   } catch (error) {
     console.error('Email send error:', error)
-    const message =
-      error instanceof Error
-        ? error.message
-        : 'Invio email fallito'
-    return NextResponse.json({ error: message }, { status: 500 })
+    return NextResponse.json({ error: 'Invio email fallito' }, { status: 500 })
   }
 }

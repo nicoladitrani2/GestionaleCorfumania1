@@ -12,7 +12,7 @@ export async function createAuditLog(
   rentalId?: string | null
 ) {
   try {
-    const data: Prisma.AuditLogCreateInput = {
+    const data: Prisma.AuditLogUncheckedCreateInput = {
       userId,
       action,
       entityType,

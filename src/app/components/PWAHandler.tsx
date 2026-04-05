@@ -34,11 +34,19 @@ export default function PWAHandler() {
 
     if (isStandalone) return
 
-    // Service Worker registration: ok tenerla qui, ma assicurati che /sw.js esista
+    // Abilita SW solo se esplicitamente richiesto (evita cache in dev)
+    const enablePWA = process.env.NEXT_PUBLIC_ENABLE_PWA === 'true'
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch((err) => {
-        console.error('SW registration failed:', err)
-      })
+      if (enablePWA) {
+        navigator.serviceWorker.register('/sw.js').catch((err) => {
+          console.error('SW registration failed:', err)
+        })
+      } else {
+        // Se presente un SW vecchio, deregistra per evitare fetch falliti
+        navigator.serviceWorker.getRegistrations().then((regs) => {
+          regs.forEach((r) => r.unregister().catch(() => {}))
+        })
+      }
     }
 
     const onBeforeInstallPrompt = (e: Event) => {

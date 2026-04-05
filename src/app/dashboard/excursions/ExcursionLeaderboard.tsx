@@ -40,6 +40,15 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
 
     participants.forEach(p => {
       // Filter invalid
+      const approval =
+        p.approvalStatus ||
+        (p.paymentStatus === 'PENDING_APPROVAL'
+          ? 'PENDING'
+          : p.paymentStatus === 'REJECTED'
+            ? 'REJECTED'
+            : undefined)
+      if (approval === 'PENDING' || approval === 'REJECTED') return
+      if (p.status && p.status !== 'ACTIVE') return
       if (p.paymentType === 'REFUNDED' || p.isExpired) return
 
       const userId = p.createdById

@@ -153,37 +153,38 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, transferDepartureLocation, transferDestinationLocation, transferTime } = body
+    const { name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, transferDepartureLocation, transferDestinationLocation, transferTime, maxParticipants } = body
 
-    // Validation
-    if (!startDate) {
-      return NextResponse.json({ error: 'La data di inizio è obbligatoria.' }, { status: 400 })
-    }
+    // Validation - All fields are optional per user request
+    // if (!startDate) {
+    //   return NextResponse.json({ error: 'La data di inizio è obbligatoria.' }, { status: 400 })
+    // }
 
-    const start = new Date(startDate)
+    const start = startDate ? new Date(startDate) : null
     const end = endDate ? new Date(endDate) : null
     const deadline = confirmationDeadline ? new Date(confirmationDeadline) : null
 
-    if (endDate && new Date(endDate) < start) {
+    if (start && end && end < start) {
       return NextResponse.json({ error: 'La data di fine non può essere precedente alla data di inizio.' }, { status: 400 })
     }
-    if (confirmationDeadline && new Date(confirmationDeadline) > start) {
+    if (start && deadline && deadline > start) {
       return NextResponse.json({ error: 'La data di scadenza non può essere successiva alla data di inizio.' }, { status: 400 })
     }
 
     // Calculate durations for recurrence
-    const duration = end ? end.getTime() - start.getTime() : 0
-    const deadlineLead = deadline ? start.getTime() - deadline.getTime() : 0
+    const duration = (start && end) ? end.getTime() - start.getTime() : 0
+    const deadlineLead = (start && deadline) ? start.getTime() - deadline.getTime() : 0
 
-    const createExcursion = async (s: Date, e: Date | null, d: Date | null) => {
+    const createExcursion = async (s: Date | null, e: Date | null, d: Date | null) => {
       return await prisma.excursion.create({
         data: {
-          name,
+          name: name || undefined,
           startDate: s,
           endDate: e,
           confirmationDeadline: d,
           priceAdult: priceAdult ? parseFloat(priceAdult) : 0,
           priceChild: priceChild ? parseFloat(priceChild) : 0,
+          maxParticipants: maxParticipants ? parseInt(maxParticipants) : null,
           transferDepartureLocation,
           transferDestinationLocation,
           transferTime,
@@ -202,7 +203,7 @@ export async function POST(request: Request) {
 
     const createdExcursions = []
 
-    if (recurrence && recurrence.endDate) {
+    if (recurrence && recurrence.endDate && start) {
       const recEnd = new Date(recurrence.endDate)
       recEnd.setHours(23, 59, 59, 999)
 
@@ -280,28 +281,30 @@ export async function PUT(request: Request) {
   }
 
   const body = await request.json()
-  const { id, name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, transferDepartureLocation, transferDestinationLocation, transferTime } = body
+  const { id, name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, transferDepartureLocation, transferDestinationLocation, transferTime, maxParticipants } = body
 
   // Validation
-  if (startDate) {
-    const start = new Date(startDate)
-    if (endDate && new Date(endDate) < start) {
-      return NextResponse.json({ error: 'La data di fine non può essere precedente alla data di inizio.' }, { status: 400 })
-    }
-    if (confirmationDeadline && new Date(confirmationDeadline) > start) {
-      return NextResponse.json({ error: 'La data di scadenza non può essere successiva alla data di inizio.' }, { status: 400 })
-    }
+  const start = startDate ? new Date(startDate) : undefined
+  const end = endDate ? new Date(endDate) : null
+  const deadline = confirmationDeadline ? new Date(confirmationDeadline) : null
+
+  if (start && end && end < start) {
+    return NextResponse.json({ error: 'La data di fine non può essere precedente alla data di inizio.' }, { status: 400 })
+  }
+  if (start && deadline && deadline > start) {
+    return NextResponse.json({ error: 'La data di scadenza non può essere successiva alla data di inizio.' }, { status: 400 })
   }
 
   const excursion = await prisma.excursion.update({
     where: { id },
     data: {
-      name,
-      startDate: startDate ? new Date(startDate) : undefined,
-      endDate: endDate ? new Date(endDate) : null,
-      confirmationDeadline: confirmationDeadline ? new Date(confirmationDeadline) : null,
+      name: name || undefined,
+      startDate: start,
+      endDate: end,
+      confirmationDeadline: deadline,
       priceAdult: priceAdult !== undefined ? parseFloat(priceAdult) : undefined,
       priceChild: priceChild !== undefined ? parseFloat(priceChild) : undefined,
+      maxParticipants: maxParticipants ? parseInt(maxParticipants) : null,
       transferDepartureLocation,
       transferDestinationLocation,
       transferTime,
@@ -323,6 +326,10 @@ export async function PUT(request: Request) {
     const start = startDate ? new Date(startDate) : excursion.startDate
     const end = endDate ? new Date(endDate) : excursion.endDate
     const deadline = confirmationDeadline ? new Date(confirmationDeadline) : excursion.confirmationDeadline
+
+    if (!start) {
+        return NextResponse.json({ error: 'Start date is required for recurrence' }, { status: 400 })
+    }
 
     const duration = end ? end.getTime() - start.getTime() : 0
     const deadlineLead = deadline ? start.getTime() - deadline.getTime() : 0

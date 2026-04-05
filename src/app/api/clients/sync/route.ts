@@ -26,7 +26,11 @@ export async function POST(request: Request) {
         let clientId: string | undefined
         let serviceType = 'EXCURSION'
         if (p.transferId) serviceType = 'TRANSFER'
-        if (p.isRental) serviceType = 'RENTAL'
+        if (p.rentalId) serviceType = 'RENTAL'
+
+        const names = p.name.split(' ')
+        const firstName = p.firstName || names[0] || ''
+        const lastName = p.lastName || names.slice(1).join(' ') || ''
 
         if (p.email) {
           // Check if client exists with this email
@@ -42,10 +46,10 @@ export async function POST(request: Request) {
             // Create new client
             const newClient = await prisma.client.create({
               data: {
-                firstName: p.firstName,
-                lastName: p.lastName,
+                firstName,
+                lastName,
                 email: p.email,
-                phoneNumber: p.phoneNumber,
+                phoneNumber: p.phone,
                 nationality: p.nationality,
                 serviceType
               }
@@ -59,10 +63,10 @@ export async function POST(request: Request) {
           // but that's the trade-off.
           const newClient = await prisma.client.create({
             data: {
-              firstName: p.firstName,
-              lastName: p.lastName,
+              firstName,
+              lastName,
               email: null,
-              phoneNumber: p.phoneNumber,
+              phoneNumber: p.phone,
               nationality: p.nationality,
               serviceType
             }

@@ -37,7 +37,7 @@ export default function SuppliersPage() {
     isOpen: boolean
     title: string
     message: string
-    variant: 'success' | 'error' | 'info' | 'warning'
+    variant: 'success' | 'danger' | 'info' | 'warning'
   }>({
     isOpen: false,
     title: '',
@@ -105,7 +105,7 @@ export default function SuppliersPage() {
               isOpen: true,
               title: 'Errore',
               message: data.error || 'Errore durante l\'eliminazione',
-              variant: 'error'
+              variant: 'danger'
             })
           }
         } catch (e) {
@@ -113,12 +113,13 @@ export default function SuppliersPage() {
             isOpen: true,
             title: 'Errore',
             message: 'Errore di rete',
-            variant: 'error'
+            variant: 'danger'
           })
         }
       }
     })
   }
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()

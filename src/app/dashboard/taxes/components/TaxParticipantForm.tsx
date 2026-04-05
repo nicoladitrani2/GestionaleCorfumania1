@@ -39,8 +39,7 @@ export function TaxParticipantForm({ onSuccess, onCancel, initialData, isEditing
   
   const [prices, setPrices] = useState({
     BRACELET: 0,
-    CITY_TAX: 2,
-    AC: 5
+    CITY_TAX: 2
   })
 
   const [loading, setLoading] = useState(false)
@@ -70,14 +69,14 @@ export function TaxParticipantForm({ onSuccess, onCancel, initialData, isEditing
     setFormData(prev => ({
       ...prev,
       selectedServices: prev.selectedServices.includes(service)
-        ? prev.selectedServices.filter(s => s !== service)
+        ? prev.selectedServices.filter((s: string) => s !== service)
         : [...prev.selectedServices, service]
     }))
   }
 
   const getTotalPrice = () => {
-    return formData.selectedServices.reduce((acc, service) => {
-      return acc + (prices as any)[service]
+    return formData.selectedServices.reduce((acc: number, service: string) => {
+      return acc + (prices as Record<string, number>)[service]
     }, 0)
   }
 
@@ -246,27 +245,6 @@ export function TaxParticipantForm({ onSuccess, onCancel, initialData, isEditing
                 <p className="font-bold text-blue-700">€ {prices.CITY_TAX.toFixed(2)}</p>
               </div>
 
-              {/* Aria Condizionata */}
-              <div 
-                className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all ${
-                  formData.selectedServices.includes('AC') 
-                    ? 'bg-blue-50 border-blue-200 shadow-sm' 
-                    : 'bg-white border-gray-200 hover:border-blue-300'
-                } ${isEditing ? 'opacity-50 cursor-not-allowed' : ''}`}
-                onClick={() => !isEditing && toggleService('AC')}
-              >
-                <div className="flex items-center gap-3">
-                  {formData.selectedServices.includes('AC') 
-                    ? <CheckSquare className="w-5 h-5 text-blue-600" /> 
-                    : <Square className="w-5 h-5 text-gray-400" />
-                  }
-                  <div>
-                    <p className="font-medium text-gray-900">Aria Condizionata</p>
-                    <p className="text-sm text-gray-500">Supplemento stanza</p>
-                  </div>
-                </div>
-                <p className="font-bold text-blue-700">€ {prices.AC.toFixed(2)}</p>
-              </div>
             </div>
           </div>
 

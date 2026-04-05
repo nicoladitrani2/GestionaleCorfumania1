@@ -121,8 +121,15 @@ export async function POST(request: Request) {
           supplier: 'GO4SEA', // Default
           userId: session.user.id,
           // Defaults for required fields
-          email: '', 
-          phoneNumber: '',
+          email: '',
+          phone: '',
+          name: `${firstName} ${lastName}`.trim(),
+          adults: 1,
+          children: 0,
+          infants: 0,
+          paymentStatus: 'COMPLETED',
+          status: 'CONFIRMED',
+          bookingDate: new Date(),
         }
       })
       createdParticipants.push(participant)

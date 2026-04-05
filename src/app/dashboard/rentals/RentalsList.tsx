@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Briefcase, Calendar, Map as MapIcon } from 'lucide-react'
+import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Briefcase, Calendar, Map as MapIcon, History, X, ChevronDown } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { generateParticipantPDF } from '@/lib/pdf-generator'
@@ -10,6 +10,7 @@ import { RefundModal } from '../excursions/RefundModal'
 import { DeleteChoiceModal } from '../excursions/DeleteChoiceModal'
 import { ConfirmationModal } from '../components/ConfirmationModal'
 import { AlertModal } from '../components/AlertModal'
+import { AuditLogList } from '../excursions/AuditLogList'
 
 // --- Helpers ---
 
@@ -64,26 +65,6 @@ const formatDate = (dateString: string) => {
   return new Date(dateString).toLocaleDateString('it-IT')
 }
 
-const getCommissionDisplay = (p: any) => {
-  let val = p.commissionPercentage
-  let type = p.createdBy?.agency?.commissionType || 'PERCENTAGE'
-  
-  // If stored value is 0, try to infer from context
-  if (!val || val === 0) {
-    if (p.createdBy?.agency) {
-      val = p.createdBy.agency.defaultCommission
-    } else if (p.createdBy?.role === 'ADMIN') {
-      val = 1
-      type = 'FIXED'
-    }
-  }
-  
-  if (val > 0) {
-    return { val, type }
-  }
-  return null
-}
-
 const thClassName = "px-6 py-4 text-left text-xs font-semibold text-gray-500 uppercase tracking-wider"
 
 // --- Sub-component ---
@@ -97,6 +78,7 @@ interface RentalsTableProps {
   onDelete: (id: string) => void
   onSettleBalance: (p: any) => void
   onShowDetails: (p: any) => void
+  onShowHistory: (p: any) => void
   onRefund: (p: any) => void
 }
 
@@ -109,12 +91,14 @@ const RentalsTable = ({
   onDelete,
   onSettleBalance,
   onShowDetails,
+  onShowHistory,
   onRefund
 }: RentalsTableProps) => {
   const totalPrice = data.reduce((sum, p) => sum + (p.price || 0), 0)
   const totalDeposit = data.reduce((sum, p) => sum + (p.deposit || 0), 0)
   const totalTax = data.reduce((sum, p) => sum + (p.tax || 0), 0)
   const totalPax = data.reduce((sum, p) => sum + ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1), 0)
+  const totalAgentShare = data.reduce((sum, p) => sum + (p.rentalAgentShare || 0), 0)
 
   return (
   <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -139,7 +123,7 @@ const RentalsTable = ({
             </th>
             <th className={thClassName}>
               <div className="flex items-center gap-2">
-                <BadgeCheck className="w-4 h-4" /> Inserito da
+                <BadgeCheck className="w-4 h-4" /> Assistente
               </div>
             </th>
             <th className={thClassName}>
@@ -162,7 +146,22 @@ const RentalsTable = ({
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         const isManaged = p.rentalType === 'CAR'
         const isOwner = p.createdById === currentUserId
-        const canSeeFinancial = userRole === 'ADMIN' || isOwner
+        const isAssignee = p.assignedToId === currentUserId
+        const canSeeFinancial = userRole === 'ADMIN' || isOwner || isAssignee
+        const assistant = p.assignedTo || p.createdBy
+        const gross = Number(p.price || 0)
+        const insurance = Number(p.insurancePrice || 0)
+        const supplement = Number(p.supplementPrice || 0)
+        const tax = Number(p.tax || 0)
+        const excludedCosts = Math.max(0, insurance) + Math.max(0, supplement) + Math.max(0, tax)
+        const fallbackCommissionBase =
+          p.rentalType === 'CAR'
+            ? Math.max(0, gross - excludedCosts)
+            : Math.max(0, gross)
+        const commissionBase =
+          typeof p.rentalCommissionBase === 'number' ? p.rentalCommissionBase : fallbackCommissionBase
+        const agentShare =
+          typeof p.rentalAgentShare === 'number' ? p.rentalAgentShare : commissionBase * 0.05
         
         return (
           <tr 
@@ -193,59 +192,20 @@ const RentalsTable = ({
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <div className="flex flex-col">
-                    <span className="font-medium text-gray-900">{p.createdBy?.code || '-'}</span>
-                    <span className="text-xs text-gray-500">{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
+                    <span className="font-medium text-gray-900">{assistant?.code || '-'}</span>
+                    <span className="text-xs text-gray-500">{assistant?.firstName} {assistant?.lastName}</span>
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">
                   {canSeeFinancial ? (
                     <div className="flex flex-col">
                       <span>Prezzo: € {p.price?.toFixed(2) || '0.00'}</span>
-                      {p.rentalType === 'CAR' && (
-                        <>
-                          <span className="text-xs text-green-600">
-                            Incassato: € {(p.deposit || 0).toFixed(2)}
-                          </span>
-                          {p.price > (p.deposit || 0) && (
-                            <span className="text-xs text-orange-600">
-                              Da incassare: € {(p.price - (p.deposit || 0)).toFixed(2)}
-                            </span>
-                          )}
-                        </>
-                      )}
-                      {p.tax > 0 && (
-                        <span className="text-xs text-red-500">
-                          Tasse: € {p.tax.toFixed(2)}
-                        </span>
-                      )}
-                      {p.insurancePrice > 0 && (
-                        <span className="text-xs text-gray-500">
-                          Assicurazione: € {p.insurancePrice.toFixed(2)}
-                        </span>
-                      )}
-                      {p.supplementPrice > 0 && (
-                        <span className="text-xs text-gray-500">
-                          Supplemento: € {p.supplementPrice.toFixed(2)}
-                        </span>
-                      )}
-                      {p.rentalType !== 'BOAT' && p.assistantCommission > 0 && (
-                        <span className="text-xs text-purple-600">
-                          Comm. Assistente: {p.assistantCommission}
-                          {p.assistantCommissionType === 'FIXED' ? '€' : '%'}
-                        </span>
-                      )}
-                      {(() => {
-                        const comm = getCommissionDisplay(p)
-                        if (comm) {
-                          return (
-                            <span className="text-xs text-blue-500">
-                              Comm: {comm.val}
-                              {comm.type === 'FIXED' ? '€' : '%'}
-                            </span>
-                          )
-                        }
-                        return null
-                      })()}
+                      <span className="text-xs text-green-600">
+                        Incassato (registrato): € {(p.deposit || 0).toFixed(2)}
+                      </span>
+                      <span className="text-xs text-purple-700">
+                        Quota Agente (5%): € {agentShare.toFixed(2)}
+                      </span>
                     </div>
                   ) : (
                     <div className="text-xs text-gray-400">
@@ -267,6 +227,13 @@ const RentalsTable = ({
                       title="Visualizza Dettagli"
                     >
                       <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => onShowHistory(p)}
+                      className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-gray-700 bg-gray-50 hover:bg-gray-100 rounded-md transition-colors border border-gray-200"
+                      title="Cronologia"
+                    >
+                      <History className="w-3.5 h-3.5" />
                     </button>
 
                     {canEdit && (
@@ -335,8 +302,9 @@ const RentalsTable = ({
       {userRole === 'ADMIN' && (
         <div className="flex items-center gap-4 font-mono">
           <span>Prezzo: € {totalPrice.toFixed(2)}</span>
-          <span>Incassato: € {totalDeposit.toFixed(2)}</span>
+          <span>Incassato (registrato): € {totalDeposit.toFixed(2)}</span>
           {totalTax > 0 && <span>Tasse: € {totalTax.toFixed(2)}</span>}
+          <span>Agenti (5%): € {totalAgentShare.toFixed(2)}</span>
         </div>
       )}
     </div>
@@ -410,6 +378,13 @@ const RentalsTable = ({
                       title="Dettagli"
                   >
                       <Eye className="w-4 h-4" />
+                  </button>
+                  <button
+                      onClick={() => onShowHistory(p)}
+                      className="p-2 text-gray-700 bg-gray-50 rounded-lg border border-gray-200"
+                      title="Cronologia"
+                  >
+                      <History className="w-4 h-4" />
                   </button>
                   {canEdit && (
                       <>
@@ -488,8 +463,12 @@ export function RentalsList({
   }: RentalsListProps) {
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [showExpiredSection, setShowExpiredSection] = useState(false)
+  const [showRefundedSection, setShowRefundedSection] = useState(false)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
   const [showDetails, setShowDetails] = useState(false)
+  const [showHistory, setShowHistory] = useState(false)
+  const [historyRentalId, setHistoryRentalId] = useState<string | null>(null)
   const [showRefund, setShowRefund] = useState(false)
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
   const [showDeleteChoice, setShowDeleteChoice] = useState(false)
@@ -519,6 +498,22 @@ export function RentalsList({
     message: '',
     variant: 'info'
   })
+
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.readAsDataURL(blob)
+      reader.onloadend = () => {
+        const result = reader.result?.toString()
+        if (result) {
+          resolve(result.split(',')[1])
+        } else {
+          reject(new Error('Failed to convert PDF to Base64'))
+        }
+      }
+      reader.onerror = error => reject(error)
+    })
+  }
 
   const fetchParticipants = async () => {
     try {
@@ -577,18 +572,31 @@ export function RentalsList({
     fetchParticipants()
   }, [refreshTrigger])
 
+  const searchTerm = search.trim().toLowerCase()
+
+  useEffect(() => {
+    if (searchTerm) {
+      setShowExpiredSection(true)
+      setShowRefundedSection(true)
+    }
+  }, [searchTerm])
+
   if (loading) return (
     <div className="flex justify-center items-center py-12">
       <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
     </div>
   )
 
-  const searchTerm = search.trim().toLowerCase()
-
   const matchesSearch = (p: any) => {
     if (!searchTerm) return true
     const notes = (p.notes || '').toLowerCase()
     return notes.includes(searchTerm)
+  }
+
+  const isVisiblePending = (p: any) => {
+    if (p.paymentType === 'REFUNDED' || p.status === 'REFUNDED') return false
+    if (p.isExpired) return false
+    return matchesSearch(p)
   }
 
   const activeParticipants = participants
@@ -602,7 +610,7 @@ export function RentalsList({
   const refundedParticipants = participants
     .filter(p => p.paymentType === 'REFUNDED')
     .filter(matchesSearch)
-  const pendingParticipants = participants.filter(p => getApproval(p) === 'PENDING')
+  const pendingParticipants = participants.filter(p => getApproval(p) === 'PENDING').filter(isVisiblePending)
 
   const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
@@ -716,7 +724,7 @@ export function RentalsList({
               isOpen: true,
               title: 'Errore',
               message: data.error || 'Errore durante la registrazione del saldo',
-              variant: 'error'
+              variant: 'danger'
             })
           }
         } catch (error) {
@@ -725,28 +733,39 @@ export function RentalsList({
             isOpen: true,
             title: 'Errore',
             message: 'Errore di connessione',
-            variant: 'error'
+            variant: 'danger'
           })
         }
       }
     })
   }
 
-  const handleRefund = async (amount: number) => {
-    if (!participantToRefund) return
+  const handleRefund = async (participantId: string, amount: number, method: string, notes: string) => {
+    const participant = participants.find(p => p.id === participantId) || participantToRefund
+    if (!participant) return
 
     try {
-       // Generate updated PDF for refund
-       const updatedParticipant = {
-        ...participantToRefund,
+      const methodLabels: Record<string, string> = {
+        CASH: 'Contanti',
+        TRANSFER: 'Bonifico',
+        CARD: 'Carta'
+      }
+
+      const refundNote = `[${new Date().toLocaleDateString()}] Rimborsato €${amount} (${methodLabels[method] || method}) - ${notes || ''}`
+
+      const updatedParticipant = {
+        ...participant,
         paymentType: 'REFUNDED',
-        isOption: false
+        isOption: false,
+        notes: participant.notes ? `${participant.notes}\n${refundNote}` : refundNote
       }
 
       const eventData = {
         type: 'RENTAL',
-        name: `Noleggio ${participantToRefund.rentalType}`,
-        date: participantToRefund.rentalStartDate
+        name: `Noleggio ${(participant as any).rentalType || ''}`.trim(),
+        date: (participant as any).rentalStartDate,
+        pickupLocation: (participant as any).pickupLocation,
+        dropoffLocation: (participant as any).dropoffLocation
       }
 
       const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
@@ -757,13 +776,13 @@ export function RentalsList({
       const pdfBlobEN = docEN.output('blob')
       const pdfBase64EN = await blobToBase64(pdfBlobEN)
 
-      const res = await fetch(`/api/participants/${participantToRefund.id}`, {
-        method: 'PUT',
+      const res = await fetch(`/api/participants/${participantId}/refund`, {
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          ...participantToRefund,
-          paymentType: 'REFUNDED',
-          notes: `${participantToRefund.notes || ''}\n[RIMBORSO] Effettuato rimborso di €${amount.toFixed(2)} il ${new Date().toLocaleDateString('it-IT')}`,
+          refundAmount: amount,
+          refundMethod: method,
+          notes,
           pdfAttachmentIT: pdfBase64IT,
           pdfAttachmentEN: pdfBase64EN
         })
@@ -774,9 +793,23 @@ export function RentalsList({
         setParticipantToRefund(null)
         fetchParticipants()
         if (onUpdate) onUpdate()
+      } else {
+        const data = await res.json().catch(() => ({}))
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: data.error || 'Errore durante il rimborso',
+          variant: 'danger'
+        })
       }
     } catch (error) {
       console.error('Error refunding participant:', error)
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: 'Errore di connessione',
+        variant: 'danger'
+      })
     }
   }
 
@@ -805,6 +838,11 @@ export function RentalsList({
             onShowDetails={(p) => {
               setSelectedParticipant(p)
               setShowDetails(true)
+            }}
+            onShowHistory={(p) => {
+              if (!p?.rentalId) return
+              setHistoryRentalId(p.rentalId)
+              setShowHistory(true)
             }}
             onRefund={(p) => {
               setParticipantToRefund(p)
@@ -836,6 +874,11 @@ export function RentalsList({
             setSelectedParticipant(p)
             setShowDetails(true)
           }}
+          onShowHistory={(p) => {
+            if (!p?.rentalId) return
+            setHistoryRentalId(p.rentalId)
+            setShowHistory(true)
+          }}
           onRefund={(p) => {
             setParticipantToRefund(p)
             setShowRefund(true)
@@ -847,33 +890,45 @@ export function RentalsList({
       {expiredParticipants.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowExpiredSection(v => !v)}
+              className="flex items-center gap-2 hover:bg-gray-50 rounded-lg px-2 py-1 transition-colors"
+            >
               <Clock className="w-5 h-5 text-red-600" />
               <h3 className="text-lg font-bold text-gray-800">Noleggi Scaduti / Completati</h3>
               <span className="bg-red-100 text-red-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-red-200">
                 {expiredParticipants.length}
               </span>
+              <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showExpiredSection ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+          {showExpiredSection && (
+            <div className="opacity-75 hover:opacity-100 transition-opacity">
+              <RentalsTable 
+                data={expiredParticipants}
+                emptyMessage="Nessun noleggio scaduto"
+                userRole={userRole}
+                currentUserId={currentUserId}
+                onEdit={onEdit}
+                onDelete={handleDelete}
+                onSettleBalance={handleSettleBalance}
+                onShowDetails={(p) => {
+                  setSelectedParticipant(p)
+                  setShowDetails(true)
+                }}
+                onShowHistory={(p) => {
+                  if (!p?.rentalId) return
+                  setHistoryRentalId(p.rentalId)
+                  setShowHistory(true)
+                }}
+                onRefund={(p) => {
+                  setParticipantToRefund(p)
+                  setShowRefund(true)
+                }}
+              />
             </div>
-          </div>
-          <div className="opacity-75 hover:opacity-100 transition-opacity">
-            <RentalsTable 
-              data={expiredParticipants}
-              emptyMessage="Nessun noleggio scaduto"
-              userRole={userRole}
-              currentUserId={currentUserId}
-              onEdit={onEdit}
-              onDelete={handleDelete}
-              onSettleBalance={handleSettleBalance}
-              onShowDetails={(p) => {
-                setSelectedParticipant(p)
-                setShowDetails(true)
-              }}
-              onRefund={(p) => {
-                setParticipantToRefund(p)
-                setShowRefund(true)
-              }}
-            />
-          </div>
+          )}
         </div>
       )}
 
@@ -881,33 +936,45 @@ export function RentalsList({
       {refundedParticipants.length > 0 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between px-1">
-            <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowRefundedSection(v => !v)}
+              className="flex items-center gap-2 hover:bg-gray-50 rounded-lg px-2 py-1 transition-colors"
+            >
               <RotateCcw className="w-5 h-5 text-gray-600" />
               <h3 className="text-lg font-bold text-gray-800">Noleggi Rimborsati</h3>
               <span className="bg-gray-100 text-gray-800 text-xs font-medium px-2.5 py-0.5 rounded-full border border-gray-200">
                 {refundedParticipants.length}
               </span>
+              <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${showRefundedSection ? 'rotate-180' : ''}`} />
+            </button>
+          </div>
+          {showRefundedSection && (
+            <div className="opacity-75 hover:opacity-100 transition-opacity">
+              <RentalsTable 
+                data={refundedParticipants}
+                emptyMessage="Nessun noleggio rimborsato"
+                userRole={userRole}
+                currentUserId={currentUserId}
+                onEdit={onEdit}
+                onDelete={handleDelete}
+                onSettleBalance={handleSettleBalance}
+                onShowDetails={(p) => {
+                  setSelectedParticipant(p)
+                  setShowDetails(true)
+                }}
+                onShowHistory={(p) => {
+                  if (!p?.rentalId) return
+                  setHistoryRentalId(p.rentalId)
+                  setShowHistory(true)
+                }}
+                onRefund={(p) => {
+                  setParticipantToRefund(p)
+                  setShowRefund(true)
+                }}
+              />
             </div>
-          </div>
-          <div className="opacity-75 hover:opacity-100 transition-opacity">
-            <RentalsTable 
-              data={refundedParticipants}
-              emptyMessage="Nessun noleggio rimborsato"
-              userRole={userRole}
-              currentUserId={currentUserId}
-              onEdit={onEdit}
-              onDelete={handleDelete}
-              onSettleBalance={handleSettleBalance}
-              onShowDetails={(p) => {
-                setSelectedParticipant(p)
-                setShowDetails(true)
-              }}
-              onRefund={(p) => {
-                setParticipantToRefund(p)
-                setShowRefund(true)
-              }}
-            />
-          </div>
+          )}
         </div>
       )}
 
@@ -921,6 +988,36 @@ export function RentalsList({
         excursion={null} // No excursion object for rentals, generic logic inside modal handles it
       />
 
+      {showHistory && historyRentalId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-4xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
+            <div className="bg-gray-50 px-6 py-4 border-b border-gray-100 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-gray-100 rounded-lg">
+                  <History className="w-6 h-6 text-gray-700" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-gray-800">Cronologia</h2>
+                  <p className="text-sm text-gray-500">Operazioni sul noleggio</p>
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  setShowHistory(false)
+                  setHistoryRentalId(null)
+                }}
+                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-full transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 overflow-y-auto">
+              <AuditLogList rentalId={historyRentalId} />
+            </div>
+          </div>
+        </div>
+      )}
+
       <RefundModal 
         isOpen={showRefund}
         onClose={() => {
@@ -929,7 +1026,6 @@ export function RentalsList({
         }}
         onConfirm={handleRefund}
         participant={participantToRefund}
-        maxRefund={participantToRefund?.deposit || 0}
       />
 
       <DeleteChoiceModal 
@@ -938,9 +1034,9 @@ export function RentalsList({
             setShowDeleteChoice(false)
             setParticipantToDelete(null)
         }}
-        onDelete={executeDelete}
-        onRefund={handleRequestRefund}
-        participant={participantToDelete}
+        onConfirmDelete={executeDelete}
+        onRequestRefund={handleRequestRefund}
+        participantName={participantToDelete ? `${participantToDelete.firstName} ${participantToDelete.lastName}` : ''}
       />
 
       <ConfirmationModal

@@ -45,6 +45,7 @@ export function ExcursionsManager({
   const [newEndDate, setNewEndDate] = useState('')
   const [newConfirmationDeadline, setNewConfirmationDeadline] = useState('')
   const [newExcursionName, setNewExcursionName] = useState('')
+  const [newMaxParticipants, setNewMaxParticipants] = useState('')
   const [newPriceAdult, setNewPriceAdult] = useState('')
   const [newPriceChild, setNewPriceChild] = useState('')
   const [newTransferDepartureLocation, setNewTransferDepartureLocation] = useState('')
@@ -289,6 +290,7 @@ export function ExcursionsManager({
   const handleCreateExcursion = () => {
     setEditingExcursionId(null)
     setNewExcursionName('')
+    setNewMaxParticipants('')
     setNewPriceAdult('')
     setNewPriceChild('')
     setNewTransferDepartureLocation('')
@@ -329,6 +331,7 @@ export function ExcursionsManager({
     e.stopPropagation()
     setEditingExcursionId(excursion.id)
     setNewExcursionName(excursion.name)
+    setNewMaxParticipants(excursion.maxParticipants ? excursion.maxParticipants.toString() : '')
     setNewPriceAdult(excursion.priceAdult ? excursion.priceAdult.toString() : '')
     setNewPriceChild(excursion.priceChild ? excursion.priceChild.toString() : '')
     setNewTransferDepartureLocation(excursion.transferDepartureLocation || '')
@@ -419,24 +422,17 @@ export function ExcursionsManager({
     e.preventDefault()
     setError('')
 
-    // Validate dates
-    const start = new Date(newStartDate)
+    // Validate dates only if provided
+    const start = newStartDate ? new Date(newStartDate) : null
     const end = newEndDate ? new Date(newEndDate) : null
     const deadline = newConfirmationDeadline ? new Date(newConfirmationDeadline) : null
-    const now = new Date()
 
-    // Controllo data passata (solo per nuovi inserimenti)
-    // if (!editingExcursionId && start < now) {
-    //   setError('La data di inizio non può essere nel passato.')
-    //   return
-    // }
-
-    if (end && end < start) {
+    if (start && end && end < start) {
       setError('La data di fine non può essere precedente alla data di inizio.')
       return
     }
 
-    if (deadline && deadline > start) {
+    if (start && deadline && deadline > start) {
       setError('La data di scadenza non può essere successiva alla data di inizio dell\'escursione.')
       return
     }
@@ -446,9 +442,10 @@ export function ExcursionsManager({
       const method = editingExcursionId ? 'PUT' : 'POST'
       const payload: any = {
         name: newExcursionName,
+        maxParticipants: newMaxParticipants,
         startDate: newStartDate,
         endDate: newEndDate,
-        confirmationDeadline: newConfirmationDeadline || newStartDate, // Default to startDate
+        confirmationDeadline: newConfirmationDeadline || newStartDate, // Default to startDate if not provided (only if startDate exists, handled by API/Backend logic if needed)
         priceAdult: newPriceAdult,
         priceChild: newPriceChild,
         transferDepartureLocation: newTransferDepartureLocation,
@@ -519,6 +516,32 @@ export function ExcursionsManager({
       ' ' +
       date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
     )
+  }
+
+  const getCapacityBadge = (max: number | null, used: number) => {
+    if (!max || max <= 0) return null
+    const remaining = max - used
+    const safeRemaining = Math.max(remaining, 0)
+    const ratio = remaining / max
+
+    if (remaining <= 0) {
+      return {
+        text: `Posti: ${safeRemaining}/${max}`,
+        className: 'bg-red-50 text-red-700 border-red-200'
+      }
+    }
+
+    if (remaining <= 5 || ratio <= 0.2) {
+      return {
+        text: `Posti: ${safeRemaining}/${max}`,
+        className: 'bg-yellow-50 text-yellow-800 border-yellow-200'
+      }
+    }
+
+    return {
+      text: `Posti: ${safeRemaining}/${max}`,
+      className: 'bg-green-50 text-green-700 border-green-200'
+    }
   }
 
   const handleToggleSelect = (id: string, e: React.MouseEvent) => {
@@ -741,9 +764,24 @@ export function ExcursionsManager({
                       type="text"
                       value={newExcursionName}
                       onChange={(e) => setNewExcursionName(e.target.value)}
-                      required
                       className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
                       placeholder="Es. Tour dell'Isola"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Max Partecipanti</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Users className="h-5 w-5 text-gray-500" />
+                    </div>
+                    <input
+                      type="number"
+                      min="1"
+                      value={newMaxParticipants}
+                      onChange={(e) => setNewMaxParticipants(e.target.value)}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                      placeholder="Illimitati"
                     />
                   </div>
                 </div>
@@ -821,7 +859,6 @@ export function ExcursionsManager({
                     type="datetime-local"
                     value={newStartDate}
                     onChange={(e) => setNewStartDate(e.target.value)}
-                    required
                     className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                   />
                 </div>
@@ -1158,6 +1195,7 @@ export function ExcursionsManager({
                   excursionTransferTime={selectedExcursion.transferTime}
                   agencyDefaultCommission={agencyDefaultCommission}
                   agencyCommissionType={agencyCommissionType}
+                  maxParticipants={selectedExcursion.maxParticipants || undefined}
                 />
               </div>
             </div>
@@ -1369,14 +1407,27 @@ export function ExcursionsManager({
                       <span className="font-medium text-gray-700 ml-2">
                         {excursion._count?.participants || 0} Partecipanti
                       </span>
-                      {userRole === 'ADMIN' && (excursion.totalCollected !== undefined) && (
-                        <div className="ml-auto flex items-center gap-1 bg-green-50 px-2 py-1 rounded text-green-700 border border-green-100">
-                          <Euro className="w-3 h-3" />
-                          <span className="font-mono font-medium text-sm">
-                            {excursion.totalCollected.toFixed(2)}
-                          </span>
-                        </div>
-                      )}
+                      <div className="ml-auto flex items-center gap-2">
+                        {(() => {
+                          const max = typeof excursion.maxParticipants === 'number' ? excursion.maxParticipants : null
+                          const used = typeof excursion._count?.participants === 'number' ? excursion._count.participants : 0
+                          const badge = getCapacityBadge(max, used)
+                          if (!badge) return null
+                          return (
+                            <span className={`px-2 py-1 rounded text-xs font-semibold border ${badge.className}`}>
+                              {badge.text}
+                            </span>
+                          )
+                        })()}
+                        {userRole === 'ADMIN' && (excursion.totalCollected !== undefined) && (
+                          <div className="flex items-center gap-1 bg-green-50 px-2 py-1 rounded text-green-700 border border-green-100">
+                            <Euro className="w-3 h-3" />
+                            <span className="font-mono font-medium text-sm">
+                              {excursion.totalCollected.toFixed(2)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </div>

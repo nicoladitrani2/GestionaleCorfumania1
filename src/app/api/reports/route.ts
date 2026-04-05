@@ -8,6 +8,9 @@ export async function GET(request: Request) {
   try {
     const session = await getSession()
     if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    if (session.user.role !== 'ADMIN') {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+    }
 
     const { searchParams } = new URL(request.url)
     const startDate = searchParams.get('startDate')
@@ -17,6 +20,7 @@ export async function GET(request: Request) {
     const providerIds = searchParams.get('providerIds')?.split(',')
     const assistantIds = searchParams.get('assistantIds')?.split(',')
     const excursionIds = searchParams.get('excursionIds')?.split(',')
+    const includeFutureRentals = searchParams.get('includeFutureRentals') === 'true'
 
     // 1. Fetch Agencies for mapping
     const agencies = await prisma.agency.findMany()
@@ -66,10 +70,18 @@ export async function GET(request: Request) {
 
     // Assistant Filter
     if (assistantIds && assistantIds.length > 0) {
-        if (whereClause.user) {
-            whereClause.user.id = { in: assistantIds }
+        const assistantCondition = {
+            OR: [
+                { userId: { in: assistantIds } },
+                { assignedToId: { in: assistantIds } }
+            ]
+        }
+        if (whereClause.AND && Array.isArray(whereClause.AND)) {
+            whereClause.AND.push(assistantCondition)
+        } else if (whereClause.AND) {
+            whereClause.AND = [whereClause.AND, assistantCondition]
         } else {
-             whereClause.user = { id: { in: assistantIds } }
+            whereClause.AND = [assistantCondition]
         }
     }
 
@@ -78,10 +90,11 @@ export async function GET(request: Request) {
         whereClause.excursionId = { in: excursionIds }
     }
 
-    const participants = await prisma.participant.findMany({
+    const rawParticipants = await prisma.participant.findMany({
       where: whereClause,
       include: {
         user: true,
+        assignedTo: true,
         excursion: true,
         transfer: true,
         rental: true
@@ -89,6 +102,15 @@ export async function GET(request: Request) {
       orderBy: {
         createdAt: 'desc'
       }
+    })
+
+    // Filter out participants belonging to unapproved transfers (PENDING or REJECTED)
+    const participants = rawParticipants.filter(p => {
+        if (p.transfer) {
+            // Only include transfer participants if the transfer is APPROVED
+            return p.transfer.approvalStatus === 'APPROVED'
+        }
+        return true
     })
 
     // Fetch Commissions
@@ -143,13 +165,31 @@ export async function GET(request: Request) {
     let totalExternalAgencyCommission = 0
     let totalPax = 0
     let totalTax = 0
+
+    let rentalsGross = 0
+    let rentalsSupplierOut = 0
+    let rentalsCommissionTotal = 0
+    let rentalsCommissionBaseTotal = 0
+    let rentalsCarExcludedCostsTotal = 0
+    let rentalsCarGrossBaseCount = 0
+    let rentalsCompanyNow = 0
+    let rentalsCompanyFuture = 0
+    let rentalsCompanyTotal = 0
+    let rentalsAgentTotal = 0
+    let rentalsAgentNow = 0
+    let rentalsAgentFuture = 0
+    let rentalsGo4SeaTotal = 0
+    let rentalsGo4SeaNow = 0
+    let rentalsGo4SeaFuture = 0
     
-    const byAgency: Record<string, { name: string, revenue: number, commission: number, assistantCommission?: number, netAgency: number, count: number, pax: number, tax: number }> = {}
+    const byAgency: Record<string, { name: string, revenue: number, commission: number, assistantCommission: number, netAgency: number, count: number, pax: number, tax: number }> = {}
     const bySupplier: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byAssistant: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byExcursion: Record<string, { name: string, date: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byTransfer: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
-    const byRental: Record<string, { name: string, revenue: number, commission: number, assistantCommission: number, supplierShare: number, netAgency: number, count: number, pax: number, tax: number }> = {}
+    const byRental: Record<string, { name: string, revenue: number, gross: number, commissionBase: number, commission: number, agentShare: number, companyShare: number, go4seaShare: number, supplierOut: number, assistantCommission: number, supplierShare: number, netAgency: number, count: number, pax: number, tax: number }> = {}
+    const byRentalAgent: Record<string, { id: string, code: string, name: string, count: number, gross: number, commissionBase: number, agentShare: number, companyShare: number, go4seaShare: number }> = {}
+    const rentalsPaymentByMethod: Record<string, { name: string, revenue: number, count: number }> = {}
     const bySpecialService: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number }> = {}
 
     participants.forEach(p => {
@@ -218,9 +258,27 @@ export async function GET(request: Request) {
 
         const isRental = !!p.rentalId
         let effectiveRentalType: string | null = null
+        let rentalGross = 0
+        let rentalCommissionBase = 0
+        let rentalSupplierShare = 0
+        let rentalCompanyShare = 0
+        let rentalAgentShare = 0
+        let rentalGo4SeaShare = 0
+        let rentalCompanyNowForRow = 0
+        let rentalCompanyFutureForRow = 0
 
         if (isRental) {
-            effectiveRentalType = ((p as any).rentalType || p.rental?.type || null) as string | null
+            const rawRentalType = (((p as any).rentalType || p.rental?.type || null) as string | null)
+            effectiveRentalType = rawRentalType
+
+            if (effectiveRentalType) {
+              const normalized = String(effectiveRentalType).toUpperCase()
+              if (normalized === 'SCOOTER' || normalized === 'QUAD') effectiveRentalType = 'MOTO'
+              else if (normalized === 'AUTO') effectiveRentalType = 'CAR'
+              else if (normalized === 'CAR_GROSS') effectiveRentalType = 'MOTO'
+              else if (normalized === 'BARCA' || normalized === 'BOAT') effectiveRentalType = 'BOAT'
+              else if (normalized !== 'CAR' && normalized !== 'MOTO' && normalized !== 'BOAT') effectiveRentalType = normalized
+            }
 
             if (!effectiveRentalType) {
                 if ((p.insurancePrice || 0) > 0 || (p.supplementPrice || 0) > 0) {
@@ -237,25 +295,89 @@ export async function GET(request: Request) {
                 if (!types.includes(currentRentalType)) return
             }
 
-            if (effectiveRentalType && ['MOTO', 'BOAT'].includes(effectiveRentalType)) {
-                isBrokerageProcessed = true
-                revenue = 0
-                
-                const price = p.totalPrice || 0
-                const commPct = p.commissionPercentage || 0
-                
-                if (effectiveRentalType === 'MOTO') {
-                    const taxable = Math.max(0, price - (p.insurancePrice || 0) - (p.supplementPrice || 0))
-                    commissionAmount = taxable * (commPct / 100)
-                } else {
-                    commissionAmount = price * (commPct / 100)
+            rentalGross = p.totalPrice || 0
+            const insurance = p.insurancePrice || 0
+            const supplement = p.supplementPrice || 0
+            const rentalTax = p.tax || 0
+            const supplierName = (p.supplier || '').trim().toLowerCase()
+            const operatorAgencyId = ((p.assignedTo as any)?.agencyId || (p.user as any)?.agencyId) as string | undefined
+            const referenceAgencyId = ((p as any).agencyId || operatorAgencyId) as string | undefined
+            const referenceAgencyName = referenceAgencyId ? String(agencyMap[referenceAgencyId]?.name || '').toLowerCase() : ''
+            const isGo4Sea = referenceAgencyName.includes('go4sea')
+            const excludedCosts =
+              effectiveRentalType === 'CAR'
+                ? (Math.max(0, insurance) + Math.max(0, rentalTax) + Math.max(0, supplement))
+                : 0
+            rentalCommissionBase =
+              effectiveRentalType === 'CAR'
+                ? Math.max(0, rentalGross - excludedCosts)
+                : Math.max(0, rentalGross)
+
+            const includeRentalNow = effectiveRentalType === 'BOAT'
+            const includeRentalFuture = includeFutureRentals
+            const includeRental = includeRentalNow || includeRentalFuture
+
+            const totalCommission = includeRental ? (rentalCommissionBase * 0.2) : 0
+            if (includeRental) rentalsCommissionBaseTotal += rentalCommissionBase
+
+            rentalAgentShare = rentalCommissionBase * 0.05
+            rentalCompanyShare = rentalCommissionBase * (isGo4Sea ? 0.05 : 0.15)
+            rentalGo4SeaShare = isGo4Sea ? rentalCommissionBase * 0.1 : 0
+
+            commissionAmount = totalCommission
+            rentalSupplierShare = includeRental ? Math.max(0, rentalGross - totalCommission) : 0
+
+            rentalCompanyNowForRow = includeRentalNow ? rentalCompanyShare : 0
+            rentalCompanyFutureForRow = includeRentalFuture && !includeRentalNow ? rentalCompanyShare : 0
+
+            const agentNow = includeRentalNow ? rentalAgentShare : 0
+            const agentFuture = includeRentalFuture && !includeRentalNow ? rentalAgentShare : 0
+            const go4SeaNow = includeRentalNow ? rentalGo4SeaShare : 0
+            const go4SeaFuture = includeRentalFuture && !includeRentalNow ? rentalGo4SeaShare : 0
+
+            rentalsGross += includeRental ? rentalGross : 0
+            rentalsSupplierOut += rentalSupplierShare
+            rentalsCommissionTotal += totalCommission
+            rentalsCompanyNow += rentalCompanyNowForRow
+            rentalsCompanyFuture += rentalCompanyFutureForRow
+            rentalsCompanyTotal += includeRental ? rentalCompanyShare : 0
+            rentalsAgentTotal += includeRental ? rentalAgentShare : 0
+            rentalsAgentNow += agentNow
+            rentalsAgentFuture += agentFuture
+            rentalsGo4SeaTotal += includeRental ? rentalGo4SeaShare : 0
+            rentalsGo4SeaNow += go4SeaNow
+            rentalsGo4SeaFuture += go4SeaFuture
+
+            revenue = includeRental ? rentalGross : 0
+
+            if (includeRental) {
+              const agentId = (p.assignedToId || p.user?.id) as string | undefined
+              if (agentId) {
+                const owner = p.assignedTo || p.user
+                const agentName = `${owner?.firstName || ''} ${owner?.lastName || ''}`.trim() || owner?.email
+                if (!byRentalAgent[agentId]) {
+                  byRentalAgent[agentId] = { id: agentId, code: owner?.code || '', name: agentName, count: 0, gross: 0, commissionBase: 0, agentShare: 0, companyShare: 0, go4seaShare: 0 }
                 }
+                byRentalAgent[agentId].count += 1
+                byRentalAgent[agentId].gross += rentalGross
+                byRentalAgent[agentId].commissionBase += rentalCommissionBase
+                byRentalAgent[agentId].agentShare += rentalAgentShare
+                byRentalAgent[agentId].companyShare += rentalCompanyShare
+                byRentalAgent[agentId].go4seaShare += rentalGo4SeaShare
+              }
+            }
+
+            if (includeRental) {
+              const method = String(p.paymentMethod || '').trim() || 'N/D'
+              if (!rentalsPaymentByMethod[method]) {
+                rentalsPaymentByMethod[method] = { name: method, revenue: 0, count: 0 }
+              }
+              rentalsPaymentByMethod[method].revenue += totalCommission
+              rentalsPaymentByMethod[method].count += 1
             }
         }
 
-        const isBrokerageRental = isRental && effectiveRentalType && ['MOTO', 'BOAT'].includes(effectiveRentalType)
-        
-        if (agency && !isBrokerageRental && !p.specialServiceType) {
+        if (agency && !isRental && !p.specialServiceType) {
             let ruleType = (agency as any).commissionType || 'PERCENTAGE'
             let ruleValue = agency.defaultCommission || 0
 
@@ -305,18 +427,34 @@ export async function GET(request: Request) {
 
         if (assistantAgency && (asstCommVal === null || asstCommVal === undefined || asstCommVal === 0)) {
             asstCommVal = assistantAgency.defaultCommission || 0
+            
+            // Check for overrides (Excursion/Transfer specific commissions)
+            if (p.excursion) {
+                const excursionCommissions = commissionsMap[p.excursion.id] || []
+                const commRule = excursionCommissions.find(c => c.agencyId === assistantAgency.id)
+                if (commRule) {
+                    asstCommVal = commRule.commissionPercentage
+                    asstCommType = (commRule as any).commissionType || 'PERCENTAGE'
+                }
+            } else if (p.transfer) {
+                const transferCommissions = transferCommissionsMap[p.transfer.id] || []
+                const commRule = transferCommissions.find(c => c.agencyId === assistantAgency.id)
+                if (commRule) {
+                    asstCommVal = commRule.commissionPercentage
+                    asstCommType = (commRule as any).commissionType || 'PERCENTAGE'
+                }
+            }
         }
 
         if (!asstCommType) asstCommType = 'PERCENTAGE'
         if (asstCommVal === null || asstCommVal === undefined) asstCommVal = 0
 
-        if (asstCommVal > 0) {
-            // Nessuna commissione assistente sui noleggi barca
-            if (isRental && effectiveRentalType === 'BOAT') {
-                assistantCommissionAmount = 0
-            } else if (asstCommType === 'PERCENTAGE') {
+        if (isRental) {
+            assistantCommissionAmount = 0
+        } else if (asstCommVal > 0) {
+            if (asstCommType === 'PERCENTAGE') {
                 let baseForAssistant = revenue
-                if (isBrokerageRental || p.specialServiceType) {
+                if (p.specialServiceType) {
                     baseForAssistant = commissionAmount
                 }
                 assistantCommissionAmount = baseForAssistant * (asstCommVal / 100)
@@ -335,21 +473,7 @@ export async function GET(request: Request) {
         // Per-row Netto Agenzia (per agenzia)
         let netAgencyForRow = 0
         if (isRental) {
-            if (effectiveRentalType === 'BOAT') {
-                // Per le barche: la commissione calcolata è già il netto agenzia,
-                // e non va toccata da commissioni assistente.
-                netAgencyForRow = commissionAmount
-            } else if (isBrokerageRental) {
-                // Per le moto usiamo il totale commissione come netto aziendale,
-                // senza sottrarre eventuali commissioni assistente.
-                if (effectiveRentalType === 'MOTO') {
-                    netAgencyForRow = commissionAmount
-                } else {
-                    netAgencyForRow = commissionAmount - assistantCommissionAmount
-                }
-            } else {
-                netAgencyForRow = revenue * 0.2 - assistantCommissionAmount
-            }
+            netAgencyForRow = includeFutureRentals ? rentalCompanyShare : rentalCompanyNowForRow
         } else if (p.specialServiceType) {
             netAgencyForRow = commissionAmount - assistantCommissionAmount
         } else {
@@ -363,61 +487,98 @@ export async function GET(request: Request) {
         }
         
         // By Agency
-        let agencyName = 'Nessuna Agenzia'
-        if (userAgencyId && agencyMap[userAgencyId]) {
-            agencyName = agencyMap[userAgencyId].name
-        }
-        
-        if (!byAgency[agencyName]) {
-            byAgency[agencyName] = { name: agencyName, revenue: 0, commission: 0, assistantCommission: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
-        }
-        byAgency[agencyName].revenue += revenue
-        // For agency-level views, commission represents the sum of assistant quotas
-        byAgency[agencyName].commission += assistantCommissionAmount
-        byAgency[agencyName].assistantCommission += assistantCommissionAmount
-        byAgency[agencyName].netAgency += netAgencyForRow
-        byAgency[agencyName].count += 1
-        byAgency[agencyName].pax += pax
-        byAgency[agencyName].tax += tax
-
-        // By Supplier
-        const supplierName = p.supplier || 'Nessun Fornitore'
-        if (!bySupplier[supplierName]) {
-            bySupplier[supplierName] = { name: supplierName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
-        }
-        
-        // Calculate Supplier Share
-        let supplierShare = revenue
         if (isRental) {
-            if (effectiveRentalType === 'CAR') {
-                supplierShare = revenue * 0.8
-            } else if (effectiveRentalType === 'BOAT') {
-                // Per le barche: la percentuale agenzia è già il netto,
-                // quindi la quota fornitore è semplicemente il prezzo totale meno il netto agenzia.
-                const price = p.totalPrice || 0
-                supplierShare = price - commissionAmount
-            } else {
-                supplierShare = ((p.totalPrice as any) || 0) - commissionAmount
+            const corfumaniaName = adminAgency?.name || 'Corfumania'
+            const corfumaniaNet = includeFutureRentals ? rentalCompanyShare : rentalCompanyNowForRow
+
+            if (!byAgency[corfumaniaName]) {
+                byAgency[corfumaniaName] = { name: corfumaniaName, revenue: 0, commission: 0, assistantCommission: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
+            }
+            byAgency[corfumaniaName].revenue += 0
+            byAgency[corfumaniaName].commission += 0
+            byAgency[corfumaniaName].assistantCommission += 0
+            byAgency[corfumaniaName].netAgency += corfumaniaNet
+            byAgency[corfumaniaName].count += 1
+            byAgency[corfumaniaName].pax += pax
+            byAgency[corfumaniaName].tax += includeFutureRentals || effectiveRentalType === 'BOAT' ? tax : 0
+
+            const go4SeaNet =
+              effectiveRentalType === 'BOAT'
+                ? rentalGo4SeaShare
+                : (includeFutureRentals ? rentalGo4SeaShare : 0)
+
+            if (go4SeaNet > 0) {
+                const go4SeaAgency = agencies.find(a => String(a.name || '').toLowerCase().includes('go4sea'))
+                const go4SeaName = go4SeaAgency?.name || 'Go4sea'
+                if (!byAgency[go4SeaName]) {
+                    byAgency[go4SeaName] = { name: go4SeaName, revenue: 0, commission: 0, assistantCommission: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
+                }
+                byAgency[go4SeaName].revenue += 0
+                byAgency[go4SeaName].commission += 0
+                byAgency[go4SeaName].assistantCommission += 0
+                byAgency[go4SeaName].netAgency += go4SeaNet
+                byAgency[go4SeaName].count += 1
+                byAgency[go4SeaName].pax += pax
+                byAgency[go4SeaName].tax += 0
+            }
+        } else {
+            let agencyName = 'Nessuna Agenzia'
+            if (userAgencyId && agencyMap[userAgencyId]) {
+                agencyName = agencyMap[userAgencyId].name
+            }
+            
+            if (!byAgency[agencyName]) {
+                byAgency[agencyName] = { name: agencyName, revenue: 0, commission: 0, assistantCommission: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
+            }
+            const agencyStat = byAgency[agencyName]
+            if (agencyStat) {
+                agencyStat.revenue += revenue
+                // For agency-level views, commission represents the sum of assistant quotas
+                agencyStat.commission += assistantCommissionAmount
+                agencyStat.assistantCommission += assistantCommissionAmount
+                agencyStat.netAgency += netAgencyForRow
+                agencyStat.count += 1
+                agencyStat.pax += pax
+                agencyStat.tax += tax
             }
         }
 
-        bySupplier[supplierName].revenue += supplierShare
-        bySupplier[supplierName].commission += 0 
-        bySupplier[supplierName].count += 1
-        bySupplier[supplierName].pax += pax
-        bySupplier[supplierName].tax += tax
+        // By Supplier / Payout Target
+        const includeRentalNow = effectiveRentalType === 'BOAT'
+        const includeRentalFuture = includeFutureRentals
+        const includeRental = includeRentalNow || includeRentalFuture
 
-        // By Assistant
-        const assistantName = `${p.user.firstName || ''} ${p.user.lastName || ''}`.trim() || p.user.email
-        if (!byAssistant[assistantName]) {
-            byAssistant[assistantName] = { name: assistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+        const supplierBucketName = p.supplier || 'Nessun Fornitore'
+
+        if (!bySupplier[supplierBucketName]) {
+            bySupplier[supplierBucketName] = { name: supplierBucketName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
         }
-        byAssistant[assistantName].revenue += revenue
-        // Display Assistant's Commission in the Assistant Table
-        byAssistant[assistantName].commission += assistantCommissionAmount 
-        byAssistant[assistantName].count += 1
-        byAssistant[assistantName].pax += pax
-        byAssistant[assistantName].tax += tax
+        
+        // Calculate Supplier Share (for Rentals this is the 80% payout)
+        let supplierShare = revenue
+        if (isRental) {
+            supplierShare = rentalSupplierShare
+        }
+
+        bySupplier[supplierBucketName].revenue += supplierShare
+        bySupplier[supplierBucketName].commission += 0 
+        bySupplier[supplierBucketName].count += 1
+        bySupplier[supplierBucketName].pax += pax
+        bySupplier[supplierBucketName].tax += isRental ? (includeRental ? tax : 0) : tax
+
+        // By Assistant (exclude RENTALS to avoid mixing "soldi subito" logic with commissions)
+        if (!isRental) {
+            const assistantName = `${p.user.firstName || ''} ${p.user.lastName || ''}`.trim() || p.user.email
+            if (!byAssistant[assistantName]) {
+                byAssistant[assistantName] = { name: assistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+            }
+            byAssistant[assistantName].revenue += revenue
+            // Display Assistant's Commission in the Assistant Table
+            byAssistant[assistantName].commission += assistantCommissionAmount
+            byAssistant[assistantName].count += 1
+            byAssistant[assistantName].pax += pax
+            byAssistant[assistantName].tax += tax
+        }
 
         // By Excursion / Rental / Transfer
         if (p.excursion) {
@@ -431,7 +592,7 @@ export async function GET(request: Request) {
             const excursionKey = `${p.excursion.name}-${formattedDate}`
             
             if (!byExcursion[excursionKey]) {
-                byExcursion[excursionKey] = { name: p.excursion.name, date: formattedDate, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+                byExcursion[excursionKey] = { name: p.excursion.name || 'Senza nome', date: formattedDate, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
             }
             byExcursion[excursionKey].revenue += revenue
             byExcursion[excursionKey].commission += commissionAmount
@@ -454,21 +615,28 @@ export async function GET(request: Request) {
         } else if (isRental) {
             const rentalLabelType = effectiveRentalType || p.rental?.type || 'Generico'
             const rentalName = `Noleggio: ${rentalLabelType} - ${p.rental?.name || ''}`
-            const netAgencyForRow = isBrokerageRental
-                ? commissionAmount
-                : revenue * 0.2 - assistantCommissionAmount
+
+            const includeRentalNow = effectiveRentalType === 'BOAT'
+            const includeRentalFuture = includeFutureRentals
+            const includeRental = includeRentalNow || includeRentalFuture
             
             if (!byRental[rentalName]) {
-                byRental[rentalName] = { name: rentalName, revenue: 0, commission: 0, assistantCommission: 0, supplierShare: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
+                byRental[rentalName] = { name: rentalName, revenue: 0, gross: 0, commissionBase: 0, commission: 0, agentShare: 0, companyShare: 0, go4seaShare: 0, supplierOut: 0, assistantCommission: 0, supplierShare: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
             }
             byRental[rentalName].revenue += revenue
+            byRental[rentalName].gross += includeRental ? rentalGross : 0
+            byRental[rentalName].commissionBase += includeRental ? rentalCommissionBase : 0
             byRental[rentalName].commission += commissionAmount
-            byRental[rentalName].assistantCommission += assistantCommissionAmount
-            byRental[rentalName].supplierShare += supplierShare
-            byRental[rentalName].netAgency += netAgencyForRow
+            byRental[rentalName].agentShare += includeRental ? rentalAgentShare : 0
+            byRental[rentalName].companyShare += includeRental ? rentalCompanyShare : 0
+            byRental[rentalName].go4seaShare += includeRental ? rentalGo4SeaShare : 0
+            byRental[rentalName].supplierOut += rentalSupplierShare
+            byRental[rentalName].assistantCommission += 0
+            byRental[rentalName].supplierShare += rentalSupplierShare
+            byRental[rentalName].netAgency += includeFutureRentals ? rentalCompanyShare : rentalCompanyNowForRow
             byRental[rentalName].count += 1
             byRental[rentalName].pax += pax
-            byRental[rentalName].tax += tax
+            byRental[rentalName].tax += includeRental ? tax : 0
         }
     })
 
@@ -591,7 +759,24 @@ export async function GET(request: Request) {
         totalTaxRevenue: taxStats.totalRevenue,
         count: participants.length,
         totalNetAgency,
-        totalExternalAgencyCommission
+        totalExternalAgencyCommission,
+        rentals: {
+          gross: rentalsGross,
+          supplierOut: rentalsSupplierOut,
+          commissionTotal: rentalsCommissionTotal,
+          commissionBaseTotal: rentalsCommissionBaseTotal,
+          carExcludedCostsTotal: rentalsCarExcludedCostsTotal,
+          carGrossBaseCount: rentalsCarGrossBaseCount,
+          companyNow: rentalsCompanyNow,
+          companyFuture: rentalsCompanyFuture,
+          companyTotal: rentalsCompanyTotal,
+          agentTotal: rentalsAgentTotal,
+          agentNow: rentalsAgentNow,
+          agentFuture: rentalsAgentFuture,
+          go4seaTotal: rentalsGo4SeaTotal,
+          go4seaNow: rentalsGo4SeaNow,
+          go4seaFuture: rentalsGo4SeaFuture
+        }
       },
       taxStats, // New field
       byAgency: Object.values(byAgency).sort((a, b) => b.revenue - a.revenue),
@@ -600,6 +785,8 @@ export async function GET(request: Request) {
       byExcursion: Object.values(byExcursion),
       byTransfer: Object.values(byTransfer),
       byRental: Object.values(byRental),
+      byRentalAgent: Object.values(byRentalAgent).sort((a, b) => b.agentShare - a.agentShare),
+      byRentalPaymentMethod: Object.values(rentalsPaymentByMethod).sort((a, b) => b.revenue - a.revenue),
       bySpecialService: Object.values(bySpecialService)
     })
 

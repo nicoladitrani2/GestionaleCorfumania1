@@ -38,6 +38,15 @@ export function TransferLeaderboard({ transfer, userRole }: TransferLeaderboardP
     const statsMap = new Map()
 
     participants.forEach((p) => {
+      const approval =
+        p.approvalStatus ||
+        (p.paymentStatus === 'PENDING_APPROVAL'
+          ? 'PENDING'
+          : p.paymentStatus === 'REJECTED'
+            ? 'REJECTED'
+            : undefined)
+      if (approval === 'PENDING' || approval === 'REJECTED') return
+      if (p.status && p.status !== 'ACTIVE') return
       if (p.paymentType === 'REFUNDED' || p.isExpired) return
 
       const owner = p.assignedTo || p.createdBy

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Plus, Users, User, Calendar, Clock, Edit, Home, Map as MapIcon, X, Check, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Briefcase, ArrowRight, Percent, BarChart3, Award } from 'lucide-react'
+import { Plus, Users, User, Calendar, Clock, Edit, Home, Map as MapIcon, X, Check, CheckCircle, Search, Filter, AlertCircle, History, Euro, Trash2, ChevronDown, Briefcase, ArrowRight, Percent, BarChart3, Award } from 'lucide-react'
 import { ParticipantForm } from '../excursions/ParticipantForm'
 import { ParticipantsList } from './ParticipantsList'
 import { AuditLogList } from '../excursions/AuditLogList'
@@ -49,6 +49,7 @@ export function TransfersManager({
   const [newSupplier, setNewSupplier] = useState('GO4SEA')
   const [newPriceAdult, setNewPriceAdult] = useState('')
   const [newPriceChild, setNewPriceChild] = useState('')
+  const [newMaxParticipants, setNewMaxParticipants] = useState('')
   const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
   
   // Modal States
@@ -78,9 +79,21 @@ export function TransfersManager({
     variant: 'info'
   })
 
+  const [approvalModal, setApprovalModal] = useState<{
+    isOpen: boolean
+    transferId: string
+    priceAdult: string
+    priceChild: string
+  }>({
+    isOpen: false,
+    transferId: '',
+    priceAdult: '',
+    priceChild: ''
+  })
+
   // State for agencies and commissions
   const [agencies, setAgencies] = useState<{ id: string, name: string, defaultCommission: number, commissionType: string }[]>([])
-  const [commissions, setCommissions] = useState<{ agencyId: string, percentage: string }[]>([])
+  const [commissions, setCommissions] = useState<{ agencyId: string, percentage: string, commissionType: string }[]>([])
 
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -107,7 +120,8 @@ export function TransfersManager({
           if (!editingTransferId) {
              setCommissions(data.map((a: any) => ({ 
                agencyId: a.id, 
-               percentage: a.defaultCommission ? a.defaultCommission.toString() : '' 
+               percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
+               commissionType: a.commissionType || 'PERCENTAGE'
              })))
           }
         }
@@ -239,6 +253,14 @@ export function TransfersManager({
     setNewConfirmationDeadline('')
     setNewPriceAdult('')
     setNewPriceChild('')
+    setNewMaxParticipants('')
+    
+    // Reset commissions
+    setCommissions(agencies.map(a => ({ 
+      agencyId: a.id, 
+      percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
+      commissionType: a.commissionType || 'PERCENTAGE'
+    })))
     
     // Logica di default fornitore
     let defaultSup = 'GO4SEA'
@@ -290,6 +312,7 @@ export function TransfersManager({
         ? transfer.priceChild.toString()
         : ''
     )
+    setNewMaxParticipants(transfer.maxParticipants ? transfer.maxParticipants.toString() : '')
     
     // Populate commissions
     if (transfer.commissions) {
@@ -297,11 +320,16 @@ export function TransfersManager({
         const comm = transfer.commissions.find((c: any) => c.agencyId === a.id)
         return {
           agencyId: a.id,
-          percentage: comm ? comm.commissionPercentage.toString() : (a.defaultCommission ? a.defaultCommission.toString() : '')
+          percentage: comm ? comm.commissionPercentage.toString() : (a.defaultCommission ? a.defaultCommission.toString() : ''),
+          commissionType: comm ? (comm.commissionType || 'PERCENTAGE') : (a.commissionType || 'PERCENTAGE')
         }
       }))
     } else {
-      setCommissions(agencies.map(a => ({ agencyId: a.id, percentage: a.defaultCommission ? a.defaultCommission.toString() : '' })))
+      setCommissions(agencies.map(a => ({ 
+        agencyId: a.id, 
+        percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
+        commissionType: a.commissionType || 'PERCENTAGE'
+      })))
     }
 
     setIsCreating(true)
@@ -361,6 +389,8 @@ export function TransfersManager({
         pickupLocation: newPickupLocation,
         dropoffLocation: newDropoffLocation,
         supplier: newSupplier,
+        maxParticipants: newMaxParticipants ? parseInt(newMaxParticipants) : null,
+        commissions // Add commissions
       }
 
       if (userRole === 'ADMIN') {
@@ -410,12 +440,22 @@ export function TransfersManager({
     fetchTransfers()
   }
 
-  const handleApprovalAction = async (transferId: string, status: 'APPROVED' | 'REJECTED') => {
+  const handleApprovalAction = async (transfer: any, status: 'APPROVED' | 'REJECTED') => {
+    if (status === 'APPROVED') {
+      setApprovalModal({
+        isOpen: true,
+        transferId: transfer.id,
+        priceAdult: transfer.priceAdult ? transfer.priceAdult.toString() : '',
+        priceChild: transfer.priceChild ? transfer.priceChild.toString() : ''
+      })
+      return
+    }
+
     try {
       const res = await fetch('/api/transfers', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: transferId, approvalStatus: status })
+        body: JSON.stringify({ id: transfer.id, approvalStatus: status })
       })
 
       if (!res.ok) {
@@ -425,7 +465,7 @@ export function TransfersManager({
 
       const updated = await res.json()
 
-      if (selectedTransfer && selectedTransfer.id === transferId) {
+      if (selectedTransfer && selectedTransfer.id === transfer.id) {
         setSelectedTransfer({ ...selectedTransfer, ...updated })
       }
 
@@ -436,6 +476,56 @@ export function TransfersManager({
         isOpen: true,
         title: 'Errore',
         message: e.message || 'Errore durante l\'aggiornamento dello stato',
+        variant: 'danger'
+      })
+    }
+  }
+
+  const submitApproval = async () => {
+    try {
+      const pa = parseFloat(approvalModal.priceAdult || '0')
+      const pc = parseFloat(approvalModal.priceChild || '0')
+
+      if (isNaN(pa) || isNaN(pc) || (pa <= 0 && pc <= 0)) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: 'Inserire almeno un prezzo valido maggiore di 0.',
+          variant: 'danger'
+        })
+        return
+      }
+
+      const res = await fetch('/api/transfers', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          id: approvalModal.transferId, 
+          approvalStatus: 'APPROVED',
+          priceAdult: pa,
+          priceChild: pc
+        })
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Errore durante l\'approvazione')
+      }
+
+      const updated = await res.json()
+
+      if (selectedTransfer && selectedTransfer.id === approvalModal.transferId) {
+        setSelectedTransfer({ ...selectedTransfer, ...updated })
+      }
+
+      setApprovalModal({ isOpen: false, transferId: '', priceAdult: '', priceChild: '' })
+      fetchTransfers()
+    } catch (e: any) {
+      console.error(e)
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: e.message || 'Errore durante l\'approvazione',
         variant: 'danger'
       })
     }
@@ -454,6 +544,32 @@ export function TransfersManager({
       ' ' +
       date.toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })
     )
+  }
+
+  const getCapacityBadge = (max: number | null, used: number) => {
+    if (!max || max <= 0) return null
+    const remaining = max - used
+    const safeRemaining = Math.max(remaining, 0)
+    const ratio = remaining / max
+
+    if (remaining <= 0) {
+      return {
+        text: `Posti: ${safeRemaining}/${max}`,
+        className: 'bg-red-50 text-red-700 border-red-200'
+      }
+    }
+
+    if (remaining <= 5 || ratio <= 0.2) {
+      return {
+        text: `Posti: ${safeRemaining}/${max}`,
+        className: 'bg-yellow-50 text-yellow-800 border-yellow-200'
+      }
+    }
+
+    return {
+      text: `Posti: ${safeRemaining}/${max}`,
+      className: 'bg-green-50 text-green-700 border-green-200'
+    }
   }
 
   const getTransferCommission = (transfer: any) => {
@@ -492,6 +608,84 @@ export function TransfersManager({
 
   return (
     <>
+      {approvalModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-green-600 px-6 py-4 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-white flex items-center gap-2">
+                <CheckCircle className="w-6 h-6" />
+                Approva Trasferimento
+              </h3>
+              <button 
+                onClick={() => setApprovalModal({ ...approvalModal, isOpen: false })}
+                className="text-white/80 hover:text-white hover:bg-white/10 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <div className="p-6 space-y-4">
+              <p className="text-gray-600 text-sm">
+                Per approvare il trasferimento, imposta i prezzi definitivi per adulti e bambini.
+                I futuri partecipanti useranno automaticamente questi prezzi.
+              </p>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulto</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Euro className="h-4 w-4 text-gray-500" />
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={approvalModal.priceAdult}
+                      onChange={(e) => setApprovalModal({ ...approvalModal, priceAdult: e.target.value })}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambino</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Euro className="h-4 w-4 text-gray-500" />
+                    </div>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={approvalModal.priceChild}
+                      onChange={(e) => setApprovalModal({ ...approvalModal, priceChild: e.target.value })}
+                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-green-500 focus:border-green-500"
+                      placeholder="0.00"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4">
+                <button
+                  onClick={() => setApprovalModal({ ...approvalModal, isOpen: false })}
+                  className="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-lg transition-colors"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={submitApproval}
+                  className="px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors shadow-sm"
+                >
+                  Conferma Approvazione
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isCreating && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
           <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
@@ -562,38 +756,58 @@ export function TransfersManager({
               </div>
 
               {userRole === 'ADMIN' && (
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div>
-                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulto</label>
-                    <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={newPriceAdult}
-                        onChange={(e) => setNewPriceAdult(e.target.value)}
-                        className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
-                        placeholder="Es. 15.00"
-                      />
+                <>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulto</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={newPriceAdult}
+                          onChange={(e) => setNewPriceAdult(e.target.value)}
+                          className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                          placeholder="Es. 15.00"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambino</label>
+                      <div className="relative">
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={newPriceChild}
+                          onChange={(e) => setNewPriceChild(e.target.value)}
+                          className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                          placeholder="Es. 10.00"
+                        />
+                      </div>
                     </div>
                   </div>
+                  
                   <div>
-                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambino</label>
+                    <label className="block text-sm font-bold text-gray-900 mb-1">Max Partecipanti</label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <Users className="h-5 w-5 text-gray-500" />
+                      </div>
                       <input
                         type="number"
-                        min="0"
-                        step="0.01"
-                        value={newPriceChild}
-                        onChange={(e) => setNewPriceChild(e.target.value)}
-                        className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
-                        placeholder="Es. 10.00"
+                        min="1"
+                        value={newMaxParticipants}
+                        onChange={(e) => setNewMaxParticipants(e.target.value)}
+                        className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                        placeholder="Illimitati"
                       />
                     </div>
+                    <p className="text-xs text-gray-500 mt-1">Lasciare vuoto per nessun limite. Blocca le prenotazioni al raggiungimento.</p>
                   </div>
-                </div>
+                </>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -627,6 +841,56 @@ export function TransfersManager({
                   className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
                 />
               </div>
+
+              {userRole === 'ADMIN' && (
+                <div>
+                  <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Agenzie (Default)</label>
+                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
+                    {agencies.length === 0 && <p className="text-sm text-gray-500 italic">Nessuna agenzia disponibile.</p>}
+                    {agencies && agencies.length > 0 && agencies.map(agency => (
+                      agency ? (
+                      <div key={agency.id || agency.name} className="flex items-center justify-between gap-3">
+                        <span className="text-sm font-medium text-gray-700 truncate flex-1" title={agency.name}>{agency.name}</span>
+                        <div className="flex gap-2 w-48">
+                            <select
+                                value={commissions.find(c => c.agencyId === agency.id)?.commissionType || 'PERCENTAGE'}
+                                onChange={(e) => {
+                                    const val = e.target.value
+                                    setCommissions(prev => prev.map(c => 
+                                        c.agencyId === agency.id ? { ...c, commissionType: val } : c
+                                    ))
+                                }}
+                                className="w-20 text-xs border border-gray-300 rounded-md py-1 px-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
+                            >
+                                <option value="PERCENTAGE">%</option>
+                                <option value="FIXED">€/pax</option>
+                            </select>
+                            <div className="relative flex-1">
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                placeholder="0"
+                                value={commissions.find(c => c.agencyId === agency.id)?.percentage || ''}
+                                onChange={(e) => {
+                                  const val = e.target.value
+                                  setCommissions(prev => prev.map(c => 
+                                    c.agencyId === agency.id ? { ...c, percentage: val } : c
+                                  ))
+                                }}
+                                className="block w-full border border-gray-300 rounded-md py-1 px-2 text-right pr-6 focus:ring-blue-500 focus:border-blue-500 text-sm"
+                              />
+                              <span className="absolute right-2 top-1.5 text-gray-400 text-xs">
+                                  {commissions.find(c => c.agencyId === agency.id)?.commissionType === 'FIXED' ? '€' : '%'}
+                              </span>
+                            </div>
+                        </div>
+                      </div>
+                      ) : null
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
@@ -786,16 +1050,16 @@ export function TransfersManager({
                  </div>
                  <button
                   onClick={() => setIsAddingParticipant(true)}
-                  disabled={userRole !== 'ADMIN' && selectedTransfer.approvalStatus !== 'APPROVED'}
+                  disabled={userRole !== 'ADMIN' && selectedTransfer.approvalStatus === 'REJECTED'}
                   className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium shadow-md transition-all transform hover:-translate-y-0.5 ${
-                    userRole !== 'ADMIN' && selectedTransfer.approvalStatus !== 'APPROVED'
+                    userRole !== 'ADMIN' && selectedTransfer.approvalStatus === 'REJECTED'
                       ? 'bg-gray-200 text-gray-500 cursor-not-allowed shadow-none hover:translate-y-0 hover:shadow-none'
                       : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg'
                   }`}
                 >
                   <Plus className="w-5 h-5" />
-                  {userRole !== 'ADMIN' && selectedTransfer.approvalStatus !== 'APPROVED'
-                    ? 'In attesa approvazione'
+                  {userRole !== 'ADMIN' && selectedTransfer.approvalStatus === 'REJECTED'
+                    ? 'Trasferimento Rifiutato'
                     : 'Aggiungi Partecipante'}
                 </button>
                 {userRole === 'ADMIN' && selectedTransfer.approvalStatus === 'PENDING' && (
@@ -891,7 +1155,7 @@ export function TransfersManager({
                transferName={selectedTransfer.name}
                transferDate={selectedTransfer.date}
                transferConfirmationDeadline={selectedTransfer.confirmationDeadline}
-               onEdit={(participant) => {
+               onEdit={(participant: any) => {
                  setEditingParticipant(participant)
                  setIsAddingParticipant(true)
                }}
@@ -930,6 +1194,8 @@ export function TransfersManager({
                 transferId={selectedTransfer.id}
                 transferName={selectedTransfer.name}
                 transferDate={selectedTransfer.date}
+                transferApprovalStatus={selectedTransfer.approvalStatus}
+                maxParticipants={selectedTransfer.maxParticipants || undefined}
                 transferEndDate={selectedTransfer.endDate}
                 defaultValues={{
                     pickupLocation: selectedTransfer.pickupLocation,
@@ -1084,10 +1350,23 @@ export function TransfersManager({
                     <div className="flex items-center justify-between pt-4 border-t border-gray-50">
                       <div className="flex flex-col gap-1 w-full">
                         <div className="flex justify-between items-center w-full">
-                           <span className="text-xs text-gray-500 font-medium flex items-center gap-1">
-                              <User className="w-3 h-3" />
-                              {transfer._count?.participants || 0} Pax
-                           </span>
+                           <div className="flex items-center gap-2">
+                             <span className="text-xs text-gray-500 font-medium flex items-center gap-1">
+                                <User className="w-3 h-3" />
+                                {transfer._count?.participants || 0} Pax
+                             </span>
+                             {(() => {
+                               const max = typeof transfer.maxParticipants === 'number' ? transfer.maxParticipants : null
+                               const used = typeof transfer._count?.participants === 'number' ? transfer._count.participants : 0
+                               const badge = getCapacityBadge(max, used)
+                               if (!badge) return null
+                               return (
+                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${badge.className}`}>
+                                   {badge.text}
+                                 </span>
+                               )
+                             })()}
+                           </div>
                            <span className="text-xs font-medium text-blue-600 group-hover:translate-x-1 transition-transform flex items-center">
                               Gestisci <ChevronDown className="w-3 h-3 ml-1 -rotate-90" />
                            </span>

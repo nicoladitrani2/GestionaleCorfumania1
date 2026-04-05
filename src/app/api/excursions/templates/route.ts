@@ -16,14 +16,20 @@ const DEFAULT_TEMPLATES = [
 ]
 
 export async function GET() {
-  // Check if we have any templates, if not seed defaults
+  const session = await getSession()
+  if (!session) return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
+
   const count = await prisma.excursionTemplate.count()
   
   if (count === 0) {
-    for (const name of DEFAULT_TEMPLATES) {
-      await prisma.excursionTemplate.create({
-        data: { name }
-      }).catch(e => console.error(`Error seeding template ${name}:`, e))
+    if (session.user.role === 'ADMIN') {
+      for (const name of DEFAULT_TEMPLATES) {
+        await prisma.excursionTemplate.create({
+          data: { name }
+        }).catch(e => console.error(`Error seeding template ${name}:`, e))
+      }
+    } else {
+      return NextResponse.json([])
     }
   }
 

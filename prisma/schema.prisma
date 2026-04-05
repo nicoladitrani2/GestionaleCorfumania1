@@ -1,5 +1,6 @@
 generator client {
   provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
@@ -17,6 +18,7 @@ model Agency {
   commissions ExcursionAgencyCommission[]
   transferCommissions TransferAgencyCommission[]
   users       User[]
+  participants Participant[] @relation("ParticipantAgency")
 }
 
 model User {
@@ -35,21 +37,23 @@ model User {
   participants       Participant[]
   agency             Agency?       @relation(fields: [agencyId], references: [id])
   assignedTaxBookings TaxBooking[] @relation("AssignedTaxBookings")
+  taxImportBatchesCreated TaxImportBatch[]
   assignedParticipants Participant[] @relation("AssignedParticipants")
   createdTransfers   Transfer[]    @relation("UserCreatedTransfers")
 }
 
 model Excursion {
   id                   String                      @id @default(cuid())
-  name                 String
-  startDate            DateTime
+  name                 String?
+  startDate            DateTime?
   endDate              DateTime?
   confirmationDeadline DateTime?
   createdAt            DateTime                    @default(now())
   updatedAt            DateTime                    @updatedAt
-  priceAdult           Float                       @default(0)
-  priceChild           Float                       @default(0)
-  tax                  Float                       @default(0)
+  priceAdult           Float?                      @default(0)
+  priceChild           Float?                      @default(0)
+  tax                  Float?                      @default(0)
+  maxParticipants      Int?
   auditLogs            AuditLog[]
   agencyCommissions    ExcursionAgencyCommission[]
   participants         Participant[]
@@ -81,6 +85,7 @@ model Transfer {
   supplier             String
   priceAdult           Float         @default(0)
   priceChild           Float         @default(0)
+  maxParticipants      Int?
   createdAt            DateTime      @default(now())
   updatedAt            DateTime      @updatedAt
   returnPickupLocation String?
@@ -177,6 +182,16 @@ model Participant {
   assistantCommissionType String?
   needsTransfer          Boolean  @default(false)
   commissionPercentage   Float    @default(0)
+  agencyId               String?
+  agency                 Agency?  @relation("ParticipantAgency", fields: [agencyId], references: [id])
+  approvalStatus         String   @default("APPROVED") // PENDING, APPROVED, REJECTED
+  
+  // Campi anagrafici aggiuntivi
+  firstName             String?
+  lastName              String?
+  dateOfBirth           DateTime?
+  docNumber             String?
+  docType               String?
 }
 
 model Client {
@@ -223,12 +238,19 @@ model TaxBooking {
   nFile       String
   week        String   // Sheet name
   provenienza String   // "PRIVATO" | "AGENZIA"
-  serviceCode Int      // 1, 2, 3
+  serviceCode Int      // 1=BRACCIALETTO, 2=TASSA_SOGGIORNO, 3=BRACCIALETTO+TASSA, 4=CAUZIONE
   pax         Int
   leadName    String
   room        String?
   totalAmount Float    @default(0)
+
+  depositStatus String  @default("PENDING") // PENDING | RETURNED | RETAINED
+  depositProcessedAt DateTime?
   
+  importBatchId String?
+  importBatch   TaxImportBatch? @relation(fields: [importBatchId], references: [id])
+  backups       TaxBookingBackup[]
+
   assignedToId String?
   assignedTo   User?   @relation("AssignedTaxBookings", fields: [assignedToId], references: [id])
   
@@ -240,5 +262,30 @@ model TaxBooking {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  @@unique([nFile, week]) // Assuming nFile is unique within a week
+  @@unique([nFile, week, serviceCode]) // Multiple records per booking/week (e.g. deposit)
+}
+
+model TaxImportBatch {
+  id          String   @id @default(cuid())
+  fileName    String?
+  createdAt   DateTime @default(now())
+  createdById String
+  createdBy   User     @relation(fields: [createdById], references: [id])
+  rolledBackAt DateTime?
+
+  taxBookings TaxBooking[]
+  backups     TaxBookingBackup[]
+}
+
+model TaxBookingBackup {
+  id              String   @id @default(cuid())
+  batchId         String
+  batch           TaxImportBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  taxBookingId    String
+  taxBooking      TaxBooking @relation(fields: [taxBookingId], references: [id], onDelete: Cascade)
+  prevImportBatchId String?
+  snapshot        String
+  createdAt       DateTime @default(now())
+
+  @@unique([taxBookingId, batchId])
 }

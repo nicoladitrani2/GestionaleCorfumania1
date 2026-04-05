@@ -17,7 +17,12 @@ export async function POST(request: Request) {
 
     const clients = await prisma.client.findMany({
       include: {
-        participants: true
+        participants: {
+          include: {
+            excursion: true,
+            transfer: true
+          }
+        }
       }
     })
 

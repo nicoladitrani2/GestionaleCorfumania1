@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { History, User } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { History, User, Filter } from 'lucide-react'
 
 interface AuditLog {
   id: string
@@ -9,6 +9,7 @@ interface AuditLog {
   details: string
   createdAt: string
   user: {
+    id: string
     firstName: string
     lastName: string
     email: string
@@ -18,26 +19,31 @@ interface AuditLog {
 interface AuditLogListProps {
   excursionId?: string
   transferId?: string
+  rentalId?: string
 }
 
-export function AuditLogList({ excursionId, transferId }: AuditLogListProps) {
+export function AuditLogList({ excursionId, transferId, rentalId }: AuditLogListProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [selectedUser, setSelectedUser] = useState<string>('ALL')
 
   useEffect(() => {
     fetchLogs()
-  }, [excursionId, transferId])
+  }, [excursionId, transferId, rentalId])
 
   const fetchLogs = async () => {
     setLoading(true)
     try {
-      const url = excursionId 
-        ? `/api/excursions/${excursionId}/logs`
-        : `/api/transfers/${transferId}/logs`
-        
-      const res = await fetch(url)
-      if (res.ok) {
-        setLogs(await res.json())
+      let url = ''
+      if (excursionId) url = `/api/excursions/${excursionId}/logs`
+      else if (transferId) url = `/api/transfers/${transferId}/logs`
+      else if (rentalId) url = `/api/rentals/${rentalId}/logs`
+      
+      if (url) {
+        const res = await fetch(url)
+        if (res.ok) {
+          setLogs(await res.json())
+        }
       }
     } catch (e) {
       console.error(e)
@@ -45,6 +51,21 @@ export function AuditLogList({ excursionId, transferId }: AuditLogListProps) {
       setLoading(false)
     }
   }
+
+  const uniqueUsers = useMemo(() => {
+    const users = new Map()
+    logs.forEach(log => {
+      if (log.user) {
+        users.set(log.user.id, `${log.user.firstName} ${log.user.lastName}`)
+      }
+    })
+    return Array.from(users.entries()).map(([id, name]) => ({ id, name }))
+  }, [logs])
+
+  const filteredLogs = useMemo(() => {
+    if (selectedUser === 'ALL') return logs
+    return logs.filter(log => log.user?.id === selectedUser)
+  }, [logs, selectedUser])
 
   const formatAction = (action: string) => {
     switch (action) {
@@ -87,7 +108,29 @@ export function AuditLogList({ excursionId, transferId }: AuditLogListProps) {
 
   return (
     <div className="space-y-4">
-      {logs.map((log) => (
+      {uniqueUsers.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 bg-gray-50 p-3 rounded-lg border border-gray-200">
+          <Filter className="w-4 h-4 text-gray-500" />
+          <span className="text-sm font-medium text-gray-700">Filtra per utente:</span>
+          <select
+            value={selectedUser}
+            onChange={(e) => setSelectedUser(e.target.value)}
+            className="text-sm border-gray-300 rounded-md focus:ring-blue-500 focus:border-blue-500 bg-white"
+          >
+            <option value="ALL">Tutti gli utenti</option>
+            {uniqueUsers.map(user => (
+              <option key={user.id} value={user.id}>{user.name}</option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      {filteredLogs.length === 0 && selectedUser !== 'ALL' ? (
+        <div className="text-center py-8 text-gray-500 italic">
+          Nessuna attività trovata per questo utente.
+        </div>
+      ) : (
+        filteredLogs.map((log) => (
         <div key={log.id} className="bg-white p-4 rounded-lg border border-gray-200 shadow-sm hover:shadow-md transition-shadow">
           <div className="flex items-start justify-between gap-4">
             <div className="flex items-start gap-3">
@@ -113,7 +156,7 @@ export function AuditLogList({ excursionId, transferId }: AuditLogListProps) {
             </div>
           </div>
         </div>
-      ))}
+      )))}
     </div>
   )
 }

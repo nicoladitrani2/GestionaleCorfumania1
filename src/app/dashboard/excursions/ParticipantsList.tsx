@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw } from 'lucide-react'
+import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, Euro, Eye, RotateCcw } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { generateParticipantPDF, generateParticipantsListPDF } from '@/lib/pdf-generator'
@@ -116,11 +116,6 @@ interface ParticipantsTableProps {
             </th>
             <th className={thClassName}>
               <div className="flex items-center gap-2">
-                <BadgeCheck className="w-4 h-4" /> Inserito da
-              </div>
-            </th>
-            <th className={thClassName}>
-              <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4" /> Documento
               </div>
             </th>
@@ -169,18 +164,6 @@ interface ParticipantsTableProps {
                   </span>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{p.nationality}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <div className="flex flex-col">
-                    <span className="font-medium text-gray-900">{p.createdBy?.code || '-'}</span>
-                    <span className="text-xs text-gray-500">{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
-                    {p.commissionPercentage > 0 && (
-                      <div className="text-xs text-blue-500 mt-0.5">
-                        Comm: {p.commissionPercentage}
-                        {p.createdBy?.agency?.commissionType === 'FIXED' ? '€' : '%'}
-                      </div>
-                    )}
-                  </div>
-                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <div className="flex flex-col">
                     <span className="font-medium text-gray-700">{p.docNumber}</span>
@@ -304,10 +287,6 @@ interface ParticipantsTableProps {
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
-              <div className="flex flex-col">
-                 <span className="text-xs text-gray-400">Inserito da</span>
-                 <span>{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
-              </div>
                <div className="flex flex-col">
                  <span className="text-xs text-gray-400">Telefono</span>
                  <span>{p.phoneNumber || '-'}</span>
@@ -429,6 +408,17 @@ export function ParticipantsList({
     variant: 'info',
     onConfirm: () => {}
   })
+  const [alertModal, setAlertModal] = useState<{
+    isOpen: boolean
+    title: string
+    message: string
+    variant?: 'danger' | 'success' | 'info' | 'warning'
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    variant: 'info'
+  })
 
 
 
@@ -478,6 +468,29 @@ export function ParticipantsList({
   const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
   
   const confirmedParticipants = participants.filter(p => p.paymentType === 'BALANCE')
+
+  const maxParticipants = typeof excursion?.maxParticipants === 'number' ? excursion.maxParticipants : null
+  const occupiedPax =
+    maxParticipants && maxParticipants > 0
+      ? participants.reduce((sum: number, p: any) => {
+          const isRejected = getApproval(p) === 'REJECTED'
+          const isRefunded = p.paymentType === 'REFUNDED' || p.status === 'REFUNDED'
+          const isActive = !p.status || p.status === 'ACTIVE'
+          const isExpired = (() => {
+            if (p.paymentType === 'REFUNDED') return false
+            if (getApproval(p) === 'REJECTED') return false
+            if (p.paymentType === 'BALANCE') return false
+            if (p.isExpired) return true
+            if (!deadline) return false
+            return now > deadline
+          })()
+
+          if (isRejected || isRefunded || !isActive || isExpired) return sum
+          const pax = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
+          return sum + (pax > 0 ? pax : 1)
+        }, 0)
+      : 0
+  const remainingPax = maxParticipants && maxParticipants > 0 ? maxParticipants - occupiedPax : null
   
   const inTimeUnpaid = participants.filter(p => {
     if (p.paymentType === 'REFUNDED' || p.paymentType === 'BALANCE') return false
@@ -680,13 +693,39 @@ export function ParticipantsList({
         isOpen: true,
         title: 'Errore',
         message: 'Errore nella generazione del PDF',
-        variant: 'error'
+        variant: 'danger'
       })
     }
   }
 
   return (
     <div className="space-y-8">
+      {maxParticipants && maxParticipants > 0 && (
+        <div
+          className={`p-4 rounded-xl border ${
+            typeof remainingPax === 'number' && remainingPax < 0
+              ? 'bg-red-50 border-red-200'
+              : 'bg-blue-50 border-blue-200'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <div className="flex items-center gap-2 font-semibold text-gray-900">
+              <Users className="w-4 h-4 text-blue-700" />
+              Posti
+            </div>
+            <div className="text-gray-800">
+              Massimi: <span className="font-bold">{maxParticipants}</span>
+            </div>
+            <div className="text-gray-800">
+              Occupati: <span className="font-bold">{occupiedPax}</span>
+            </div>
+            <div className={`${typeof remainingPax === 'number' && remainingPax < 0 ? 'text-red-700' : 'text-gray-800'}`}>
+              Disponibili: <span className="font-bold">{typeof remainingPax === 'number' ? remainingPax : '-'}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex justify-between items-center px-1">
         <button
           onClick={() => openExportModal(confirmedParticipants, 'lista-partecipanti')}
@@ -906,6 +945,14 @@ export function ParticipantsList({
         title={confirmModal.title}
         message={confirmModal.message}
         variant={confirmModal.variant}
+      />
+
+      <AlertModal
+        isOpen={alertModal.isOpen}
+        onClose={() => setAlertModal(prev => ({ ...prev, isOpen: false }))}
+        title={alertModal.title}
+        message={alertModal.message}
+        variant={alertModal.variant}
       />
     </div>
   )

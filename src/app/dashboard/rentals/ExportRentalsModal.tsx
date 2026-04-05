@@ -28,7 +28,6 @@ export const RENTAL_EXPORT_FIELDS = [
   { id: 'tax', label: 'Tasse' },
   { id: 'paymentType', label: 'Tipo Pagamento' },
   { id: 'paymentStatus', label: 'Stato Pagamento' },
-  { id: 'createdBy', label: 'Inserito da' },
   { id: 'agency', label: 'Agenzia' },
   { id: 'notes', label: 'Note' },
   { id: 'createdAt', label: 'Data Inserimento' },

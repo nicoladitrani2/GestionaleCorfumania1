@@ -47,6 +47,7 @@ interface TransferData {
   returnDate?: string | Date
   returnTime?: string
   returnPickupLocation?: string
+  pendingApproval?: boolean
 }
 
 interface ExcursionData {
@@ -57,8 +58,10 @@ interface ExcursionData {
   meetingPoint?: string
 }
 
-interface RentalData extends ExcursionData {
+interface RentalData {
   type: 'RENTAL'
+  name: string
+  date: string | Date
   pickupLocation?: string
   dropoffLocation?: string
 }
@@ -316,6 +319,21 @@ export const generateParticipantPDF = (
     }
 
     yPos += 15 // Adjust yPos for next section
+    
+    // Pending Approval Notice for Transfers
+    if (transfer.pendingApproval) {
+      const noticeY = yPos + 5
+      doc.setDrawColor(251, 191, 36) // amber-400
+      doc.setFillColor(255, 251, 235) // amber-50
+      doc.roundedRect(20, noticeY, 170, 16, 2, 2, 'FD')
+      doc.setTextColor(120, 53, 15) // amber-800
+      doc.setFont('helvetica', 'bold')
+      doc.setFontSize(9)
+      doc.text('ATTENZIONE: Trasferimento in attesa di approvazione.', 25, noticeY + 6)
+      doc.setFont('helvetica', 'normal')
+      doc.text('NOTICE: Transfer reservation pending approval.', 25, noticeY + 12)
+      yPos += 18
+    }
   } else {
     // Excursion Logic (Standard)
     const excursion = event as ExcursionData
@@ -356,8 +374,11 @@ export const generateParticipantPDF = (
   
   const details = [
     [t.fields.name, `${participant.firstName} ${participant.lastName}`],
-    [t.fields.nationality, participant.nationality],
-    [t.fields.doc, `${participant.docType} - ${participant.docNumber}`],
+    [t.fields.nationality, participant.nationality || '-'],
+    [
+      t.fields.doc,
+      (`${participant.docType || ''} - ${participant.docNumber || ''}`).replace(/^\s*-\s*$/, '').trim() || '-'
+    ],
     [t.fields.phone, participant.phoneNumber || '-'],
     [t.fields.email, participant.email || '-'],
     [t.fields.pax, ((participant.adults || 0) + (participant.children || 0) + (participant.infants || 0)).toString()],
@@ -544,7 +565,6 @@ export const generateParticipantsListPDF = (
   if (selectedFields.includes('paymentType')) head[0].push('Stato')
   if (selectedFields.includes('paymentMethod')) head[0].push('Metodo')
   if (selectedFields.includes('supplier')) head[0].push('Fornitore')
-  if (selectedFields.includes('createdBy')) head[0].push('Inserito da')
   if (selectedFields.includes('createdAt')) head[0].push('Data Ins.')
   if (selectedFields.includes('notes')) head[0].push('Note')
   if (selectedFields.includes('accommodation')) head[0].push('Struttura')
@@ -590,10 +610,6 @@ export const generateParticipantsListPDF = (
     }
 
     if (selectedFields.includes('supplier')) row.push(p.supplier || '-')
-    
-    if (selectedFields.includes('createdBy')) {
-       row.push(p.createdBy ? `${p.createdBy.firstName} ${p.createdBy.lastName}` : '-')
-    }
 
     if (selectedFields.includes('createdAt')) {
        const d = p.createdAt ? new Date(p.createdAt).toLocaleDateString('it-IT') : '-'

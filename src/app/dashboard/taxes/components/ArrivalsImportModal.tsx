@@ -43,6 +43,7 @@ interface ArrivalsImportModalProps {
 export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalProps) {
   const [workbook, setWorkbook] = useState<XLSX.WorkBook | null>(null)
   const [data, setData] = useState<GroupedData | null>(null)
+  const [fileName, setFileName] = useState<string | null>(null)
   const [showDebug, setShowDebug] = useState(false)
   const [loading, setLoading] = useState(false)
   const [uploading, setUploading] = useState(false)
@@ -56,6 +57,7 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
     const file = e.target.files?.[0]
     if (!file) return
 
+    setFileName(file.name)
     setLoading(true)
     setError(null)
     const reader = new FileReader()
@@ -89,8 +91,8 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
         
         const ensureUnique = (list: TaxBookingData[]) => {
             for (const item of list) {
-                // Key matches Prisma constraint: nFile + week
-                const key = `${item.nFile}__${item.week}`.toUpperCase()
+                // Key matches Prisma constraint: nFile + week + serviceCode
+                const key = `${item.nFile}__${item.week}__${item.serviceCode}`.toUpperCase()
                 
                 if (seenKeys.has(key)) {
                     // Duplicate found!
@@ -100,7 +102,7 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
                     console.warn(`Duplicate booking detected: ${originalNFile} (${item.week}). Renamed to ${item.nFile}`)
                     
                     // Add the NEW key to seen
-                    seenKeys.add(`${item.nFile}__${item.week}`.toUpperCase())
+                    seenKeys.add(`${item.nFile}__${item.week}__${item.serviceCode}`.toUpperCase())
                 } else {
                     seenKeys.add(key)
                 }
@@ -129,283 +131,210 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
     const agenzia: TaxBookingData[] = []
     const skipped: SkippedRowData[] = []
 
+    // Formato nuovo (come screenshot):
     // A(0): N FILE
-    // B(1): ADV / NOME AGENZIA
-    // C(2): PROVENIENZA (1=Privato, 2=Agenzia)
-    // D(3): CODICE SERVIZIO (1=Brac, 2=Tax, 3=Both)
-    // E(4): N. PAX
-    // F(5): LAST NAME (Lead / Pax)
-    // G(6): FIRST NAME
+    // B(1): ADV / Nome Agenzia (testo)
+    // C(2): Legenda provenienza: "A" (Agenzia) | "P" (Privato)
+    // D(3): N. PAX (numero)
+    // E(4): LAST NAME
+    // F(5): FIRST NAME
+    // G(6): BIRTHDATE (può essere vuota)
+    // O(14): HOTEL/APARTMENT (es. SUNRISE) -> se SUNRISE niente tassa di soggiorno
+    // R(17): IN
+    // S(18): OUT
 
-    const START_ROW_INDEX = 2 
+    const START_ROW_INDEX = 2
+    let currentBase: any = null
 
-    let currentBooking: TaxBookingData | null = null;
+    const flushCurrent = () => {
+      if (!currentBase) return
+
+      const participants = currentBase.participants || []
+      const statedPax = currentBase.pax || 0
+      const finalPax = statedPax > 0 ? statedPax : participants.length
+
+      const { braceletCost, cityTaxCost } = calculateBookingCost({
+        participants,
+        provenienza: currentBase.provenienza,
+        pax: finalPax,
+        inDate: currentBase.inDate,
+        outDate: currentBase.outDate,
+        hotel: currentBase.hotel,
+      })
+
+      const records: TaxBookingData[] = []
+
+      const totalBracelet = braceletCost
+      const totalCityTax = cityTaxCost
+
+      if (totalBracelet > 0 && totalCityTax > 0) {
+        records.push({
+          ...currentBase,
+          pax: finalPax,
+          serviceCode: 3,
+          totalAmount: totalBracelet + totalCityTax,
+          rawData: JSON.stringify({ ...currentBase.raw, participants, braceletCost: totalBracelet, cityTaxCost: totalCityTax })
+        })
+      } else if (totalBracelet > 0) {
+        records.push({
+          ...currentBase,
+          pax: finalPax,
+          serviceCode: 1,
+          totalAmount: totalBracelet,
+          rawData: JSON.stringify({ ...currentBase.raw, participants, braceletCost: totalBracelet, cityTaxCost: 0 })
+        })
+      } else if (totalCityTax > 0) {
+        records.push({
+          ...currentBase,
+          pax: finalPax,
+          serviceCode: 2,
+          totalAmount: totalCityTax,
+          rawData: JSON.stringify({ ...currentBase.raw, participants, braceletCost: 0, cityTaxCost: totalCityTax })
+        })
+      }
+
+      records.push({
+        ...currentBase,
+        pax: finalPax,
+        serviceCode: 4,
+        totalAmount: 50,
+        rawData: JSON.stringify({ ...currentBase.raw, participants, depositAmount: 50 })
+      })
+
+      for (const r of records) {
+        if (r.provenienza === 'AGENZIA') agenzia.push(r)
+        else privati.push(r)
+      }
+
+      currentBase = null
+    }
 
     for (let i = START_ROW_INDEX; i < jsonData.length; i++) {
-        const row = jsonData[i]
-        if (!row || row.length === 0) continue
+      const row = jsonData[i]
+      if (!row || row.length === 0) continue
 
-        // STRICT RULE: New Booking STARTS if and only if Column C (Index 2) AND Column D (Index 3) have valid values
-        // C: Provenienza (1 or 2)
-        // D: Service Code (1, 2, or 3)
-        const rawProv = row[2]
-        const rawService = row[3]
-        const leadNameCheck = String(row[1] || '').toUpperCase()
-        
-        // Skip TOTAL rows or Summary rows
-        if (leadNameCheck.includes('TOTALE') || leadNameCheck.includes('RIEPILOGO')) continue
+      const a0 = String(row[0] || '').trim().toUpperCase()
+      const b1 = String(row[1] || '').trim()
+      const c2 = String(row[2] || '').trim().toUpperCase()
 
-        let isNewBooking = false
-        let provenienzaCode = 0
-        let serviceCode = 0
+      if (a0.includes('TOTALE') || a0.includes('RIEPILOGO') || b1.toUpperCase().includes('TOTALE') || b1.toUpperCase().includes('RIEPILOGO')) continue
+      if (a0.includes('ARRIVAL') || a0.includes('CORFU')) continue
 
-        if (rawProv !== undefined && rawProv !== null && rawProv !== '' &&
-            rawService !== undefined && rawService !== null && rawService !== '') {
-            
-            const parsedProv = parseInt(rawProv)
-            const parsedService = parseInt(rawService)
+      const isNewBooking = (c2 === 'A' || c2 === 'P') && row[3] !== undefined && row[3] !== null && String(row[3]).trim() !== ''
 
-            if (!isNaN(parsedProv) && (parsedProv === 1 || parsedProv === 2) &&
-                !isNaN(parsedService) && [1, 2, 3].includes(parsedService)) {
-                
-                isNewBooking = true
-                provenienzaCode = parsedProv
-                serviceCode = parsedService
-            }
+      if (isNewBooking) {
+        flushCurrent()
+
+        let nFile = String(row[0] || '').trim()
+        if (!nFile) {
+          const prefix = c2 === 'A' ? 'AGENCY' : 'PRIV'
+          nFile = `${prefix}_${sheetName.replace(/\s+/g, '')}_ROW${i + 1}`
         }
 
-        if (isNewBooking) {
-            // 1. Close previous booking if exists
-            if (currentBooking) {
-                // Calculate cost using KNOWN participants AND Stated Pax to handle ghosts
-                const { totalAmount, pax } = calculateBookingCost(
-                    currentBooking.participants, 
-                    currentBooking.serviceCode,
-                    currentBooking.pax // Pass the stated pax from Excel
-                )
-                currentBooking.totalAmount = totalAmount
-                // Ensure currentBooking.pax reflects the MAX count
-                currentBooking.pax = pax
-                
-                // Update rawData with latest participants list
-                try {
-                    const existingRaw = JSON.parse(currentBooking.rawData || '{}')
-                    existingRaw.participants = currentBooking.participants
-                    currentBooking.rawData = JSON.stringify(existingRaw)
-                } catch (e) {
-                    console.error('Error updating rawData', e)
-                }
-                
-                // ONLY add if there is at least 1 pax or 1 participant
-                if (currentBooking.pax > 0) {
-                    // Ensure unique nFile for Agency bookings if missing or generic
-                    if (currentBooking.provenienza === 'AGENZIA') {
-                        if (!currentBooking.nFile || currentBooking.nFile === currentBooking.week || currentBooking.nFile.length < 3) {
-                            currentBooking.nFile = `AGENCY_${currentBooking.week.replace(/\s+/g, '')}_ROW${currentBooking.rowIndex}`
-                        }
-                        agenzia.push(currentBooking)
-                    } else {
-                        // FIX: Ensure unique nFile for Private bookings too if missing
-                        if (!currentBooking.nFile) {
-                             currentBooking.nFile = `PRIV_${currentBooking.week.replace(/\s+/g, '')}_ROW${currentBooking.rowIndex}`
-                        }
-                        privati.push(currentBooking)
-                    }
-                }
-            }
+        const statedPax = parseInt(String(row[3] || 0), 10) || 0
+        const hotel = String(row[14] || '').trim()
+        const room = String(row[15] || '').trim()
+        const inDate = row[17]
+        const outDate = row[18]
 
-            // 2. Start NEW Booking
-            let nFile = String(row[0] || '').trim()
-            // FIX: If nFile is missing in Excel, generate a temporary one immediately
-            // This prevents "Skipping booking with missing nFile" warning later
-            if (!nFile) {
-                 // Use row index and type to create unique ID
-                 const prefix = provenienzaCode === 2 ? 'AGENCY' : 'PRIV'
-                 nFile = `${prefix}_${sheetName.replace(/\s+/g, '')}_ROW${i + 1}`
-            }
-
-            // serviceCode is already parsed and validated above
-            const statedPax = parseInt(row[4]) || 0
-            const room = row[15] || ''
-            const flightInfo = `${formatDate(row[8]) || ''} ${row[9] || ''}`
-            
-            // Extract Booking Name / Lead Name from Column B (Left of C)
-            // User instruction: "vedi il numero nella colonna C e prendi come prenotazione ciò che sta scritto a sinistra"
-            // "A sinistra" of C(2) is B(1) [ADV/NAME].
-            let leadName = String(row[1] || '').trim()
-
-            // Extract first passenger (Lead)
-            const participants = []
-            
-            if (row[5]) { // Last Name present in header row
-                participants.push({
-                    lastName: row[5],
-                    firstName: row[6],
-                    birthDate: row[7],
-                })
-            }
-
-            // Fallback if Col B was empty
-            if (!leadName) {
-                if (participants.length > 0) {
-                     leadName = `${participants[0].lastName} ${participants[0].firstName}`
-                } else {
-                     leadName = 'Unknown' 
-                }
-            }
-
-            currentBooking = {
-                rowIndex: i + 1,
-                nFile: nFile, 
-                week: sheetName,
-                provenienza: provenienzaCode === 2 ? 'AGENZIA' : 'PRIVATO',
-                serviceCode: serviceCode,
-                pax: statedPax, 
-                leadName: leadName,
-                room: room,
-                totalAmount: 0, 
-                // Store flight info AND participants in rawData
-                rawData: JSON.stringify({ flightInfo, participants }),
-                participants: participants
-            }
-        } else {
-            // Continuation of current booking?
-            if (currentBooking) {
-                // DO NOT ACUMULATE PAX blindly. Trust the first row or the participants count.
-                // const extraPax = parseInt(row[4]) || 0
-                // currentBooking.pax += extraPax
-
-                // Check if it has passenger data (Col F/5)
-                if (row[5]) {
-                    currentBooking.participants?.push({
-                        lastName: row[5],
-                        firstName: row[6],
-                        birthDate: row[7],
-                    })
-                    
-                    // Increment PAX count for each actual participant found in continuation rows
-                    // User instruction: "il numero dei pax devono essere considerati solo quelli che hanno la corrispondente colonna C e D successivamente si vanno a contare nella colonna E"
-                    // However, user also said "ovviamente il numero dei pax devono essere considerati solo quelli che hanno la corrispondente colonna C e D"
-                    // And then "successivamente si vanno a contare nella colonna E"
-                    
-                    // The most robust way based on "si vanno a contare nella colonna E" IF they don't have C/D
-                    // But usually E is empty on continuation rows or has 1.
-                    // Let's increment based on finding a person.
-                    
-                    // Actually, let's recalculate total pax based on participants array length at the end.
-                    // This is handled in the "Close previous booking" and "Close last booking" blocks:
-                    // if (pax > 0) currentBooking.pax = pax; (where pax is participants.length)
-                    
-                    // So we don't need to manually increment currentBooking.pax here, 
-                    // because it will be overwritten by the count of participants array.
-                    
-                    // If Lead Name was temporary (e.g. Agency Name or Unknown) and we found a real person, update it?
-                    // Optional: keep Agency Name as Lead for Agency bookings? 
-                    // Usually user prefers the actual person name if available.
-                    // Let's stick to the first person found if current lead is "Unknown".
-                    if (currentBooking.leadName === 'Unknown') {
-                        currentBooking.leadName = `${row[5]} ${row[6]}`
-                    }
-                    // If it was Agency Name, keep it? Or switch to pax? 
-                    // Let's keep Agency Name if it was set from Col B, it's useful.
-                }
-            } else {
-                // Orphaned row logic (Skipped)
-                const potentialPax = parseInt(row[4]) || 0
-                if (potentialPax > 0 && !leadNameCheck.includes('TOTALE') && !leadNameCheck.includes('RIEPILOGO')) {
-                    skipped.push({
-                        rowIndex: i + 1,
-                        reason: 'Pax > 0 ma mancano codici C o D validi',
-                        pax: potentialPax,
-                        rawC: rawProv,
-                        rawD: rawService,
-                        rawE: row[4],
-                        rawName: row[1] || row[5] || '???'
-                    })
-                }
-            }
+        const participants: any[] = []
+        if (row[4]) {
+          participants.push({
+            lastName: row[4],
+            firstName: row[5],
+            birthDate: row[6],
+          })
         }
+
+        const leadName = participants.length > 0 ? `${participants[0].lastName} ${participants[0].firstName}`.trim() : (b1 || 'Unknown')
+
+        currentBase = {
+          rowIndex: i + 1,
+          nFile,
+          week: sheetName,
+          provenienza: c2 === 'A' ? 'AGENZIA' : 'PRIVATO',
+          pax: statedPax,
+          leadName,
+          room: room || null,
+          totalAmount: 0,
+          rawData: '{}',
+          participants,
+          hotel,
+          inDate,
+          outDate,
+          raw: {
+            agencyName: b1,
+            hotel,
+            room,
+            inDate: formatDate(inDate),
+            outDate: formatDate(outDate),
+            source: c2 === 'A' ? 'AGENZIA' : 'PRIVATO',
+            importSource: 'EXCEL',
+          }
+        }
+      } else {
+        if (!currentBase) continue
+        if (row[4]) {
+          currentBase.participants.push({
+            lastName: row[4],
+            firstName: row[5],
+            birthDate: row[6],
+          })
+        }
+      }
     }
 
-    // Close the last booking
-    if (currentBooking) {
-         const { totalAmount, pax } = calculateBookingCost(
-             currentBooking.participants || [], 
-             currentBooking.serviceCode,
-             currentBooking.pax // Pass stated pax
-         )
-         currentBooking.totalAmount = totalAmount
-         currentBooking.pax = pax
-
-         // Update rawData with latest participants list
-         try {
-             const existingRaw = JSON.parse(currentBooking.rawData || '{}')
-             existingRaw.participants = currentBooking.participants
-             currentBooking.rawData = JSON.stringify(existingRaw)
-         } catch (e) {
-             console.error('Error updating rawData', e)
-         }
-
-         if (currentBooking.pax > 0) {
-             if (currentBooking.provenienza === 'AGENZIA') {
-                if (!currentBooking.nFile || currentBooking.nFile === currentBooking.week || currentBooking.nFile.length < 3) {
-                    currentBooking.nFile = `AGENCY_${currentBooking.week.replace(/\s+/g, '')}_ROW${currentBooking.rowIndex}`
-                }
-                agenzia.push(currentBooking)
-            } else {
-                // FIX: Ensure unique nFile for Private bookings too if missing
-                if (!currentBooking.nFile) {
-                        currentBooking.nFile = `PRIV_${currentBooking.week.replace(/\s+/g, '')}_ROW${currentBooking.rowIndex}`
-                }
-                privati.push(currentBooking)
-            }
-         }
-    }
+    flushCurrent()
     
     return { privati, agenzia, skipped }
   }
 
-  const calculateBookingCost = (participants: any[], serviceCode: number, statedPax: number = 0) => {
-      let braceletCost = 0
-      const knownPaxCount = participants.length
-      
-      if (serviceCode === 1 || serviceCode === 3) {
-          // 1. Calculate for KNOWN participants (where we might know age)
-          participants.forEach(p => {
-              let isChild = false
-              if (p.birthDate) {
-                  const birthDateObj = parseExcelDate(p.birthDate)
-                  if (birthDateObj) {
-                      const age = new Date().getFullYear() - birthDateObj.getFullYear()
-                      if (age < 12) isChild = true
-                  }
-              }
-              braceletCost += isChild ? 5 : 10
-          })
+  const calculateBookingCost = (input: {
+    participants: any[]
+    provenienza: string
+    pax: number
+    hotel: string
+    inDate: any
+    outDate: any
+  }) => {
+    const { participants, provenienza, pax, hotel, inDate, outDate } = input
 
-          // 2. Handle "Ghost" participants (Stated Pax > Known Names)
-          // If Excel says 4 Pax but we only have 2 names, we must charge for the other 2.
-          // Since we don't know their age, we assume Standard Adult Price (10€) to avoid revenue loss.
-          if (statedPax > knownPaxCount) {
-              const diff = statedPax - knownPaxCount
-              braceletCost += diff * 10 
-          }
-      }
-      
-      let taxCost = 0
-      if (serviceCode === 2 || serviceCode === 3) {
-          taxCost = 2 // Fixed cost per Booking (Room)
-      }
-      
-      // Return total amount and the pax count
-      // STRICT RULE: Use statedPax from Excel Column E if available (>0)
-      // User instruction: "il numero dei pax deve essere totale alla somma della colonna E"
-      const finalPax = statedPax > 0 ? statedPax : knownPaxCount
+    let braceletCost = 0
+    if (provenienza === 'AGENZIA') {
+      let computed = 0
+      participants.forEach(p => {
+        const birthDateObj = parseExcelDate(p.birthDate)
+        if (birthDateObj) {
+          const now = new Date()
+          let age = now.getFullYear() - birthDateObj.getFullYear()
+          const m = now.getMonth() - birthDateObj.getMonth()
+          if (m < 0 || (m === 0 && now.getDate() < birthDateObj.getDate())) age -= 1
+          braceletCost += age < 12 ? 5 : 10
+          computed += 1
+        } else if (p.lastName || p.firstName) {
+          braceletCost += 10
+          computed += 1
+        }
+      })
 
-      return { 
-          totalAmount: braceletCost + taxCost, 
-          pax: finalPax
+      if (pax > computed) {
+        braceletCost += (pax - computed) * 10
       }
+    }
+
+    let cityTaxCost = 0
+    const hotelName = String(hotel || '').trim().toUpperCase()
+    if (hotelName && !hotelName.includes('SUNRISE')) {
+      const inObj = parseExcelDate(inDate)
+      const outObj = parseExcelDate(outDate)
+      if (inObj && outObj) {
+        const diffDays = Math.floor((outObj.getTime() - inObj.getTime()) / (1000 * 60 * 60 * 24))
+        const nights = diffDays - 1
+        if (nights > 0) cityTaxCost = nights * 2
+      }
+    }
+
+    return { braceletCost, cityTaxCost }
   }
 
   const handleSave = async () => {
@@ -415,6 +344,20 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
       setError(null)
 
       try {
+          setProgress('Creazione import...')
+          const batchRes = await fetch('/api/taxes/import-batches', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ fileName })
+          })
+          if (!batchRes.ok) {
+            const errText = await batchRes.text()
+            throw new Error(`Errore creazione import: ${errText}`)
+          }
+          const batchJson = await batchRes.json()
+          const importBatchId = String(batchJson?.batch?.id || '')
+          if (!importBatchId) throw new Error('Errore creazione import: batchId mancante')
+
           const allBookings = [...data.privati, ...data.agenzia]
           const BATCH_SIZE = 20 // Reduced from 50 to avoid timeouts
           const totalBatches = Math.ceil(allBookings.length / BATCH_SIZE)
@@ -422,7 +365,10 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
           for (let i = 0; i < totalBatches; i++) {
               const start = i * BATCH_SIZE
               const end = start + BATCH_SIZE
-              const batch = allBookings.slice(start, end)
+              const batch = allBookings.slice(start, end).map(b => ({
+                ...b,
+                importBatchId
+              }))
               
               setProgress(`Salvataggio batch ${i + 1} di ${totalBatches}...`)
 
@@ -466,6 +412,7 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
   
   const parseExcelDate = (cell: any): Date | null => {
       if (!cell) return null
+      if (cell instanceof Date && !isNaN(cell.getTime())) return cell
       if (typeof cell === 'number') {
           return new Date(Math.round((cell - 25569)*86400*1000));
       }
@@ -473,6 +420,10 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
       if (typeof cell === 'string') {
           const parts = cell.split('/')
           if (parts.length === 3) return new Date(parseInt(parts[2]), parseInt(parts[1])-1, parseInt(parts[0]))
+          if (parts.length === 2) {
+            const now = new Date()
+            return new Date(now.getFullYear(), parseInt(parts[1]) - 1, parseInt(parts[0]))
+          }
       }
       return null
   }
@@ -694,6 +645,57 @@ function ArrivalsTable({ data, type }: { data: TaxBookingData[], type: 'private'
     return <p className="text-gray-500 italic text-center py-4">Nessun arrivo trovato per questa categoria.</p>
   }
 
+  const grouped = (() => {
+    const map = new Map<string, {
+      week: string
+      nFile: string
+      leadName: string
+      pax: number
+      room: string
+      minRowIndex: number
+      amountBracelet: number
+      amountCityTax: number
+      amountDeposit: number
+      totalAmount: number
+      participants: any[]
+    }>()
+
+    for (const row of data) {
+      const key = `${row.week}__${row.nFile}`.toUpperCase()
+      const existing = map.get(key)
+      const rawParticipants = row.participants || []
+
+      const next = existing || {
+        week: row.week,
+        nFile: row.nFile,
+        leadName: row.leadName,
+        pax: row.pax,
+        room: row.room,
+        minRowIndex: row.rowIndex,
+        amountBracelet: 0,
+        amountCityTax: 0,
+        amountDeposit: 0,
+        totalAmount: 0,
+        participants: rawParticipants,
+      }
+
+      next.leadName = next.leadName || row.leadName
+      next.pax = Math.max(next.pax || 0, row.pax || 0)
+      next.room = next.room || row.room
+      next.minRowIndex = Math.min(next.minRowIndex, row.rowIndex)
+      if (next.participants.length === 0 && rawParticipants.length > 0) next.participants = rawParticipants
+
+      if (row.serviceCode === 4) next.amountDeposit += row.totalAmount || 0
+      else if (row.serviceCode === 2) next.amountCityTax += row.totalAmount || 0
+      else next.amountBracelet += row.totalAmount || 0
+
+      next.totalAmount = next.amountBracelet + next.amountCityTax + next.amountDeposit
+      map.set(key, next)
+    }
+
+    return Array.from(map.values()).sort((a, b) => a.minRowIndex - b.minRowIndex)
+  })()
+
   return (
     <div className="overflow-x-auto rounded-lg border border-gray-200 shadow-sm max-h-96">
       <table className="w-full text-sm text-left">
@@ -702,13 +704,15 @@ function ArrivalsTable({ data, type }: { data: TaxBookingData[], type: 'private'
             <th className="px-4 py-3 font-bold">N File</th>
             <th className="px-4 py-3 font-bold">Capogruppo</th>
             <th className="px-4 py-3 font-bold text-center">Pax</th>
-            <th className="px-4 py-3 font-bold text-center">Cod. Serv.</th>
+            <th className="px-4 py-3 font-bold text-right">Braccialetto</th>
+            <th className="px-4 py-3 font-bold text-right">Tassa</th>
+            <th className="px-4 py-3 font-bold text-right">Cauzione</th>
             <th className="px-4 py-3 font-bold text-right">Totale</th>
             <th className="px-4 py-3 font-bold">Alloggio</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100">
-          {data.map((row, idx) => (
+          {grouped.map((row, idx) => (
             <tr key={idx} className="bg-white hover:bg-gray-50 transition-colors">
               <td className="px-4 py-3 font-mono text-gray-500">{row.nFile}</td>
               <td className="px-4 py-3">
@@ -718,16 +722,10 @@ function ArrivalsTable({ data, type }: { data: TaxBookingData[], type: 'private'
                 </div>
               </td>
               <td className="px-4 py-3 text-center font-medium">{row.pax}</td>
-              <td className="px-4 py-3 text-center">
-                  <span className={`px-2 py-1 rounded text-xs font-bold ${
-                      row.serviceCode === 3 ? 'bg-blue-100 text-blue-700' : 
-                      row.serviceCode === 2 ? 'bg-yellow-100 text-yellow-700' : 
-                      'bg-green-100 text-green-700'
-                  }`}>
-                      {row.serviceCode === 1 ? 'Brac' : row.serviceCode === 2 ? 'Tax' : 'All'}
-                  </span>
-              </td>
-              <td className="px-4 py-3 text-right font-bold text-gray-900">€ {row.totalAmount}</td>
+              <td className="px-4 py-3 text-right font-bold text-gray-900">€ {row.amountBracelet.toFixed(2)}</td>
+              <td className="px-4 py-3 text-right font-bold text-gray-900">€ {row.amountCityTax.toFixed(2)}</td>
+              <td className="px-4 py-3 text-right font-bold text-gray-900">€ {row.amountDeposit.toFixed(2)}</td>
+              <td className="px-4 py-3 text-right font-bold text-gray-900">€ {row.totalAmount.toFixed(2)}</td>
               <td className="px-4 py-3 text-gray-600 truncate max-w-xs">{row.room}</td>
             </tr>
           ))}

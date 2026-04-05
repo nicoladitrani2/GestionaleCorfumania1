@@ -11,7 +11,7 @@ export async function middleware(request: NextRequest) {
     } catch (e) {}
   }
 
-  if (request.nextUrl.pathname.startsWith('/dashboard')) {
+  if (request.nextUrl.pathname.startsWith('/dashboard') || request.nextUrl.pathname.startsWith('/change-password')) {
     if (!session) {
       return NextResponse.redirect(new URL('/login', request.url))
     }
@@ -28,15 +28,9 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  if (request.nextUrl.pathname === '/login') {
-    if (session) {
-      return NextResponse.redirect(new URL('/dashboard', request.url))
-    }
-  }
-
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ['/dashboard/:path*', '/login'],
+  matcher: ['/dashboard/:path*', '/login', '/change-password'],
 }

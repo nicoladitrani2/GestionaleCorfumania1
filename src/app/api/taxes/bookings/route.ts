@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { addRateLimitHeaders, getClientIp, rateLimit } from '@/lib/rateLimit'
+import { enforceSameOrigin } from '@/lib/csrf'
 
 export async function GET(request: Request) {
   try {
@@ -44,8 +46,25 @@ export async function POST(request: Request) {
     if (!session || !session.user) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
+    if (session.user.role !== 'ADMIN') {
+      return new NextResponse('Forbidden', { status: 403 })
+    }
 
-    const body = await request.json()
+    const csrf = enforceSameOrigin(request)
+    if (csrf) return csrf
+
+    const ip = getClientIp(request)
+    const rl = rateLimit(`tax-bookings:post:ip:${ip}:admin:${session.user.id}`, 120, 10 * 60 * 1000)
+    if (!rl.allowed) {
+      return addRateLimitHeaders(new NextResponse('Too Many Requests', { status: 429 }), rl, 120)
+    }
+
+    let body: any = {}
+    try {
+      body = await request.json()
+    } catch {
+      body = {}
+    }
     const { bookings } = body
 
     if (!Array.isArray(bookings)) {
@@ -54,14 +73,13 @@ export async function POST(request: Request) {
 
     // Process bookings
     // We use transaction to ensure data integrity
-    const results = []
+    const results: any[] = []
     
     // Using transaction for atomic operations but processing one by one to check state
     await prisma.$transaction(async (tx) => {
         for (const b of bookings) {
             // Validate required fields
             if (!b.nFile || !b.week) {
-                console.warn('Skipping booking with missing nFile or week:', b)
                 continue
             }
 
@@ -71,26 +89,67 @@ export async function POST(request: Request) {
             const paxInt = parseInt(String(b.pax || 0), 10)
             const serviceCodeInt = parseInt(String(b.serviceCode || 0), 10)
             const totalAmountFloat = parseFloat(String(b.totalAmount || 0))
+            const importBatchId = b.importBatchId ? String(b.importBatchId) : null
 
             // 1. Check if exists
-            const existing = await tx.taxBooking.findUnique({
+            const existing = await tx.taxBooking.findFirst({
                 where: {
-                    nFile_week: {
-                        nFile: nFileStr,
-                        week: weekStr
-                    }
+                    nFile: nFileStr,
+                    week: weekStr,
+                    serviceCode: serviceCodeInt
                 }
             })
 
             if (existing) {
                 // 2. Check if "locked" (assigned or paid)
                 // User requirement: "dati che sono stati già usati, assegnati e pagati non devono essere sovrasritti"
-                const isLocked = existing.assignedToId || existing.customerPaid || existing.adminPaid
+                const isLocked =
+                  existing.assignedToId ||
+                  existing.customerPaid ||
+                  existing.adminPaid ||
+                  (existing.serviceCode === 4 && existing.depositStatus !== 'PENDING')
                 
                 if (isLocked) {
                     // SKIP update
                     results.push(existing)
                     continue
+                }
+
+                const rawForSource = String(b.rawData || existing.rawData || '{}')
+                let importSource = ''
+                try {
+                    const parsed = JSON.parse(rawForSource || '{}')
+                    importSource = String(parsed?.importSource || '')
+                } catch {
+                    importSource = ''
+                }
+
+                if (importSource === 'EXCEL' && importBatchId) {
+                    const snapshot = JSON.stringify({
+                        provenienza: existing.provenienza,
+                        serviceCode: existing.serviceCode,
+                        pax: existing.pax,
+                        leadName: existing.leadName,
+                        room: existing.room,
+                        totalAmount: existing.totalAmount,
+                        assignedToId: existing.assignedToId,
+                        customerPaid: existing.customerPaid,
+                        adminPaid: existing.adminPaid,
+                        rawData: existing.rawData,
+                        depositStatus: existing.depositStatus,
+                        depositProcessedAt: existing.depositProcessedAt ? existing.depositProcessedAt.toISOString() : null,
+                    })
+
+                    await tx.taxBookingBackup.upsert({
+                        where: { taxBookingId_batchId: { taxBookingId: existing.id, batchId: importBatchId } },
+                        create: {
+                            taxBookingId: existing.id,
+                            batchId: importBatchId,
+                            prevImportBatchId: existing.importBatchId,
+                            snapshot,
+                        },
+                        update: {},
+                    })
                 }
 
                 // 3. Update if not locked
@@ -103,7 +162,10 @@ export async function POST(request: Request) {
                         leadName: String(b.leadName || ''),
                         room: b.room ? String(b.room) : null,
                         totalAmount: totalAmountFloat,
-                        rawData: String(b.rawData || '{}')
+                        rawData: String(b.rawData || '{}'),
+                        depositStatus: String(b.depositStatus || existing.depositStatus || 'PENDING'),
+                        depositProcessedAt: b.depositProcessedAt ? new Date(String(b.depositProcessedAt)) : existing.depositProcessedAt,
+                        importBatchId: importSource === 'EXCEL' ? importBatchId : existing.importBatchId
                     }
                 })
                 results.push(updated)
@@ -121,10 +183,70 @@ export async function POST(request: Request) {
                         totalAmount: totalAmountFloat,
                         customerPaid: b.customerPaid === true,
                         assignedToId: session.user.id, // Assign to creator by default
-                        rawData: String(b.rawData || '{}')
+                        rawData: String(b.rawData || '{}'),
+                        depositStatus: String(b.depositStatus || 'PENDING'),
+                        depositProcessedAt: b.depositProcessedAt ? new Date(String(b.depositProcessedAt)) : null,
+                        importBatchId
                     }
                 })
                 results.push(created)
+            }
+
+            if (serviceCodeInt !== 4) {
+                const raw = String(b.rawData || '{}')
+                let importSource = ''
+                try {
+                    const parsed = JSON.parse(raw || '{}')
+                    importSource = String(parsed?.importSource || '')
+                } catch {
+                    importSource = ''
+                }
+
+                if (importSource !== 'EXCEL') {
+                    continue
+                }
+                if (!importBatchId) {
+                    continue
+                }
+
+                const existingDeposit = await tx.taxBooking.findFirst({
+                    where: {
+                        nFile: nFileStr,
+                        week: weekStr,
+                        serviceCode: 4
+                    },
+                    select: { id: true }
+                })
+
+                if (!existingDeposit) {
+                    let depositRaw = '{}'
+                    try {
+                        const parsed = JSON.parse(raw || '{}')
+                        depositRaw = JSON.stringify({ ...parsed, depositAmount: 50 })
+                    } catch {
+                        depositRaw = JSON.stringify({ depositAmount: 50 })
+                    }
+
+                    const existingAssignedToId = existing?.assignedToId || null
+
+                    await tx.taxBooking.create({
+                        data: {
+                            nFile: nFileStr,
+                            week: weekStr,
+                            provenienza: String(b.provenienza || ''),
+                            serviceCode: 4,
+                            pax: paxInt,
+                            leadName: String(b.leadName || ''),
+                            room: b.room ? String(b.room) : null,
+                            totalAmount: 50,
+                            assignedToId: existingAssignedToId || session.user.id,
+                            rawData: depositRaw,
+                            depositStatus: 'PENDING',
+                            depositProcessedAt: null,
+                            importBatchId
+                        }
+                    })
+                }
             }
         }
     }, {
@@ -132,11 +254,10 @@ export async function POST(request: Request) {
         timeout: 120000  // increased from 20000 (2 mins) to handle large batches
     })
 
-    return NextResponse.json(results)
+    return addRateLimitHeaders(NextResponse.json(results), rl, 120)
   } catch (error: any) {
     console.error('Error creating tax bookings:', error)
-    // Return the actual error message for debugging
-    return new NextResponse(`Internal Server Error: ${error.message}`, { status: 500 })
+    return new NextResponse('Internal Server Error', { status: 500 })
   }
 }
 
@@ -187,7 +308,7 @@ export async function PUT(request: Request) {
 
     if (session.user.role !== 'ADMIN') {
         // Check permissions for non-admin
-        if (action === 'assign' || action === 'adminPaid') {
+        if (action === 'assign' || action === 'adminPaid' || action === 'depositStatus') {
              return new NextResponse('Forbidden', { status: 403 })
         }
         if (action === 'customerPaid') {
@@ -209,6 +330,17 @@ export async function PUT(request: Request) {
         case 'adminPaid':
             updateData = { adminPaid: Boolean(value) }
             break
+        case 'depositStatus': {
+            const next = String(value || '')
+            if (!['PENDING', 'RETURNED', 'RETAINED'].includes(next)) {
+              return new NextResponse('Invalid deposit status', { status: 400 })
+            }
+            updateData = {
+              depositStatus: next,
+              depositProcessedAt: next === 'PENDING' ? null : new Date()
+            }
+            break
+        }
         default:
             return new NextResponse('Invalid action', { status: 400 })
     }

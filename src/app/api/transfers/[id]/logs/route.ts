@@ -15,21 +15,33 @@ export async function GET(
 
   try {
     const logs = await prisma.auditLog.findMany({
-      where: { transferId: id },
+      where: {
+        OR: [
+          { transferId: id },
+          {
+            entityType: 'TRANSFER',
+            entityId: id,
+          },
+        ],
+      },
       include: {
         user: {
           select: {
+            id: true,
             firstName: true,
             lastName: true,
-            email: true
-          }
-        }
+            email: true,
+          },
+        },
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     })
 
     return NextResponse.json(logs)
   } catch (error) {
-    return NextResponse.json({ error: 'Errore nel recupero della cronologia' }, { status: 500 })
+    return NextResponse.json(
+      { error: 'Errore nel recupero della cronologia' },
+      { status: 500 }
+    )
   }
 }

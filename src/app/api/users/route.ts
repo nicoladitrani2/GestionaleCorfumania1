@@ -1,8 +1,14 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
+import { getSession } from '@/lib/auth'
 import bcrypt from 'bcryptjs'
 
 export async function GET() {
+  const session = await getSession()
+  if (!session || session.user.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
+  }
+
   try {
     const users = await prisma.user.findMany({
       orderBy: { createdAt: 'desc' },
@@ -29,6 +35,11 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
+  const session = await getSession()
+  if (!session || session.user.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
+  }
+
   try {
     const body = await request.json()
     const { email, password, firstName, lastName, role, code, agencyId } = body

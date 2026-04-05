@@ -6,6 +6,13 @@ import nodemailer from 'nodemailer'
 
 export const dynamic = 'force-dynamic'
 
+const carGrossSuppliers = new Set(
+  (process.env.RENTAL_CAR_GROSS_SUPPLIERS || process.env.NEXT_PUBLIC_RENTAL_CAR_GROSS_SUPPLIERS || '')
+    .split(',')
+    .map(s => s.trim().toLowerCase())
+    .filter(Boolean)
+)
+
 function encodeDocumentInfo(docType?: string, docNumber?: string): string | null {
   if (!docType && !docNumber) return null
   try {
@@ -31,6 +38,63 @@ function decodeDocumentInfo(ticketNumber?: string | null): { docType?: string | 
   }
 }
 
+function normalizeRentalType(raw: any): string | null {
+  if (!raw) return null
+  const normalized = String(raw).toUpperCase()
+  if (normalized === 'SCOOTER' || normalized === 'QUAD') return 'MOTO'
+  if (normalized === 'CAR_GROSS') return 'MOTO'
+  if (normalized === 'AUTO') return 'CAR'
+  if (normalized === 'BARCA') return 'BOAT'
+  return normalized
+}
+
+function computeRentalBreakdown(p: any) {
+  if (!p?.rentalId) return null
+
+  const rawRentalType = p.rentalType || p.rental?.type
+  const rentalType = normalizeRentalType(rawRentalType)
+  const gross = Number(p.totalPrice || 0)
+  const tax = Number(p.tax || 0)
+  const insurance = Number(p.insurancePrice || 0)
+  const supplement = Number(p.supplementPrice || 0)
+
+  const supplierName = String(p.supplier || '').trim().toLowerCase()
+  const operator = p.assignedTo || p.user
+  const operatorAgencyName = String(operator?.agency?.name || '').trim().toLowerCase()
+  const referenceAgencyName = String(p.agency?.name || operatorAgencyName).trim().toLowerCase()
+  const isGo4Sea = referenceAgencyName.includes('go4sea')
+  const excludedCosts =
+    rentalType === 'CAR'
+      ? (Math.max(0, insurance) + Math.max(0, tax) + Math.max(0, supplement))
+      : 0
+
+  const commissionBase = rentalType === 'CAR' ? Math.max(0, gross - excludedCosts) : Math.max(0, gross)
+
+  const commissionTotal = commissionBase * 0.2
+  const agentShare = commissionBase * 0.05
+  const companyShare = commissionBase * (isGo4Sea ? 0.05 : 0.15)
+  const go4SeaShare = isGo4Sea ? commissionBase * 0.1 : 0
+  const supplierOut = Math.max(0, gross - commissionTotal)
+
+  const companyNow = rentalType === 'BOAT' ? companyShare : 0
+  const companyFuture = rentalType === 'BOAT' ? 0 : companyShare
+
+  return {
+    rentalType,
+    rentalGross: gross,
+    rentalExcludedCosts: excludedCosts,
+    rentalCommissionBase: commissionBase,
+    rentalCommissionTotal: commissionTotal,
+    rentalAgentShare: agentShare,
+    rentalCompanyShare: companyShare,
+    rentalGo4SeaShare: go4SeaShare,
+    rentalSupplierOut: supplierOut,
+    rentalCompanyNow: companyNow,
+    rentalCompanyFuture: companyFuture,
+    rentalIsGo4Sea: isGo4Sea
+  }
+}
+
 function mapParticipantForClient(p: any) {
   const { user, client, assignedTo, ...rest } = p
   const paymentType = rest.paymentType || 'BALANCE'
@@ -42,6 +106,7 @@ function mapParticipantForClient(p: any) {
   const clientNationality = client?.nationality || null
 
   const documentInfo = decodeDocumentInfo(rest.ticketNumber)
+  const rentalBreakdown = computeRentalBreakdown(p)
 
   return {
     ...rest,
@@ -62,6 +127,7 @@ function mapParticipantForClient(p: any) {
     docNumber: documentInfo.docNumber || null,
     accommodation: rest.roomNumber || null,
     pickupTime: rest.pickupTime || null,
+    ...(rentalBreakdown || {})
   }
 }
 
@@ -117,6 +183,7 @@ export async function GET(request: Request) {
           firstName: true,
           lastName: true,
           email: true,
+          code: true,
           role: true,
           agencyId: true,
           agency: {
@@ -135,6 +202,12 @@ export async function GET(request: Request) {
           email: true,
           phoneNumber: true,
           nationality: true,
+        }
+      },
+      agency: {
+        select: {
+          id: true,
+          name: true
         }
       }
     }
@@ -189,7 +262,8 @@ export async function POST(request: Request) {
       supplementPrice,
       assistantCommission,
       assistantCommissionType,
-      assignedToId: rawAssignedToId
+      assignedToId: rawAssignedToId,
+      agencyId
     } = body
 
     const name = `${firstName || ''} ${lastName || ''}`.trim()
@@ -197,6 +271,53 @@ export async function POST(request: Request) {
     const totalTax = parseFloat(String(tax)) || 0
     const depositAmount = parseFloat(String(deposit || 0)) || 0
     
+    // Check Max Participants
+    if (excursionId) {
+      const excursion = await prisma.excursion.findUnique({
+        where: { id: excursionId },
+        select: { maxParticipants: true }
+      })
+      if (excursion?.maxParticipants) {
+        const currentStats = await prisma.participant.aggregate({
+          where: {
+            excursionId,
+            status: 'ACTIVE',
+            paymentType: { not: 'REFUNDED' },
+            approvalStatus: { not: 'REJECTED' }
+          },
+          _sum: { adults: true, children: true, infants: true }
+        })
+        const currentTotal = (currentStats._sum.adults || 0) + (currentStats._sum.children || 0) + (currentStats._sum.infants || 0)
+        const newTotal = (parseInt(adults) || 0) + (parseInt(children) || 0) + (parseInt(infants) || 0)
+        
+        if (currentTotal + newTotal > excursion.maxParticipants) {
+          return NextResponse.json({ error: `Numero massimo di partecipanti raggiunto (${excursion.maxParticipants}).` }, { status: 400 })
+        }
+      }
+    } else if (transferId) {
+      const transfer = await prisma.transfer.findUnique({
+        where: { id: transferId },
+        select: { maxParticipants: true }
+      })
+      if (transfer?.maxParticipants) {
+        const currentStats = await prisma.participant.aggregate({
+          where: {
+            transferId,
+            status: 'ACTIVE',
+            paymentType: { not: 'REFUNDED' },
+            approvalStatus: { not: 'REJECTED' }
+          },
+          _sum: { adults: true, children: true, infants: true }
+        })
+        const currentTotal = (currentStats._sum.adults || 0) + (currentStats._sum.children || 0) + (currentStats._sum.infants || 0)
+        const newTotal = (parseInt(adults) || 0) + (parseInt(children) || 0) + (parseInt(infants) || 0)
+        
+        if (currentTotal + newTotal > transfer.maxParticipants) {
+          return NextResponse.json({ error: `Numero massimo di partecipanti raggiunto (${transfer.maxParticipants}).` }, { status: 400 })
+        }
+      }
+    }
+
     let clientId: string | null = null
     if (firstName && lastName) {
       if (email) {
@@ -246,7 +367,7 @@ export async function POST(request: Request) {
         const calculated = (adultsNum * (excursion.priceAdult || 0)) + (childrenNum * (excursion.priceChild || 0))
         if (finalTotalPrice <= 0) finalTotalPrice = calculated
         const isAdmin = session.user.role === 'ADMIN'
-        if (!isAdmin && finalTotalPrice < calculated - 0.01) {
+        if (!isAdmin && Math.abs(finalTotalPrice - calculated) > 0.01) {
           finalPaymentStatus = 'PENDING_APPROVAL'
           approvalStatus = 'PENDING'
           originalPrice = calculated
@@ -257,7 +378,7 @@ export async function POST(request: Request) {
     } else if (transferId) {
       const transfer = await prisma.transfer.findUnique({
         where: { id: transferId },
-        select: { priceAdult: true, priceChild: true }
+        select: { priceAdult: true, priceChild: true, approvalStatus: true }
       })
       if (transfer) {
         const adultsNum = parseInt(adults) || 0
@@ -265,7 +386,13 @@ export async function POST(request: Request) {
         const calculated = (adultsNum * (transfer.priceAdult || 0)) + (childrenNum * (transfer.priceChild || 0))
         if (finalTotalPrice <= 0) finalTotalPrice = calculated
         const isAdmin = session.user.role === 'ADMIN'
-        if (!isAdmin && finalTotalPrice < calculated - 0.01) {
+        
+        // Transfer Not Approved OR Price too low -> Pending Approval
+        if (transfer.approvalStatus !== 'APPROVED') {
+             finalPaymentStatus = 'PENDING_APPROVAL'
+             approvalStatus = 'PENDING'
+             originalPrice = calculated
+        } else if (!isAdmin && Math.abs(finalTotalPrice - calculated) > 0.01) {
           finalPaymentStatus = 'PENDING_APPROVAL'
           approvalStatus = 'PENDING'
           originalPrice = calculated
@@ -292,6 +419,13 @@ export async function POST(request: Request) {
       paidAmount = 0
       if (finalPaymentStatus === 'PENDING') {
         finalPaymentStatus = 'PENDING'
+      }
+    }
+
+    if (isRental) {
+      paidAmount = depositAmount
+      if (finalPaymentStatus === 'PENDING') {
+        finalPaymentStatus = 'PAID'
       }
     }
 
@@ -368,7 +502,9 @@ export async function POST(request: Request) {
         assistantCommission: isRental ? assistantCommission || 0 : 0,
         assistantCommissionType: isRental ? assistantCommissionType || 'PERCENTAGE' : null,
         needsTransfer: !!needsTransfer,
-        commissionPercentage: commissionPercentage || 0
+        commissionPercentage: commissionPercentage || 0,
+        agencyId,
+        approvalStatus: approvalStatus || 'APPROVED'
       }
     })
 
@@ -379,12 +515,21 @@ export async function POST(request: Request) {
       participant.id,
       `Creato partecipante ${participant.id} - ${name} (Totale: €${finalTotalPrice.toFixed(2)})`,
       excursionId || null,
-      transferId || null
+      transferId || null,
+      resolvedRentalId
     )
 
-    // Send confirmation email with attachments if provided and not pending approval
+    // Send confirmation email with attachments if provided
     try {
-      if (email && finalPaymentStatus !== 'PENDING_APPROVAL' && (body.pdfAttachmentIT || body.pdfAttachmentEN)) {
+      // Send if email exists AND (payment is not pending OR it is a transfer pending approval)
+      // Actually, user requested email for transfer pending approval.
+      // And existing logic was: if email && finalPaymentStatus !== 'PENDING_APPROVAL'
+      // We need to allow email for PENDING_APPROVAL if it's a Transfer (or generally if requested?)
+      // User said: "Email Transfer Non Approvati... deve indicare chiaramente che è in attesa"
+      
+      const shouldSend = email && (finalPaymentStatus !== 'PENDING_APPROVAL' || transferId);
+      
+      if (shouldSend && (body.pdfAttachmentIT || body.pdfAttachmentEN)) {
         const transporter = nodemailer.createTransport({
           host: 'smtp.gmail.com',
           port: 465,
@@ -413,12 +558,20 @@ export async function POST(request: Request) {
             content: Buffer.from(body.pdfAttachmentEN, 'base64')
           })
         }
+        
+        let subject = 'Conferma Prenotazione - Corfumania'
+        let text = `Gentile ${safeName},\n\nLa tua prenotazione è stata registrata. In allegato trovi il voucher (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`
+        
+        if (finalPaymentStatus === 'PENDING_APPROVAL' && transferId) {
+             subject = 'Prenotazione in Attesa di Approvazione / Reservation Pending Approval - Corfumania'
+             text = `Gentile ${safeName},\n\nLa tua prenotazione per il trasferimento è stata ricevuta ed è in attesa di approvazione.\nRiceverai una conferma definitiva appena possibile.\n\nIn allegato trovi i dettagli della richiesta.\n\nCordiali saluti,\nTeam Corfumania\n\n---\n\nDear ${safeName},\n\nYour transfer reservation has been received and is pending approval.\nYou will receive a final confirmation as soon as possible.\n\nPlease find attached the request details.\n\nBest regards,\nCorfumania Team`
+        }
 
         await transporter.sendMail({
           from: `"Corfumania" <${process.env.EMAIL_USER}>`,
           to: email,
-          subject: 'Conferma Prenotazione - Corfumania',
-          text: `Gentile ${safeName},\n\nLa tua prenotazione è stata registrata. In allegato trovi il voucher (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
+          subject,
+          text,
           attachments
         })
         console.log('[CREATE] Email sent to', email)
@@ -478,6 +631,7 @@ export async function POST(request: Request) {
           agencyId: session.user.agencyId,
           agency: null,
         },
+        assignedTo: null
       }
     }
 

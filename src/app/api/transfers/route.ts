@@ -96,7 +96,7 @@ export async function GET(request: Request) {
 
       transfer.participants.forEach(p => {
         // Escludi completamente partecipanti con pagamento in attesa di approvazione
-        if (p.paymentStatus === 'PENDING_APPROVAL') return
+        if (p.paymentStatus === 'PENDING_APPROVAL' || p.paymentStatus === 'REJECTED') return
 
         const size = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
         const dep = typeof p.paidAmount === 'number' ? p.paidAmount : Number(p.paidAmount)
@@ -119,9 +119,11 @@ export async function GET(request: Request) {
         } else {
             // Real payments
             if (!isExpired) activeParticipants += size
-            // Exclude expired from revenue? User said "rejected = no revenue".
-            // Logic for expired deposits is ambiguous, but for REJECTED we already returned above.
-            totalCollected += (isNaN(dep) ? 0 : dep)
+            
+            // Only count revenue if transfer is APPROVED
+            if (transfer.approvalStatus === 'APPROVED') {
+                totalCollected += (isNaN(dep) ? 0 : dep)
+            }
             
             if (p.paymentType === 'BALANCE' || (dep >= pr && pr > 0)) {
                 countPaid += size
@@ -172,7 +174,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions, priceAdult, priceChild, confirmationDeadline } = body
+    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions, priceAdult, priceChild, confirmationDeadline, maxParticipants } = body
 
     if (!name || !date || !supplier) {
         return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
@@ -220,8 +222,18 @@ export async function POST(request: Request) {
         supplier,
         priceAdult: priceAdult ? parseFloat(priceAdult) : 0,
         priceChild: priceChild ? parseFloat(priceChild) : 0,
+        maxParticipants: maxParticipants ? parseInt(maxParticipants) : null,
         approvalStatus,
-        createdById: session.user.id
+        createdById: session.user.id,
+        agencyCommissions: commissions ? {
+          create: commissions
+            .map((c: any) => ({
+              agencyId: c.agencyId,
+              commissionPercentage: parseFloat(c.percentage),
+              commissionType: c.commissionType || 'PERCENTAGE'
+            }))
+            .filter((c: any) => !isNaN(c.commissionPercentage))
+        } : undefined
       }
     })
 
@@ -250,7 +262,7 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, confirmationDeadline } = body
+    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, confirmationDeadline, maxParticipants } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
@@ -281,11 +293,14 @@ export async function PUT(request: Request) {
       pickupLocation,
       dropoffLocation,
       returnPickupLocation,
-      supplier
+      supplier,
+      maxParticipants: maxParticipants ? parseInt(maxParticipants) : null
     }
 
     if (typeof approvalStatus === 'string') {
-      updateData.approvalStatus = approvalStatus
+      if (session.user.role === 'ADMIN') {
+        updateData.approvalStatus = approvalStatus
+      }
     }
 
     if (priceAdult !== undefined) {
@@ -301,7 +316,8 @@ export async function PUT(request: Request) {
             create: commissions
               .map((c: any) => ({
                 agencyId: c.agencyId,
-                commissionPercentage: parseFloat(c.percentage)
+                commissionPercentage: parseFloat(c.percentage),
+                commissionType: c.commissionType || 'PERCENTAGE'
               }))
               .filter((c: any) => !isNaN(c.commissionPercentage))
         }

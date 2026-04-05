@@ -27,7 +27,7 @@ export async function POST(
       return NextResponse.json({ error: 'Partecipante non trovato' }, { status: 404 })
     }
 
-    if (session.user.role !== 'ADMIN' && participant.createdById !== session.user.id) {
+    if (session.user.role !== 'ADMIN' && participant.userId !== session.user.id) {
       return NextResponse.json({ error: 'Non autorizzato' }, { status: 403 })
     }
     
@@ -60,7 +60,8 @@ export async function POST(
     })
 
     // 2. Create Audit Log
-    const details = `RIMBORSO: Partecipante ${participant.firstName} ${participant.lastName} rimborsato di €${refundAmount} tramite ${methodLabels[refundMethod] || refundMethod}. Stato aggiornato a REFUNDED.`
+    const safeName = participant.name || 'Cliente'
+    const details = `RIMBORSO: Partecipante ${safeName} rimborsato di €${refundAmount} tramite ${methodLabels[refundMethod] || refundMethod}. Stato aggiornato a REFUNDED.`
 
     await createAuditLog(
       session.user.id,
@@ -69,7 +70,8 @@ export async function POST(
       participant.id,
       details,
       participant.excursionId,
-      participant.transferId
+      participant.transferId,
+      participant.rentalId
     )
 
     // 3. Send Email if PDF is provided
@@ -93,16 +95,16 @@ export async function POST(
         const attachments = []
         if (pdfAttachmentIT && pdfAttachmentEN) {
              attachments.push({
-                    filename: `Rimborso_${participant.firstName}_${participant.lastName}_IT.pdf`,
+                    filename: `Rimborso_${safeName}_IT.pdf`,
                     content: Buffer.from(pdfAttachmentIT, 'base64')
              })
              attachments.push({
-                    filename: `Refund_${participant.firstName}_${participant.lastName}_EN.pdf`,
+                    filename: `Refund_${safeName}_EN.pdf`,
                     content: Buffer.from(pdfAttachmentEN, 'base64')
              })
         } else if (pdfAttachment) {
              attachments.push({
-                    filename: `Rimborso_${participant.firstName}_${participant.lastName}.pdf`,
+                    filename: `Rimborso_${safeName}.pdf`,
                     content: Buffer.from(pdfAttachment, 'base64')
              })
         }
@@ -111,7 +113,7 @@ export async function POST(
           from: `"Corfumania" <${process.env.EMAIL_USER}>`,
           to: participant.email,
           subject: 'Rimborso Effettuato - Corfumania',
-          text: `Gentile ${participant.firstName} ${participant.lastName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
+          text: `Gentile ${safeName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
           attachments: attachments,
         })
         console.log('Email rimborso inviata a:', participant.email)

@@ -52,8 +52,6 @@ export async function GET(request: Request) {
       }
     })
 
-    console.log('[/api/clients] Found clients:', clients.length)
-
     // Transform data to include distinct names list and derived service types
     const enhancedClients = clients.map(client => {
       const distinctNames = client.participants

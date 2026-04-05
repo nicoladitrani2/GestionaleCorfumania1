@@ -1,11 +1,12 @@
 'use client'
 
 import { useMemo, useState } from 'react'
-import { Plus, Search, FileDown } from 'lucide-react'
+import { Plus, Search, FileDown, Award, List } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ParticipantForm } from '../excursions/ParticipantForm'
 import { RentalsList } from './RentalsList'
+import { RentalLeaderboard } from './RentalLeaderboard'
 import { ExportRentalsModal, RENTAL_EXPORT_FIELDS } from './ExportRentalsModal'
 
 interface RentalsManagerProps {
@@ -31,6 +32,7 @@ export function RentalsManager({
   const [search, setSearch] = useState('')
   const [showExportModal, setShowExportModal] = useState(false)
   const [allRentals, setAllRentals] = useState<any[]>([])
+  const [viewMode, setViewMode] = useState<'LIST' | 'LEADERBOARD'>('LIST')
 
   const exportFilters = useMemo(() => {
     const agencies = Array.from(
@@ -244,6 +246,33 @@ export function RentalsManager({
           
           <div className="flex flex-wrap gap-2">
             {userRole === 'ADMIN' && (
+              <div className="flex bg-gray-100 p-1 rounded-lg mr-2">
+                <button
+                  onClick={() => setViewMode('LIST')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    viewMode === 'LIST'
+                      ? 'bg-white text-gray-900 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  <List className="w-4 h-4" />
+                  Lista
+                </button>
+                <button
+                  onClick={() => setViewMode('LEADERBOARD')}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                    viewMode === 'LEADERBOARD'
+                      ? 'bg-white text-blue-600 shadow-sm'
+                      : 'text-gray-500 hover:text-gray-900'
+                  }`}
+                >
+                  <Award className="w-4 h-4" />
+                  Classifica
+                </button>
+              </div>
+            )}
+
+            {userRole === 'ADMIN' && (
               <button
                 onClick={() => setShowExportModal(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-white text-gray-800 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors shadow-sm text-sm font-medium"
@@ -262,31 +291,37 @@ export function RentalsManager({
           </div>
         </div>
 
-        <div className="flex items-center gap-2 max-w-md">
-          <div className="relative flex-1">
-            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value)
-              }}
-              placeholder="Cerca nei noleggi per contenuto delle note..."
-              className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-            />
+        {viewMode === 'LIST' && (
+          <div className="flex items-center gap-2 max-w-md">
+            <div className="relative flex-1">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value)
+                }}
+                placeholder="Cerca nei noleggi per contenuto delle note..."
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
           </div>
-        </div>
+        )}
       </div>
 
-      <RentalsList 
-        currentUserId={currentUserId}
-        userRole={userRole}
-        refreshTrigger={refreshTrigger}
-        search={search}
-        onLoaded={handleRentalsLoaded}
-        onEdit={(p) => setEditingParticipant(p)}
-        onUpdate={() => setRefreshTrigger(prev => prev + 1)}
-      />
+      {viewMode === 'LIST' ? (
+        <RentalsList 
+          currentUserId={currentUserId}
+          userRole={userRole}
+          refreshTrigger={refreshTrigger}
+          search={search}
+          onLoaded={handleRentalsLoaded}
+          onEdit={(p) => setEditingParticipant(p)}
+          onUpdate={() => setRefreshTrigger(prev => prev + 1)}
+        />
+      ) : (
+        <RentalLeaderboard userRole={userRole} />
+      )}
 
       {(isAdding || editingParticipant) && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">

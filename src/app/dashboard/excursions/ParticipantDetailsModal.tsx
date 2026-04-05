@@ -33,6 +33,8 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
     if (excursion) {
       // Determina se è un trasferimento controllando se il partecipante ha un transferId o se l'oggetto excursion ha campi da trasferimento
       const isTransfer = participant.transferId || 'pickupLocation' in excursion
+      const transferStatus = (participant as any)?.transfer?.approvalStatus ?? (participant as any)?.transferApprovalStatus
+      const pendingApproval = transferStatus ? transferStatus !== 'APPROVED' : false
 
       const eventData = isTransfer ? {
         type: 'TRANSFER',
@@ -43,7 +45,8 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
         pickupTime: participant.pickupTime,
         returnDate: participant.returnDate,
         returnTime: participant.returnTime,
-        returnPickupLocation: participant.returnPickupLocation
+        returnPickupLocation: participant.returnPickupLocation,
+        pendingApproval
       } : {
         type: 'EXCURSION',
         name: excursion.name,
@@ -237,16 +240,6 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
             <h3 className="text-sm font-bold text-gray-700 uppercase tracking-wider mb-4">Altre Info</h3>
             
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-               <div className="flex items-start gap-3">
-                <UserCheck className="w-5 h-5 text-gray-400 mt-0.5" />
-                <div>
-                  <p className="text-sm text-gray-500">Inserito da</p>
-                  <p className="font-medium text-gray-900">
-                    {participant.createdBy ? `${participant.createdBy.firstName} ${participant.createdBy.lastName} (${participant.createdBy.code})` : '-'}
-                  </p>
-                </div>
-              </div>
-
               <div className="bg-yellow-50 p-4 rounded-xl">
                 <p className="text-sm text-yellow-800 font-medium mb-1">Note</p>
                 <p className="text-sm text-yellow-700 italic">

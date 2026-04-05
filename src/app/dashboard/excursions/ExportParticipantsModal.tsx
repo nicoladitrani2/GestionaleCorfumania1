@@ -19,7 +19,6 @@ export const EXPORT_FIELDS = [
   { id: 'paymentType', label: 'Stato Pagamento' },
   { id: 'paymentMethod', label: 'Metodi di Pagamento' },
   { id: 'notes', label: 'Note' },
-  { id: 'createdBy', label: 'Inserito da' },
   { id: 'supplier', label: 'Fornitore' },
   { id: 'returnDetails', label: 'Dettagli Ritorno' },
   { id: 'createdAt', label: 'Data Inserimento' }

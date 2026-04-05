@@ -44,7 +44,7 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
     isOpen: boolean
     title: string
     message: string
-    variant: 'success' | 'error' | 'info' | 'warning'
+    variant: 'success' | 'danger' | 'info' | 'warning'
   }>({
     isOpen: false,
     title: '',
@@ -93,7 +93,7 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
               isOpen: true,
               title: 'Errore',
               message: 'Errore durante l\'eliminazione dell\'utente',
-              variant: 'error'
+              variant: 'danger'
             })
           }
         } catch (error) {
@@ -102,7 +102,7 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
             isOpen: true,
             title: 'Errore',
             message: 'Errore di rete',
-            variant: 'error'
+            variant: 'danger'
           })
         }
       }

@@ -1,8 +1,9 @@
 import { useState, useEffect, Fragment } from 'react'
-import { User, Users, CheckCircle, Clock, DollarSign, Search, Filter, ChevronDown, ChevronUp, UserCheck, Wallet, Calendar, Trash2, FileDown, Plus } from 'lucide-react'
+import { User, Users, CheckCircle, Clock, DollarSign, Search, Filter, ChevronDown, ChevronUp, UserCheck, Wallet, Calendar, Trash2, FileDown, Plus, RotateCcw } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { ManualTaxBookingModal } from './ManualTaxBookingModal'
+import { ExportTaxBookingsModal, TAX_EXPORT_FIELDS, type ExportTaxBookingsFormat, type ExportTaxBookingsOptions } from './ExportTaxBookingsModal'
 import { ConfirmationModal } from '../../components/ConfirmationModal'
 import { AlertModal } from '../../components/AlertModal'
 
@@ -14,7 +15,7 @@ interface TaxBooking {
   serviceCode: number
   pax: number
   leadName: string
-  room: string
+  room: string | null
   totalAmount: number
   assignedToId: string | null
   assignedTo?: {
@@ -24,6 +25,8 @@ interface TaxBooking {
   }
   customerPaid: boolean
   adminPaid: boolean
+  depositStatus?: string
+  depositProcessedAt?: string | null
   rawData: string
 }
 
@@ -37,6 +40,11 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
   const [bookings, setBookings] = useState<TaxBooking[]>([])
   const [loading, setLoading] = useState(true)
   const [assistants, setAssistants] = useState<any[]>([])
+  const [lastImport, setLastImport] = useState<{ id: string; fileName: string | null; createdAt: string } | null>(null)
+  const [exportModalOpen, setExportModalOpen] = useState(false)
+  const [exportModalList, setExportModalList] = useState<TaxBooking[]>([])
+  const [exportModalTitle, setExportModalTitle] = useState('Tasse & Non Commissionabile')
+  const [exportModalDefaultFormat, setExportModalDefaultFormat] = useState<ExportTaxBookingsFormat>('PDF')
   const [expandedRow, setExpandedRow] = useState<string | null>(null)
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean
@@ -73,6 +81,50 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
       }
   }
 
+  const getRaw = (booking: TaxBooking) => {
+    try {
+      return JSON.parse(booking.rawData || '{}') || {}
+    } catch {
+      return {}
+    }
+  }
+
+  const parseDdMm = (s: string): Date | null => {
+    const t = String(s || '').trim()
+    if (!t) return null
+    const parts = t.split('/')
+    if (parts.length === 3) {
+      const d = parseInt(parts[0], 10)
+      const m = parseInt(parts[1], 10)
+      const y = parseInt(parts[2], 10)
+      const dt = new Date(y, m - 1, d)
+      return isNaN(dt.getTime()) ? null : dt
+    }
+    if (parts.length === 2) {
+      const d = parseInt(parts[0], 10)
+      const m = parseInt(parts[1], 10)
+      const y = new Date().getFullYear()
+      const dt = new Date(y, m - 1, d)
+      return isNaN(dt.getTime()) ? null : dt
+    }
+    const dt = new Date(t)
+    return isNaN(dt.getTime()) ? null : dt
+  }
+
+  const getOutDate = (booking: TaxBooking): Date | null => {
+    const raw = getRaw(booking)
+    if (raw.outDate) return parseDdMm(String(raw.outDate))
+    return null
+  }
+
+  const isEnded = (booking: TaxBooking) => {
+    const out = getOutDate(booking)
+    if (!out) return false
+    const today = new Date()
+    const start = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+    return out.getTime() < start.getTime()
+  }
+
   // Filters
   const [selectedWeek, setSelectedWeek] = useState<string>('')
   const [weeks, setWeeks] = useState<string[]>([])
@@ -85,6 +137,210 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
   const [selectedAssistantFilter, setSelectedAssistantFilter] = useState<string>('')
   const [showManualModal, setShowManualModal] = useState(false)
 
+  const getServiceLabel = (code: number) => {
+    if (code === 1) return 'BRACCIALETTO'
+    if (code === 2) return 'TASSA_SOGGIORNO'
+    if (code === 3) return 'BRACCIALETTO+TASSA'
+    if (code === 4) return 'CAUZIONE'
+    return String(code)
+  }
+
+  const safeJson = (raw: string): Record<string, unknown> => {
+    try {
+      const parsed = JSON.parse(raw || '{}')
+      if (parsed && typeof parsed === 'object') return parsed as Record<string, unknown>
+      return {}
+    } catch {
+      return {}
+    }
+  }
+
+  const getAmounts = (b: TaxBooking) => {
+    const raw = safeJson(b.rawData || '{}')
+    const braceletCost = Number(raw.braceletCost ?? 0)
+    const cityTaxCost = Number(raw.cityTaxCost ?? 0)
+
+    if (b.serviceCode === 4) {
+      return { bracelet: 0, cityTax: 0, deposit: b.totalAmount, total: b.totalAmount }
+    }
+
+    if (b.serviceCode === 2) {
+      return { bracelet: 0, cityTax: b.totalAmount, deposit: 0, total: b.totalAmount }
+    }
+
+    if (b.serviceCode === 3) {
+      const cityTax = cityTaxCost > 0 ? cityTaxCost : 0
+      const bracelet = braceletCost > 0 ? braceletCost : Math.max(0, b.totalAmount - cityTax)
+      return { bracelet, cityTax, deposit: 0, total: b.totalAmount }
+    }
+
+    return { bracelet: b.totalAmount, cityTax: 0, deposit: 0, total: b.totalAmount }
+  }
+
+  const getReportMeta = (b: TaxBooking) => {
+    const raw = safeJson(b.rawData || '{}')
+    const hotel = typeof raw.hotel === 'string' ? raw.hotel : ''
+    const inDate = typeof raw.inDate === 'string' ? raw.inDate : ''
+    const outDate = typeof raw.outDate === 'string' ? raw.outDate : ''
+    const agencyName = typeof raw.agencyName === 'string' ? raw.agencyName : ''
+    return { hotel, inDate, outDate, agencyName }
+  }
+
+  const buildCsv = (rows: string[][]) => {
+    const escape = (v: string) => `"${String(v ?? '').replace(/"/g, '""')}"`
+    return rows.map(r => r.map(escape).join(',')).join('\r\n')
+  }
+
+  const downloadFile = (content: string, fileName: string, mime: string) => {
+    const blob = new Blob([content], { type: mime })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const labelMap = (() => {
+    const m = new Map<string, string>()
+    for (const f of TAX_EXPORT_FIELDS) m.set(f.id, f.label)
+    return m
+  })()
+
+  const buildFiltersLine = () => {
+    return [
+      selectedWeek ? `Settimana=${selectedWeek}` : null,
+      serviceTypeFilter ? `Servizio=${getServiceLabel(Number(serviceTypeFilter))}` : null,
+      provenienzaFilter ? `Prov=${provenienzaFilter}` : null,
+      selectedAssistantFilter ? `Assistente=${selectedAssistantFilter}` : null,
+      searchTerm ? `Cerca="${searchTerm}"` : null,
+    ].filter(Boolean).join(' | ')
+  }
+
+  const getExportValues = (b: TaxBooking, forCsv: boolean) => {
+    const amounts = getAmounts(b)
+    const meta = getReportMeta(b)
+    const status = b.serviceCode === 4 ? String(b.depositStatus || 'PENDING').toUpperCase() : ''
+
+    const depositIn = b.serviceCode === 4 ? (b.totalAmount || 0) : 0
+    const depositOut = b.serviceCode === 4 && status === 'RETURNED' ? (b.totalAmount || 0) : 0
+    const depositNet = depositIn - depositOut
+
+    const assistantName = b.assignedTo ? `${b.assignedTo.firstName || ''} ${b.assignedTo.lastName || ''}`.trim() : ''
+
+    return {
+      section: b.serviceCode === 4 ? 'CAUZIONI' : 'SERVIZI',
+      week: b.week,
+      nFile: b.nFile,
+      provenienza: b.provenienza,
+      service: getServiceLabel(b.serviceCode),
+      pax: String(b.pax),
+      leadName: b.leadName,
+      agencyName: meta.agencyName || '',
+      hotel: meta.hotel || '',
+      inDate: meta.inDate || '',
+      outDate: meta.outDate || '',
+      bracelet: forCsv ? amounts.bracelet.toFixed(2) : `€ ${amounts.bracelet.toFixed(2)}`,
+      cityTax: forCsv ? amounts.cityTax.toFixed(2) : `€ ${amounts.cityTax.toFixed(2)}`,
+      total: forCsv ? b.totalAmount.toFixed(2) : `€ ${b.totalAmount.toFixed(2)}`,
+      depositIn: forCsv ? depositIn.toFixed(2) : `€ ${depositIn.toFixed(2)}`,
+      depositOut: forCsv ? depositOut.toFixed(2) : `€ ${depositOut.toFixed(2)}`,
+      depositNet: forCsv ? depositNet.toFixed(2) : `€ ${depositNet.toFixed(2)}`,
+      depositStatus: status,
+      assistant: assistantName || (forCsv ? '' : 'Non assegnato'),
+      customerPaid: forCsv ? (b.customerPaid ? '1' : '0') : (b.customerPaid ? 'SI' : 'NO'),
+      adminPaid: forCsv ? (b.adminPaid ? '1' : '0') : (b.adminPaid ? 'SI' : 'NO'),
+    }
+  }
+
+  const exportWithOptions = (list: TaxBooking[], title: string, options: ExportTaxBookingsOptions) => {
+    const fields = options.fields
+    const filtersLine = buildFiltersLine()
+
+    const services = options.includeServices ? list.filter(b => b.serviceCode !== 4) : []
+    const deposits = options.includeDeposits ? list.filter(b => b.serviceCode === 4) : []
+
+    if (options.format === 'CSV') {
+      const header = fields.map(f => labelMap.get(f) || f)
+      const rows: string[][] = [header]
+
+      const pushRows = (items: TaxBooking[]) => {
+        for (const b of items) {
+          const v = getExportValues(b, true) as any
+          rows.push(fields.map(f => String(v[f] ?? '')))
+        }
+      }
+
+      pushRows(services)
+      pushRows(deposits)
+
+      const csv = buildCsv(rows)
+      downloadFile(csv, `${title.toLowerCase().replace(/\s+/g, '_')}.csv`, 'text/csv;charset=utf-8')
+      return
+    }
+
+    const doc = new jsPDF()
+    doc.text(title, 14, 20)
+    doc.setFontSize(10)
+    doc.text(`Generato il: ${new Date().toLocaleDateString()}`, 14, 25)
+    if (filtersLine) {
+      doc.setFontSize(9)
+      doc.text(`Filtri: ${filtersLine}`, 14, 29)
+    }
+
+    const head = [fields.map(f => labelMap.get(f) || f)]
+
+    const makeBody = (items: TaxBooking[]) => {
+      return items.map(b => {
+        const v = getExportValues(b, false) as any
+        return fields.map(f => String(v[f] ?? '-'))
+      })
+    }
+
+    let startY = filtersLine ? 34 : 30
+
+    if (services.length > 0) {
+      autoTable(doc, {
+        head,
+        body: makeBody(services),
+        startY,
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [30, 30, 30] },
+      })
+      startY = ((doc as any).lastAutoTable?.finalY || startY) + 10
+    }
+
+    if (deposits.length > 0) {
+      const depositIn = deposits.reduce((acc, b) => acc + (b.totalAmount || 0), 0)
+      const depositOut = deposits.reduce((acc, b) => {
+        const status = String(b.depositStatus || 'PENDING').toUpperCase()
+        return acc + (status === 'RETURNED' ? (b.totalAmount || 0) : 0)
+      }, 0)
+      const depositNet = depositIn - depositOut
+
+      doc.setFontSize(11)
+      doc.text('Cauzioni (sezione separata)', 14, startY)
+      doc.setFontSize(9)
+      doc.text(
+        `Entrate: € ${depositIn.toFixed(2)}  |  Uscite (restituite): € ${depositOut.toFixed(2)}  |  Netto: € ${depositNet.toFixed(2)}`,
+        14,
+        startY + 5
+      )
+
+      autoTable(doc, {
+        head,
+        body: makeBody(deposits),
+        startY: startY + 10,
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [235, 255, 245], textColor: [10, 80, 50] },
+      })
+    }
+
+    doc.save(`${title.toLowerCase().replace(/\s+/g, '_')}.pdf`)
+  }
+
   const handleExportPDF = (list: TaxBooking[], title: string) => {
     const doc = new jsPDF()
     
@@ -92,31 +348,211 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
     doc.setFontSize(10)
     doc.text(`Generato il: ${new Date().toLocaleDateString()}`, 14, 25)
 
-    const tableData = list.map(b => [
-        b.nFile,
-        b.week,
-        b.leadName,
-        `${b.pax} pax`,
-        `€ ${b.totalAmount.toFixed(2)}`,
-        b.assignedTo ? `${b.assignedTo.firstName} ${b.assignedTo.lastName}` : 'Non assegnato',
-        b.customerPaid ? 'PAGATO' : 'DA PAGARE'
-    ])
+    const filtersLine = [
+      selectedWeek ? `Settimana=${selectedWeek}` : null,
+      serviceTypeFilter ? `Servizio=${getServiceLabel(Number(serviceTypeFilter))}` : null,
+      provenienzaFilter ? `Prov=${provenienzaFilter}` : null,
+      selectedAssistantFilter ? `Assistente=${selectedAssistantFilter}` : null,
+      searchTerm ? `Cerca="${searchTerm}"` : null,
+    ].filter(Boolean).join(' | ')
 
-    autoTable(doc, {
-        head: [['N File', 'Settimana', 'Cliente', 'Pax', 'Importo', 'Assistente', 'Stato']],
-        body: tableData,
-        startY: 30,
+    if (filtersLine) {
+      doc.setFontSize(9)
+      doc.text(`Filtri: ${filtersLine}`, 14, 29)
+    }
+
+    const nonDeposits = list.filter(b => b.serviceCode !== 4)
+    const deposits = list.filter(b => b.serviceCode === 4)
+
+    const tableData = nonDeposits.map(b => {
+      const amounts = getAmounts(b)
+      const meta = getReportMeta(b)
+      return [
+        b.week,
+        b.nFile,
+        b.provenienza,
+        getServiceLabel(b.serviceCode),
+        String(b.pax),
+        b.leadName,
+        meta.agencyName || '-',
+        meta.hotel || '-',
+        meta.inDate || '-',
+        meta.outDate || '-',
+        `€ ${amounts.bracelet.toFixed(2)}`,
+        `€ ${amounts.cityTax.toFixed(2)}`,
+        `€ ${b.totalAmount.toFixed(2)}`,
+        b.assignedTo ? `${b.assignedTo.firstName || ''} ${b.assignedTo.lastName || ''}`.trim() : 'Non assegnato',
+        b.customerPaid ? 'INCASSATO' : 'DA INCASSARE',
+        b.adminPaid ? 'VERSATO' : 'NON VERSATO',
+      ]
     })
 
+    autoTable(doc, {
+        head: [[
+          'Settimana',
+          'N File',
+          'Prov',
+          'Servizio',
+          'Pax',
+          'Capogruppo',
+          'Agenzia',
+          'Hotel',
+          'IN',
+          'OUT',
+          'Bracc',
+          'Tassa',
+          'Tot',
+          'Assistente',
+          'Incasso',
+          'Versato Admin',
+        ]],
+        body: tableData,
+        startY: filtersLine ? 34 : 30,
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [240, 240, 240], textColor: [30, 30, 30] },
+    })
+
+    if (deposits.length > 0) {
+      const depositIn = deposits.reduce((acc, b) => acc + (b.totalAmount || 0), 0)
+      const depositOut = deposits.reduce((acc, b) => {
+        const status = (b.depositStatus || 'PENDING').toUpperCase()
+        return acc + (status === 'RETURNED' ? (b.totalAmount || 0) : 0)
+      }, 0)
+      const depositNet = depositIn - depositOut
+
+      const startY = ((doc as any).lastAutoTable?.finalY || (filtersLine ? 34 : 30)) + 10
+      doc.setFontSize(11)
+      doc.text('Cauzioni (sezione separata)', 14, startY)
+      doc.setFontSize(9)
+      doc.text(
+        `Entrate: € ${depositIn.toFixed(2)}  |  Uscite (restituite): € ${depositOut.toFixed(2)}  |  Netto: € ${depositNet.toFixed(2)}`,
+        14,
+        startY + 5
+      )
+
+      const depositRows = deposits.map(b => {
+        const meta = getReportMeta(b)
+        const status = (b.depositStatus || 'PENDING').toUpperCase()
+        const entrata = b.totalAmount || 0
+        const uscita = status === 'RETURNED' ? entrata : 0
+        const netto = entrata - uscita
+        return [
+          b.week,
+          b.nFile,
+          b.provenienza,
+          String(b.pax),
+          b.leadName,
+          meta.hotel || '-',
+          meta.inDate || '-',
+          meta.outDate || '-',
+          `€ ${entrata.toFixed(2)}`,
+          `€ ${uscita.toFixed(2)}`,
+          `€ ${netto.toFixed(2)}`,
+          status,
+          b.assignedTo ? `${b.assignedTo.firstName || ''} ${b.assignedTo.lastName || ''}`.trim() : 'Non assegnato',
+          b.customerPaid ? 'INCASSATO' : 'DA INCASSARE',
+          b.adminPaid ? 'VERSATO' : 'NON VERSATO',
+        ]
+      })
+
+      autoTable(doc, {
+        head: [[
+          'Settimana',
+          'N File',
+          'Prov',
+          'Pax',
+          'Capogruppo',
+          'Hotel',
+          'IN',
+          'OUT',
+          'Entrata',
+          'Uscita',
+          'Netto',
+          'Esito',
+          'Assistente',
+          'Incasso',
+          'Versato Admin',
+        ]],
+        body: depositRows,
+        startY: startY + 10,
+        styles: { fontSize: 7 },
+        headStyles: { fillColor: [235, 255, 245], textColor: [10, 80, 50] },
+      })
+    }
+
     doc.save(`${title.toLowerCase().replace(/\s+/g, '_')}.pdf`)
+  }
+
+  const handleExportFilteredPDF = () => {
+    setExportModalList(allVisible)
+    setExportModalTitle('Tasse & Non Commissionabile (Filtri)')
+    setExportModalDefaultFormat('PDF')
+    setExportModalOpen(true)
+  }
+
+  const handleExportFilteredCSV = () => {
+    setExportModalList(allVisible)
+    setExportModalTitle('Tasse & Non Commissionabile (Filtri)')
+    setExportModalDefaultFormat('CSV')
+    setExportModalOpen(true)
   }
 
   useEffect(() => {
     fetchBookings()
     if (userRole === 'ADMIN') {
         fetchAssistants()
+        fetchLastImport()
     }
   }, [refreshTrigger])
+
+  const fetchLastImport = async () => {
+    try {
+      const res = await fetch('/api/taxes/import-batches')
+      if (!res.ok) return
+      const json = await res.json()
+      const b = json?.batches?.[0]
+      if (b?.id) {
+        setLastImport({ id: String(b.id), fileName: b.fileName ? String(b.fileName) : null, createdAt: String(b.createdAt) })
+      } else {
+        setLastImport(null)
+      }
+    } catch {
+      setLastImport(null)
+    }
+  }
+
+  const handleRollbackLastImport = () => {
+    if (userRole !== 'ADMIN') return
+    setConfirmModal({
+      isOpen: true,
+      title: 'Annulla ultimo import Excel',
+      message: 'Verranno eliminati/ripristinati i dati dell’ultimo file Excel importato. Confermi?',
+      variant: 'warning',
+      onConfirm: async () => {
+        try {
+          const res = await fetch('/api/taxes/import-batches/rollback-last', { method: 'POST' })
+          if (!res.ok) {
+            const t = await res.text()
+            setAlertModal({ isOpen: true, title: 'Errore', message: t || 'Errore durante il rollback', variant: 'danger' })
+            return
+          }
+          const json = await res.json()
+          setAlertModal({
+            isOpen: true,
+            title: 'Operazione completata',
+            message: `Ripristinate: ${json.restored ?? 0}, Eliminate: ${json.deleted ?? 0}`,
+            variant: 'success',
+          })
+          await fetchBookings()
+          await fetchLastImport()
+        } catch {
+          setAlertModal({ isOpen: true, title: 'Errore', message: 'Errore durante il rollback', variant: 'danger' })
+        } finally {
+          setConfirmModal(prev => ({ ...prev, isOpen: false }))
+        }
+      },
+    })
+  }
 
   const handleBulkAssign = async () => {
     if (selectedIds.size === 0) {
@@ -259,6 +695,25 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
       }
   }
 
+  const handleDepositDecision = async (bookingId: string, decision: 'RETURNED' | 'RETAINED') => {
+    try {
+      const res = await fetch('/api/taxes/bookings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: bookingId,
+          action: 'depositStatus',
+          value: decision,
+        }),
+      })
+      if (res.ok) {
+        fetchBookings()
+      }
+    } catch (error) {
+      console.error('Error updating deposit status:', error)
+    }
+  }
+
   const handleDelete = async (bookingId: string) => {
       setConfirmModal({
         isOpen: true,
@@ -350,6 +805,8 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
       return true
   })
 
+  const depositsToClose = baseFiltered.filter(b => b.serviceCode === 4 && isEnded(b) && (b.depositStatus || 'PENDING') === 'PENDING')
+
   const toggleSelectAllUnpaid = () => {
       const allUnpaidSelected = unpaidBookings.length > 0 && unpaidBookings.every(b => selectedIds.has(b.id))
       
@@ -384,6 +841,13 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
       both: {
           pax: allVisible.filter(b => b.serviceCode === 3).reduce((acc, b) => acc + b.pax, 0),
           amount: allVisible.filter(b => b.serviceCode === 3).reduce((acc, b) => acc + b.totalAmount, 0)
+      },
+      deposit: {
+          pax: allVisible.filter(b => b.serviceCode === 4).reduce((acc, b) => acc + b.pax, 0),
+          amount: allVisible.filter(b => b.serviceCode === 4).reduce((acc, b) => acc + b.totalAmount, 0),
+          returned: allVisible.filter(b => b.serviceCode === 4 && (b.depositStatus || 'PENDING') === 'RETURNED').reduce((acc, b) => acc + b.totalAmount, 0),
+          retained: allVisible.filter(b => b.serviceCode === 4 && (b.depositStatus || 'PENDING') === 'RETAINED').reduce((acc, b) => acc + b.totalAmount, 0),
+          pendingClose: depositsToClose.length,
       }
   }
 
@@ -394,6 +858,13 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
       privateAmount: allVisible.filter(b => b.provenienza === 'PRIVATO').reduce((acc, b) => acc + b.totalAmount, 0)
   }
 
+  const openExportModal = (list: TaxBooking[], title: string, format: ExportTaxBookingsFormat) => {
+    setExportModalList(list)
+    setExportModalTitle(title)
+    setExportModalDefaultFormat(format)
+    setExportModalOpen(true)
+  }
+
   const renderTable = (list: TaxBooking[], title: string, isPaidList: boolean) => (
       <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden mb-8">
           <div className="p-4 bg-gray-50 border-b border-gray-200 flex justify-between items-center">
@@ -402,7 +873,7 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
                   {title} ({list.length})
               </h3>
               <button 
-                  onClick={() => handleExportPDF(list, title)}
+                  onClick={() => openExportModal(list, title, 'PDF')}
                   className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-gray-600 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
               >
                   <FileDown className="w-4 h-4" />
@@ -464,8 +935,10 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
                           <td className="px-6 py-4 text-center">
                               <div className="font-medium">{booking.pax} Pax</div>
                               <div className="text-xs text-gray-500 mt-1">
-                                  {booking.serviceCode === 1 ? 'Solo Braccialetto' : 
-                                   booking.serviceCode === 2 ? 'Solo Tassa' : 'Braccialetto + Tassa'}
+                                  {booking.serviceCode === 1 ? 'Solo Braccialetto' :
+                                   booking.serviceCode === 2 ? 'Tassa di Soggiorno' :
+                                   booking.serviceCode === 3 ? 'Braccialetto + Tassa' :
+                                   'Cauzione'}
                               </div>
                           </td>
                           <td className="px-6 py-4 text-right font-bold text-gray-900">
@@ -634,6 +1107,7 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
                     <option value="1">Solo Braccialetto</option>
                     <option value="2">Solo Tassa</option>
                     <option value="3">Braccialetto + Tassa</option>
+                    <option value="4">Cauzione</option>
                 </select>
 
                 {userRole === 'ADMIN' && (
@@ -674,15 +1148,41 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
                     </div>
                 )}
 
-                {userRole === 'ADMIN' && (
-                    <button 
+                <div className="ml-auto flex items-center gap-2">
+                  <button
+                    onClick={handleExportFilteredPDF}
+                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm font-medium"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    Esporta PDF (filtri)
+                  </button>
+                  <button
+                    onClick={handleExportFilteredCSV}
+                    className="flex items-center gap-2 px-4 py-2 bg-white text-gray-700 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-sm font-medium"
+                  >
+                    <FileDown className="w-4 h-4" />
+                    Esporta CSV (filtri)
+                  </button>
+                  {userRole === 'ADMIN' && (
+                    <>
+                      <button
+                        onClick={handleRollbackLastImport}
+                        disabled={!lastImport}
+                        className="flex items-center gap-2 px-4 py-2 bg-amber-50 text-amber-800 rounded-lg border border-amber-100 hover:bg-amber-100 transition-colors text-sm font-medium disabled:opacity-50"
+                      >
+                        <RotateCcw className="w-4 h-4" />
+                        Annulla ultimo import
+                      </button>
+                      <button
                         onClick={handleDeleteAll}
-                        className="ml-auto flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-100 hover:bg-red-100 transition-colors text-sm font-medium"
-                    >
+                        className="flex items-center gap-2 px-4 py-2 bg-red-50 text-red-600 rounded-lg border border-red-100 hover:bg-red-100 transition-colors text-sm font-medium"
+                      >
                         <Trash2 className="w-4 h-4" />
                         Elimina Tutte (Non Assegnate)
-                    </button>
-                )}
+                      </button>
+                    </>
+                  )}
+                </div>
             </div>
 
             {/* Batch Assign Bar */}
@@ -745,7 +1245,7 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
             {/* Service Breakdown */}
             <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200 col-span-1 md:col-span-2">
                 <h4 className="text-xs font-bold text-gray-400 uppercase mb-3">Dettaglio Servizi</h4>
-                <div className="grid grid-cols-3 gap-4">
+                <div className="grid grid-cols-4 gap-4">
                     <div className="bg-blue-50 p-2 rounded-lg text-center">
                         <div className="text-xs text-blue-600 font-medium mb-1">Braccialetto</div>
                         <div className="font-bold text-blue-900">{byService.bracelet.pax} pax</div>
@@ -760,6 +1260,13 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
                         <div className="text-xs text-indigo-600 font-medium mb-1">Entrambi</div>
                         <div className="font-bold text-indigo-900">{byService.both.pax} pax</div>
                         <div className="text-xs text-indigo-700">€ {byService.both.amount.toFixed(2)}</div>
+                    </div>
+                    <div className="bg-emerald-50 p-2 rounded-lg text-center">
+                        <div className="text-xs text-emerald-600 font-medium mb-1">Cauzioni</div>
+                        <div className="font-bold text-emerald-900">€ {byService.deposit.amount.toFixed(2)}</div>
+                        <div className="text-[10px] text-emerald-700 mt-1">
+                          Da chiudere: {byService.deposit.pendingClose}
+                        </div>
                     </div>
                 </div>
             </div>
@@ -788,9 +1295,87 @@ export function TaxBookingsList({ currentUserId, userRole, refreshTrigger = 0 }:
             </div>
         </div>
 
+        {depositsToClose.length > 0 && (
+          <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+            <div className="p-4 bg-amber-50 border-b border-amber-100 flex justify-between items-center">
+              <h3 className="font-bold text-lg flex items-center gap-2 text-amber-800">
+                <Clock className="w-5 h-5" />
+                Cauzioni - Prenotazioni terminate (da chiudere) ({depositsToClose.length})
+              </h3>
+            </div>
+            <table className="w-full text-left text-sm">
+              <thead className="bg-gray-50 text-gray-500 uppercase text-xs font-semibold">
+                <tr>
+                  <th className="px-6 py-4">N File / Settimana</th>
+                  <th className="px-6 py-4">Cliente</th>
+                  <th className="px-6 py-4 text-center">Data OUT</th>
+                  <th className="px-6 py-4 text-right">Importo</th>
+                  <th className="px-6 py-4 text-center">Esito</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {depositsToClose.map(b => {
+                  const out = getOutDate(b)
+                  return (
+                    <tr key={b.id} className="hover:bg-gray-50 transition-colors">
+                      <td className="px-6 py-4">
+                        <div className="font-mono font-medium text-gray-900">{b.nFile}</div>
+                        <div className="text-xs text-gray-500 flex items-center gap-1">
+                          <Calendar className="w-3 h-3" /> {b.week}
+                        </div>
+                      </td>
+                      <td className="px-6 py-4">
+                        <div className="font-bold text-gray-900">{b.leadName}</div>
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium mt-1 ${
+                          b.provenienza === 'AGENZIA' ? 'bg-orange-100 text-orange-800' : 'bg-purple-100 text-purple-800'
+                        }`}>
+                          {b.provenienza}
+                        </span>
+                      </td>
+                      <td className="px-6 py-4 text-center">
+                        <span className="text-sm text-gray-700">{out ? out.toLocaleDateString('it-IT') : '-'}</span>
+                      </td>
+                      <td className="px-6 py-4 text-right font-bold text-gray-900">€ {b.totalAmount.toFixed(2)}</td>
+                      <td className="px-6 py-4 text-center">
+                        {userRole === 'ADMIN' ? (
+                          <div className="flex items-center justify-center gap-2">
+                            <button
+                              onClick={() => handleDepositDecision(b.id, 'RETURNED')}
+                              className="px-3 py-1 rounded-lg bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700"
+                            >
+                              Restituita
+                            </button>
+                            <button
+                              onClick={() => handleDepositDecision(b.id, 'RETAINED')}
+                              className="px-3 py-1 rounded-lg bg-red-600 text-white text-xs font-bold hover:bg-red-700"
+                            >
+                              Non restituita
+                            </button>
+                          </div>
+                        ) : (
+                          <span className="text-xs text-gray-500">Solo admin</span>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
         {/* Lists */}
         {renderTable(unpaidBookings, "Da Pagare", false)}
         {renderTable(paidBookings, "Pagati", true)}
+
+        {exportModalOpen && (
+          <ExportTaxBookingsModal
+            title={`Esporta: ${exportModalTitle}`}
+            defaultFormat={exportModalDefaultFormat}
+            onClose={() => setExportModalOpen(false)}
+            onExport={(options: ExportTaxBookingsOptions) => exportWithOptions(exportModalList, exportModalTitle, options)}
+          />
+        )}
 
         {showManualModal && (
             <ManualTaxBookingModal 

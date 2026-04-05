@@ -8,6 +8,7 @@ interface PendingTransfer {
   id: string
   name: string
   date: string
+  confirmationDeadline?: string | null
 }
 
 export function PendingTransfersWidget() {
@@ -20,12 +21,27 @@ export function PendingTransfersWidget() {
         const res = await fetch('/api/transfers?pending=true')
         if (res.ok) {
           const data = await res.json()
+          const now = new Date()
+          const todayStart = new Date(now)
+          todayStart.setHours(0, 0, 0, 0)
+
           const mapped = (data || []).map((t: any) => ({
             id: t.id,
             name: t.name,
-            date: t.date
+            date: t.date,
+            confirmationDeadline: t.confirmationDeadline ?? null
           }))
-          setItems(mapped)
+          const filtered = mapped.filter((t: PendingTransfer) => {
+            const transferDate = new Date(t.date)
+            if (transferDate < todayStart) return false
+            if (t.confirmationDeadline) {
+              const deadline = new Date(t.confirmationDeadline)
+              if (deadline < now) return false
+            }
+            return true
+          })
+
+          setItems(filtered)
         }
       } catch (e) {
         setItems([])
@@ -97,4 +113,3 @@ export function PendingTransfersWidget() {
     </div>
   )
 }
-

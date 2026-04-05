@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, BedDouble } from 'lucide-react'
+import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, Euro, Eye, RotateCcw, BedDouble } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { generateParticipantPDF, generateParticipantsListPDF } from '@/lib/pdf-generator'
@@ -9,8 +9,8 @@ import { ParticipantDetailsModal } from '../../excursions/ParticipantDetailsModa
 import { RefundModal } from '../../excursions/RefundModal'
 import { DeleteChoiceModal } from '../../excursions/DeleteChoiceModal'
 import { ExportParticipantsModal } from '../../excursions/ExportParticipantsModal'
-import { ConfirmationModal } from '../../../components/ConfirmationModal'
-import { AlertModal } from '../../../components/AlertModal'
+import { ConfirmationModal } from '../../components/ConfirmationModal'
+import { AlertModal } from '../../components/AlertModal'
 import { TaxParticipantForm } from './TaxParticipantForm'
 
 // --- Helpers ---
@@ -106,11 +106,6 @@ const TaxParticipantsTable = ({
             </th>
             <th className={thClassName}>
               <div className="flex items-center gap-2">
-                <BadgeCheck className="w-4 h-4" /> Inserito da
-              </div>
-            </th>
-            <th className={thClassName}>
-              <div className="flex items-center gap-2">
                 <FileText className="w-4 h-4" /> Documento
               </div>
             </th>
@@ -157,12 +152,6 @@ const TaxParticipantsTable = ({
                     </td>
                 )}
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{p.nationality}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                  <div className="flex flex-col">
-                    <span className="font-medium text-gray-900">{p.createdBy?.code || '-'}</span>
-                    <span className="text-xs text-gray-500">{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
-                  </div>
-                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                   <div className="flex flex-col">
                     <span className="font-medium text-gray-700">{p.docNumber}</span>
@@ -271,10 +260,6 @@ const TaxParticipantsTable = ({
             </div>
 
             <div className="grid grid-cols-2 gap-2 text-sm text-gray-600">
-              <div className="flex flex-col">
-                 <span className="text-xs text-gray-400">Inserito da</span>
-                 <span>{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
-              </div>
               <div className="flex flex-col">
                  <span className="text-xs text-gray-400">Prezzo</span>
                  <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
@@ -435,14 +420,12 @@ export function TaxParticipantsList({
     setShowRefund(true)
   }
 
-  const executeRefund = async (amount: number, reason: string) => {
-    if (!participantToRefund) return
-
+  const executeRefund = async (participantId: string, amount: number, method: string, notes: string) => {
     try {
-      const res = await fetch(`/api/participants/${participantToRefund.id}/refund`, {
+      const res = await fetch(`/api/participants/${participantId}/refund`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ amount, reason })
+        body: JSON.stringify({ refundAmount: amount, refundMethod: method, notes })
       })
 
       if (res.ok) {
@@ -498,7 +481,6 @@ export function TaxParticipantsList({
         if (selectedFields.includes('paymentType')) row.push(getStatusText(p))
         if (selectedFields.includes('paymentMethod')) row.push(p.paymentMethod || '-')
         if (selectedFields.includes('notes')) row.push(p.notes || '-')
-        if (selectedFields.includes('createdBy')) row.push(`${p.createdBy?.firstName} ${p.createdBy?.lastName}`)
         if (selectedFields.includes('supplier')) row.push('-')
         if (selectedFields.includes('returnDetails')) row.push('-')
         if (selectedFields.includes('createdAt')) row.push(new Date(p.createdAt).toLocaleDateString('it-IT'))
@@ -519,7 +501,6 @@ export function TaxParticipantsList({
     if (selectedFields.includes('paymentType')) tableHead.push('Stato')
     if (selectedFields.includes('paymentMethod')) tableHead.push('Metodo')
     if (selectedFields.includes('notes')) tableHead.push('Note')
-    if (selectedFields.includes('createdBy')) tableHead.push('Inserito da')
     if (selectedFields.includes('supplier')) tableHead.push('Fornitore')
     if (selectedFields.includes('returnDetails')) tableHead.push('Ritorno')
     if (selectedFields.includes('createdAt')) tableHead.push('Data')
@@ -619,8 +600,7 @@ export function TaxParticipantsList({
           setParticipantToRefund(null)
         }}
         onConfirm={executeRefund}
-        participantName={participantToRefund ? `${participantToRefund.firstName} ${participantToRefund.lastName}` : ''}
-        totalPaid={participantToRefund?.price || 0}
+        participant={participantToRefund}
       />
 
       <DeleteChoiceModal 
@@ -630,7 +610,7 @@ export function TaxParticipantsList({
             setParticipantToDelete(null)
         }}
         onConfirmDelete={executeDelete}
-        onConfirmRefund={() => {
+        onRequestRefund={() => {
             setShowDeleteChoice(false)
             handleRefund(participantToDelete)
         }}

@@ -17,6 +17,8 @@ interface ParticipantFormProps {
   excursionEndDate?: string | Date | null
   transferName?: string
   transferDate?: string | Date
+  transferEndDate?: string | Date | null
+  transferApprovalStatus?: string
   type?: 'EXCURSION' | 'TRANSFER' | 'RENTAL'
   defaultValues?: {
     pickupLocation?: string
@@ -37,6 +39,7 @@ interface ParticipantFormProps {
   excursionTransferTime?: string
   agencyDefaultCommission?: number
   agencyCommissionType?: string
+  maxParticipants?: number
 }
 
 const NATIONALITIES = [
@@ -77,6 +80,7 @@ export function ParticipantForm({
   excursionEndDate,
   transferName,
   transferDate,
+  transferApprovalStatus,
   type = 'EXCURSION',
   defaultValues,
   userRole,
@@ -88,11 +92,9 @@ export function ParticipantForm({
   excursionTransferDestinationLocation,
   excursionTransferTime,
   agencyDefaultCommission = 0,
-  agencyCommissionType = 'PERCENTAGE'
+  agencyCommissionType = 'PERCENTAGE',
+  maxParticipants
 }: ParticipantFormProps) {
-  // Debug log per verificare il deploy su Vercel
-  console.log('ParticipantForm init:', { userRole, userAgencyId, agencyDefaultCommission, agencyCommissionType })
-
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -132,17 +134,24 @@ export function ParticipantForm({
     insurancePrice: initialData?.insurancePrice || 0,
     supplementPrice: initialData?.supplementPrice || 0,
     assistantCommission: initialData?.assistantCommission ?? agencyDefaultCommission,
-    assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType
+    assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType,
+    agencyId: initialData?.agencyId || userAgencyId || ''
   })
   const [customNationality, setCustomNationality] = useState('')
   const [error, setError] = useState('')
   const [depositError, setDepositError] = useState('')
+  const [rentalCostsError, setRentalCostsError] = useState('')
   const [loading, setLoading] = useState(false)
   const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
   const [requestReturn, setRequestReturn] = useState(
     !!(initialData?.returnDate || defaultValues?.returnDate)
   )
-  const [assistants, setAssistants] = useState<any[]>([])
+  const [agencies, setAgencies] = useState<{ id: string, name: string, commissionType?: string, defaultCommission?: number }[]>([])
+  const currentParticipantId = initialData?.id as string | undefined
+  const [capacityInfo, setCapacityInfo] = useState<{ loading: boolean; activePax: number | null }>({
+    loading: false,
+    activePax: null
+  })
 
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean
@@ -156,6 +165,68 @@ export function ParticipantForm({
     message: '',
     variant: 'info'
   })
+
+  useEffect(() => {
+    const fetchAgencies = async () => {
+      try {
+        const res = await fetch('/api/agencies')
+        if (res.ok) {
+          const data = await res.json()
+          if (Array.isArray(data)) {
+            setAgencies(data)
+          }
+        }
+      } catch (e) {
+        console.error('Failed to fetch agencies', e)
+      }
+    }
+    fetchAgencies()
+  }, [])
+
+  useEffect(() => {
+    const shouldCompute = !!(maxParticipants && maxParticipants > 0 && (excursionId || transferId))
+    if (!shouldCompute) {
+      setCapacityInfo({ loading: false, activePax: null })
+      return
+    }
+
+    let cancelled = false
+
+    const compute = async () => {
+      setCapacityInfo(prev => ({ ...prev, loading: true }))
+      try {
+        const params = new URLSearchParams()
+        if (excursionId) params.set('excursionId', excursionId)
+        if (transferId) params.set('transferId', transferId)
+        const res = await fetch(`/api/participants?${params.toString()}`)
+        if (!res.ok) throw new Error('Fetch participants failed')
+        const items = await res.json()
+        const activePax = (items || []).reduce((sum: number, p: any) => {
+          if (currentParticipantId && p?.id === currentParticipantId) return sum
+          const isRejected = p?.approvalStatus === 'REJECTED' || p?.paymentStatus === 'REJECTED'
+          const isRefunded = p?.paymentType === 'REFUNDED' || p?.status === 'REFUNDED'
+          const isActive = !p?.status || p?.status === 'ACTIVE'
+          const isExpired = !!p?.isExpired
+          if (isRejected || isRefunded || !isActive || isExpired) return sum
+          const pax = (p?.adults || 0) + (p?.children || 0) + (p?.infants || 0)
+          return sum + (pax > 0 ? pax : 1)
+        }, 0)
+
+        if (!cancelled) {
+          setCapacityInfo({ loading: false, activePax })
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setCapacityInfo({ loading: false, activePax: null })
+        }
+      }
+    }
+
+    compute()
+    return () => {
+      cancelled = true
+    }
+  }, [maxParticipants, excursionId, transferId, currentParticipantId])
 
   useEffect(() => {
     const fetchSuppliers = async () => {
@@ -202,22 +273,6 @@ export function ParticipantForm({
   }, [initialData, userRole, defaultSupplier])
 
   useEffect(() => {
-    const loadAssistants = async () => {
-      if (userRole !== 'ADMIN') return
-      try {
-        const res = await fetch('/api/users')
-        if (res.ok) {
-          const data = await res.json()
-          setAssistants(Array.isArray(data) ? data : [])
-        }
-      } catch (e) {
-        console.error('Failed to fetch assistants', e)
-      }
-    }
-    loadAssistants()
-  }, [userRole])
-
-  useEffect(() => {
     if (initialData) {
       const isStandard = NATIONALITIES.some(n => n.code === initialData.nationality)
       setFormData({
@@ -253,7 +308,7 @@ export function ParticipantForm({
         returnDate: initialData.returnDate ? new Date(initialData.returnDate).toISOString().split('T')[0] : '',
         returnTime: initialData.returnTime || '',
         
-        rentalType: initialData.rentalType || 'CAR',
+        rentalType: initialData.rentalType === 'CAR_GROSS' ? 'MOTO' : (initialData.rentalType || 'CAR'),
         rentalStartDate: initialData.rentalStartDate ? new Date(initialData.rentalStartDate).toISOString().split('T')[0] : '',
         rentalEndDate: initialData.rentalEndDate ? new Date(initialData.rentalEndDate).toISOString().split('T')[0] : '',
         accommodation: initialData.accommodation || '',
@@ -263,7 +318,8 @@ export function ParticipantForm({
         supplementPrice: (initialData as any).supplementPrice || 0,
         commissionPercentage: (initialData as any).commissionPercentage || 0,
         assistantCommission: (initialData as any).assistantCommission || 0,
-        assistantCommissionType: (initialData as any).assistantCommissionType || 'PERCENTAGE'
+        assistantCommissionType: (initialData as any).assistantCommissionType || 'PERCENTAGE',
+        agencyId: (initialData as any).agencyId || userAgencyId || ''
       })
       if (!isStandard) {
         setCustomNationality(initialData.nationality)
@@ -287,6 +343,51 @@ export function ParticipantForm({
     // Depositi abilitati per Escursioni/Trasferimenti e per Noleggio Auto.
     // Per Moto/Barca il flusso rimane senza acconto (Brokerage).
   }, [formData.deposit, formData.price, formData.isOption, formData.paymentType, type, (formData as any).rentalType])
+
+  useEffect(() => {
+    if (type !== 'RENTAL') {
+      setRentalCostsError('')
+      return
+    }
+    if ((formData as any).rentalType !== 'CAR') {
+      setRentalCostsError('')
+      return
+    }
+
+    const price = parseFloat(String(formData.price)) || 0
+    const tax = parseFloat(String((formData as any).tax)) || 0
+    const insurance = parseFloat(String((formData as any).insurancePrice)) || 0
+    const supplement = parseFloat(String((formData as any).supplementPrice)) || 0
+    const excludedCosts = Math.max(0, tax) + Math.max(0, insurance) + Math.max(0, supplement)
+
+    if (excludedCosts > price + 0.01) {
+      setRentalCostsError('Tasse + assicurazione + supplementi non possono superare il prezzo totale.')
+    } else {
+      setRentalCostsError('')
+    }
+  }, [type, (formData as any).rentalType, formData.price, (formData as any).tax, (formData as any).insurancePrice, (formData as any).supplementPrice])
+
+  useEffect(() => {
+    if (type !== 'RENTAL') return
+    setFormData(prev => {
+      const price = Number(prev.price || 0)
+      const rentalType = String((prev as any).rentalType || '')
+      const isCar = rentalType === 'CAR'
+      const tax = parseFloat(String((prev as any).tax)) || 0
+      const insurance = parseFloat(String((prev as any).insurancePrice)) || 0
+      const supplement = parseFloat(String((prev as any).supplementPrice)) || 0
+      const excludedCosts = isCar ? Math.max(0, tax) + Math.max(0, insurance) + Math.max(0, supplement) : 0
+      const commissionBase = isCar ? Math.max(0, price - excludedCosts) : Math.max(0, price)
+      const deposit = commissionBase * 0.2
+      const roundedDeposit = Math.round(deposit * 100) / 100
+      if (prev.paymentType === 'BALANCE' && Math.abs(Number(prev.deposit || 0) - roundedDeposit) < 0.01) return prev
+      return {
+        ...prev,
+        paymentType: 'BALANCE',
+        deposit: roundedDeposit,
+      }
+    })
+  }, [type, formData.price, (formData as any).rentalType, (formData as any).tax, (formData as any).insurancePrice, (formData as any).supplementPrice])
 
   useEffect(() => {
     if (!initialData && (type === 'EXCURSION' || type === 'TRANSFER') && (priceAdult > 0 || priceChild > 0)) {
@@ -394,6 +495,36 @@ export function ParticipantForm({
     setError('')
     setLoading(true)
 
+    try {
+      if (maxParticipants && maxParticipants > 0 && (excursionId || transferId)) {
+        const params = new URLSearchParams()
+        if (excursionId) params.set('excursionId', excursionId)
+        if (transferId) params.set('transferId', transferId)
+        const res = await fetch(`/api/participants?${params.toString()}`)
+        if (res.ok) {
+          const items = await res.json()
+          const activeCount = items.reduce((sum: number, p: any) => {
+            if (currentParticipantId && p?.id === currentParticipantId) return sum
+            const isRejected = p.approvalStatus === 'REJECTED' || p.paymentStatus === 'REJECTED'
+            const isRefunded = p.paymentType === 'REFUNDED'
+            const isActive = !p.status || p.status === 'ACTIVE'
+            if (isRejected || isRefunded || !isActive) return sum
+            const pax = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
+            return sum + (pax > 0 ? pax : 1)
+          }, 0)
+          const newPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
+          if (activeCount + (newPax || 1) > maxParticipants) {
+            setLoading(false)
+            setError(`Numero massimo di partecipanti raggiunto (${maxParticipants}).`)
+            return
+          }
+        }
+      }
+    } catch (preErr) {
+      console.error('Pre-check max participants failed:', preErr)
+      // Fallback: continue, backend will enforce
+    }
+
     // Transfer requirements for excursions
     if (type === 'EXCURSION' && (formData as any).needsTransfer) {
       const changedPickup = excursionTransferDepartureLocation && formData.pickupLocation && formData.pickupLocation.trim() !== excursionTransferDepartureLocation.trim()
@@ -432,6 +563,18 @@ export function ParticipantForm({
       return
     }
 
+    if (type === 'RENTAL' && (formData as any).rentalType === 'CAR') {
+      const taxVal = parseFloat(String((formData as any).tax)) || 0
+      const insuranceVal = parseFloat(String((formData as any).insurancePrice)) || 0
+      const supplementVal = parseFloat(String((formData as any).supplementPrice)) || 0
+      const excludedCosts = Math.max(0, taxVal) + Math.max(0, insuranceVal) + Math.max(0, supplementVal)
+      if (excludedCosts > priceVal + 0.01) {
+        setError('Tasse + assicurazione + supplementi non possono superare il prezzo totale.')
+        setLoading(false)
+        return
+      }
+    }
+
     // Validation for Boat Rentals
     if (type === 'RENTAL' && (formData as any).rentalType === 'BOAT' && !formData.supplier) {
       setError('Il fornitore è obbligatorio per il noleggio barche.')
@@ -439,17 +582,29 @@ export function ParticipantForm({
       return
     }
 
-    const isManaged = type !== 'RENTAL' || (formData as any).rentalType === 'CAR'
+    const isManaged =
+      type !== 'RENTAL' ||
+      ['CAR', 'MOTO', 'BOAT'].includes(String((formData as any).rentalType || ''))
 
     try {
       // Preparazione dati da inviare
+      const rentalType = String((formData as any).rentalType || '')
+      const isCarRental = type === 'RENTAL' && rentalType === 'CAR'
+      const excludedCostsForCar = isCarRental ? (() => {
+        const taxVal = parseFloat(String((formData as any).tax)) || 0
+        const insuranceVal = parseFloat(String((formData as any).insurancePrice)) || 0
+        const supplementVal = parseFloat(String((formData as any).supplementPrice)) || 0
+        return Math.max(0, taxVal) + Math.max(0, insuranceVal) + Math.max(0, supplementVal)
+      })() : 0
+      const commissionBase = isCarRental ? Math.max(0, priceVal - excludedCostsForCar) : Math.max(0, priceVal)
+      const depositAmount = type === 'RENTAL' ? (commissionBase * 0.2) : (isManaged ? (parseFloat(String(formData.deposit)) || 0) : 0)
       const payload: any = {
         ...formData,
         nationality: formData.nationality === 'OTHER' ? customNationality : formData.nationality,
         price: parseFloat(String(formData.price)) || 0,
-        deposit: isManaged ? (parseFloat(String(formData.deposit)) || 0) : 0,
-        tax: parseFloat(String((formData as any).tax)) || 0,
-        commissionPercentage: parseFloat(String(formData.commissionPercentage)) || 0,
+        deposit: Math.round(Math.max(0, depositAmount) * 100) / 100,
+        tax: type === 'RENTAL' && (formData as any).rentalType === 'CAR' ? (parseFloat(String((formData as any).tax)) || 0) : 0,
+        commissionPercentage: type === 'RENTAL' ? 0 : (parseFloat(String(formData.commissionPercentage)) || 0),
         adults: formData.adults,
         children: formData.children,
         infants: formData.infants,
@@ -460,10 +615,11 @@ export function ParticipantForm({
         rentalStartDate: type === 'RENTAL' ? (formData as any).rentalStartDate : undefined,
         rentalEndDate: type === 'RENTAL' ? (formData as any).rentalEndDate : undefined,
         licenseType: type === 'RENTAL' ? (formData as any).licenseType : undefined,
-        insurancePrice: type === 'RENTAL' ? parseFloat(String((formData as any).insurancePrice)) || 0 : 0,
-        supplementPrice: type === 'RENTAL' ? parseFloat(String((formData as any).supplementPrice)) || 0 : 0,
-        assistantCommission: type === 'RENTAL' ? parseFloat(String((formData as any).assistantCommission)) || 0 : 0,
-        assistantCommissionType: type === 'RENTAL' ? (formData as any).assistantCommissionType : 'PERCENTAGE',
+        assignedToId: type === 'RENTAL' ? null : undefined,
+        insurancePrice: type === 'RENTAL' && (formData as any).rentalType === 'CAR' ? (parseFloat(String((formData as any).insurancePrice)) || 0) : 0,
+        supplementPrice: type === 'RENTAL' && (formData as any).rentalType === 'CAR' ? (parseFloat(String((formData as any).supplementPrice)) || 0) : 0,
+        assistantCommission: type === 'RENTAL' ? 0 : 0,
+        assistantCommissionType: type === 'RENTAL' ? null : 'PERCENTAGE',
         paymentMethod: formData.depositPaymentMethod, // Legacy sync
         depositPaymentMethod: formData.depositPaymentMethod,
         balancePaymentMethod: formData.balancePaymentMethod,
@@ -496,6 +652,7 @@ export function ParticipantForm({
         let eventData: any;
 
         if (type === 'TRANSFER') {
+            const pendingApproval = transferApprovalStatus ? transferApprovalStatus !== 'APPROVED' : false
             eventData = {
                 type: 'TRANSFER',
                 name: entityName,
@@ -505,7 +662,8 @@ export function ParticipantForm({
                 pickupTime: formData.pickupTime,
                 returnDate: formData.returnDate,
                 returnTime: formData.returnTime,
-                returnPickupLocation: formData.returnPickupLocation
+                returnPickupLocation: formData.returnPickupLocation,
+                pendingApproval
             }
         } else if (type === 'RENTAL') {
              eventData = {
@@ -605,7 +763,7 @@ export function ParticipantForm({
             setAlertModal({
               isOpen: true,
               title: 'Approvazione richiesta',
-              message: 'Il partecipante è stato salvato come BOZZA perché il prezzo è inferiore a quello calcolato. Richiede approvazione dell\'amministratore.',
+              message: 'Il partecipante è stato salvato come BOZZA perché richiede approvazione dell\'amministratore.',
               variant: 'warning'
             })
         }
@@ -659,56 +817,32 @@ export function ParticipantForm({
   const labelClassName = "block text-xs font-bold text-gray-900 mb-1 uppercase tracking-wide"
   const peopleGridClass = "grid grid-cols-2 gap-4"
 
-  const isManaged = type !== 'RENTAL' || (formData as any).rentalType === 'CAR'
-  const allowDeposit = true
-  const isMoto = type === 'RENTAL' && (formData as any).rentalType === 'MOTO'
+  const isManaged =
+    type !== 'RENTAL' ||
+    ['CAR', 'MOTO', 'BOAT'].includes(String((formData as any).rentalType || ''))
+  const allowDeposit = type !== 'RENTAL'
   const isBoat = type === 'RENTAL' && (formData as any).rentalType === 'BOAT'
   const isRental = type === 'RENTAL'
 
-  // Calculate Commission for Display (Brokerage Mode)
-  const getBrokerageCalculations = () => {
-    const price = parseFloat(String(formData.price)) || 0
-    const insurance = parseFloat(String((formData as any).insurancePrice)) || 0
-    const supplement = parseFloat(String((formData as any).supplementPrice)) || 0
-    const commPct = parseFloat(String(formData.commissionPercentage)) || 0
-    
-    // Base Imponibile for Commission
-    // Moto: Price - Insurance - Supplement
-    // Boat: Full Price
-    const taxable = isMoto ? (price - insurance - supplement) : price
-    
-    // Commission Amount (Agency Revenue)
-    const commAmount = taxable * (commPct / 100)
-
-    // Assistant Commission Calculation
-    const asstCommType = (formData as any).assistantCommissionType
-    const asstCommVal = parseFloat(String((formData as any).assistantCommission)) || 0
-    
-    let assistantAmount = 0
-    if (asstCommType === 'PERCENTAGE') {
-        // Percentage on Agency Revenue (Netto Agenzia)
-        assistantAmount = commAmount * (asstCommVal / 100)
-    } else {
-        // Fixed Amount per Person
-        assistantAmount = asstCommVal * ((formData.adults || 0) + (formData.children || 0) + (formData.infants || 0))
-    }
-    
-    const rentalType = (formData as any).rentalType
-    let netAgency = commAmount - assistantAmount
-    if (type === 'RENTAL' && (rentalType === 'MOTO' || rentalType === 'BOAT')) {
-      netAgency = commAmount
-    }
-    
-    return {
-        taxable,
-        commAmount,
-        netSupplier: price - commAmount,
-        assistantAmount,
-        netAgency
-    }
-  }
-
-  const brokerageCalc = getBrokerageCalculations()
+  const rentalType = isRental ? String((formData as any).rentalType || '') : ''
+  const isRentalCar = isRental && rentalType === 'CAR'
+  const rentalGross = parseFloat(String(formData.price)) || 0
+  const rentalTax = parseFloat(String((formData as any).tax)) || 0
+  const rentalInsurance = parseFloat(String((formData as any).insurancePrice)) || 0
+  const rentalSupplement = parseFloat(String((formData as any).supplementPrice)) || 0
+  const rentalExcludedCosts = isRentalCar ? Math.max(0, rentalTax) + Math.max(0, rentalInsurance) + Math.max(0, rentalSupplement) : 0
+  const rentalCommissionBase = isRentalCar ? Math.max(0, rentalGross - rentalExcludedCosts) : Math.max(0, rentalGross)
+  const rentalAgentShare = rentalCommissionBase * 0.05
+  const selectedPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
+  const showCapacity = !!(maxParticipants && maxParticipants > 0 && (excursionId || transferId))
+  const remainingNow =
+    showCapacity && typeof capacityInfo.activePax === 'number'
+      ? maxParticipants - capacityInfo.activePax
+      : null
+  const remainingAfter =
+    showCapacity && typeof capacityInfo.activePax === 'number'
+      ? maxParticipants - (capacityInfo.activePax + (selectedPax > 0 ? selectedPax : 1))
+      : null
 
   return (
     <div className="bg-white flex flex-col w-full h-full">
@@ -775,7 +909,7 @@ export function ParticipantForm({
                         ))}
                     </select>
                  </div>
-
+                 
                  <div>
                     <label className={labelClassName}>Data Inizio</label>
                     <input
@@ -833,9 +967,32 @@ export function ParticipantForm({
               <User className="w-5 h-5 text-blue-600" />
               <h3 className="text-lg font-semibold text-gray-800">Dati Partecipante</h3>
             </div>
-            
-            
-            
+
+          {showCapacity && (
+            <div
+              className={`p-4 rounded-xl border ${
+                typeof remainingAfter === 'number' && remainingAfter < 0
+                  ? 'bg-red-50 border-red-200'
+                  : 'bg-blue-50 border-blue-200'
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+                <div className="font-semibold text-gray-900">
+                  Posti massimi: <span className="font-bold">{maxParticipants}</span>
+                </div>
+                <div className="text-gray-800">
+                  Occupati: <span className="font-bold">{capacityInfo.loading ? '...' : (capacityInfo.activePax ?? '-')}</span>
+                </div>
+                <div className="text-gray-800">
+                  Disponibili: <span className="font-bold">{capacityInfo.loading ? '...' : (typeof remainingNow === 'number' ? Math.max(remainingNow, 0) : '-')}</span>
+                </div>
+                <div className={`${typeof remainingAfter === 'number' && remainingAfter < 0 ? 'text-red-700' : 'text-gray-800'}`}>
+                  Dopo questo inserimento: <span className="font-bold">{capacityInfo.loading ? '...' : (typeof remainingAfter === 'number' ? remainingAfter : '-')}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
               <div>
                 <label className={labelClassName}>Nome</label>
@@ -1058,6 +1215,28 @@ export function ParticipantForm({
                     className={inputClassName}
                     placeholder="email@esempio.com"
                   />
+                </div>
+                
+                <div>
+                  <label className={labelClassName}>Agenzia</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                      <Briefcase className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <select
+                      name="agencyId"
+                      value={formData.agencyId}
+                      onChange={handleChange}
+                      className={`${inputClassName} pl-9`}
+                    >
+                      <option value="">Seleziona Agenzia</option>
+                      {agencies.map((agency) => (
+                        <option key={agency.id} value={agency.id}>
+                          {agency.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
@@ -1306,43 +1485,45 @@ export function ParticipantForm({
                         </div>
                     )}
 
-                    <div className="col-span-1 sm:col-span-2">
-                      <label className={labelClassName}>Metodo Pagamento</label>
-                      <div className="flex flex-col sm:flex-row gap-4">
-                          <div className="flex-1">
-                              <span className="text-[10px] text-gray-500 mb-1 block uppercase">
-                                  {allowDeposit && formData.paymentType === 'BALANCE' ? 'Acconto / Unico' : (allowDeposit ? 'Acconto' : 'Pagamento')}
-                              </span>
-                              <select
-                                  name="depositPaymentMethod"
-                                  value={formData.depositPaymentMethod}
-                                  onChange={handleChange}
-                                  className={inputClassName}
-                                >
-                                  <option value="CASH">Contanti</option>
-                                  <option value="CARD">Carta</option>
-                                  <option value="TRANSFER">Bonifico</option>
-                              </select>
-                          </div>
-
-                          {allowDeposit && formData.paymentType === 'BALANCE' && (
+                    {(type !== 'RENTAL' || rentalType === 'BOAT') && (
+                      <div className="col-span-1 sm:col-span-2">
+                          <label className={labelClassName}>Metodo Pagamento</label>
+                          <div className="flex flex-col sm:flex-row gap-4">
                               <div className="flex-1">
-                                  <span className="text-[10px] text-gray-500 mb-1 block uppercase">Saldo</span>
+                                  <span className="text-[10px] text-gray-500 mb-1 block uppercase">
+                                      {type === 'RENTAL' ? 'Commissione (20%)' : (allowDeposit && formData.paymentType === 'BALANCE' ? 'Acconto / Unico' : (allowDeposit ? 'Acconto' : 'Pagamento'))}
+                                  </span>
                                   <select
-                                      name="balancePaymentMethod"
-                                      value={formData.balancePaymentMethod}
+                                      name="depositPaymentMethod"
+                                      value={formData.depositPaymentMethod}
                                       onChange={handleChange}
                                       className={inputClassName}
-                                  >
-                                      <option value="">-- Stesso --</option>
+                                    >
                                       <option value="CASH">Contanti</option>
                                       <option value="CARD">Carta</option>
                                       <option value="TRANSFER">Bonifico</option>
                                   </select>
                               </div>
-                          )}
-                      </div>
-                    </div>
+
+                              {type !== 'RENTAL' && allowDeposit && formData.paymentType === 'BALANCE' && (
+                                  <div className="flex-1">
+                                      <span className="text-[10px] text-gray-500 mb-1 block uppercase">Saldo</span>
+                                      <select
+                                          name="balancePaymentMethod"
+                                          value={formData.balancePaymentMethod}
+                                          onChange={handleChange}
+                                          className={inputClassName}
+                                      >
+                                          <option value="">-- Stesso --</option>
+                                          <option value="CASH">Contanti</option>
+                                          <option value="CARD">Carta</option>
+                                          <option value="TRANSFER">Bonifico</option>
+                                      </select>
+                                  </div>
+                              )}
+                          </div>
+                        </div>
+                    )}
 
                     <div>
                       <label className={labelClassName}>Prezzo Totale (€)</label>
@@ -1360,6 +1541,63 @@ export function ParticipantForm({
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
                       </div>
                     </div>
+
+                    {type === 'RENTAL' && rentalType === 'CAR' && (
+                      <>
+                        <div>
+                          <label className={labelClassName}>Tasse (€)</label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              name="tax"
+                              value={(formData as any).tax}
+                              onChange={handleChange}
+                              step="0.01"
+                              min="0"
+                              className={`${inputClassName} pl-8 font-mono ${rentalCostsError ? 'border-red-500 focus:ring-red-500 focus:border-red-500' : ''}`}
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className={labelClassName}>Assicurazione (€)</label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              name="insurancePrice"
+                              value={(formData as any).insurancePrice}
+                              onChange={handleChange}
+                              step="0.01"
+                              min="0"
+                              className={`${inputClassName} pl-8 font-mono ${rentalCostsError ? 'border-red-500 focus:ring-red-500 focus:border-red-500' : ''}`}
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className={labelClassName}>Supplementi (€)</label>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              name="supplementPrice"
+                              value={(formData as any).supplementPrice}
+                              onChange={handleChange}
+                              step="0.01"
+                              min="0"
+                              className={`${inputClassName} pl-8 font-mono ${rentalCostsError ? 'border-red-500 focus:ring-red-500 focus:border-red-500' : ''}`}
+                            />
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
+                          </div>
+                        </div>
+                        {rentalCostsError && (
+                          <div className="sm:col-span-4">
+                            <p className="text-sm text-red-600 font-medium">{rentalCostsError}</p>
+                          </div>
+                        )}
+                      </>
+                    )}
 
                     {allowDeposit && (
                         <div>
@@ -1382,105 +1620,59 @@ export function ParticipantForm({
                         )}
                         </div>
                     )}
+                    
+                    {type === 'RENTAL' && (
+                      <>
+                        <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white text-center">
+                          <div className="w-full">
+                            <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Lordo</span>
+                            <span className="text-lg font-mono font-bold text-gray-700">€ {rentalGross.toFixed(2)}</span>
+                          </div>
+                        </div>
+                        <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white text-center">
+                          <div className="w-full">
+                            <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Agente (5%)</span>
+                            <span className="text-lg font-mono font-bold text-gray-700">€ {rentalAgentShare.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </>
+                    )}
                   </div>
+
+                  
                 </>
               ) : (
                 // BROKERAGE FLOW (Barche/Moto - Agency Only Commission)
                 <div className="space-y-6">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
-                         <div>
-                            <label className={labelClassName}>Prezzo Totale Cliente (€)</label>
-                            <div className="relative">
-                                <input
-                                type="number"
-                                name="price"
-                                value={formData.price}
-                                onChange={handleChange}
-                                step="0.01"
-                                min="0"
-                                className={`${inputClassName} pl-8 font-mono bg-blue-50/50`}
-                                />
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
-                            </div>
-                        </div>
-                        
-                        <div>
-                            <label className={labelClassName}>% Commissione Agenzia</label>
-                            <div className="relative">
-                                <input
-                                type="number"
-                                name="commissionPercentage"
-                                value={formData.commissionPercentage}
-                                onChange={handleChange}
-                                step="0.1"
-                                min="0"
-                                max="100"
-                                className={`${inputClassName} pl-8 font-mono bg-purple-50/50`}
-                                />
-                                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">%</span>
-                            </div>
-                        </div>
-
-
-
-                        {isMoto && (
-                            <>
-                                <div>
-                                    <label className={labelClassName}>Assicurazione (€)</label>
-                                    <div className="relative">
-                                        <input
-                                        type="number"
-                                        name="insurancePrice"
-                                        value={(formData as any).insurancePrice}
-                                        onChange={handleChange}
-                                        step="0.01"
-                                        min="0"
-                                        className={`${inputClassName} pl-8 font-mono`}
-                                        />
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
-                                    </div>
-                                </div>
-                                <div>
-                                    <label className={labelClassName}>Supplemento (€)</label>
-                                    <div className="relative">
-                                        <input
-                                        type="number"
-                                        name="supplementPrice"
-                                        value={(formData as any).supplementPrice}
-                                        onChange={handleChange}
-                                        step="0.01"
-                                        min="0"
-                                        className={`${inputClassName} pl-8 font-mono`}
-                                        />
-                                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
-                                    </div>
-                                </div>
-                            </>
-                        )}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
+                    <div>
+                      <label className={labelClassName}>Prezzo Totale Cliente (€)</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          name="price"
+                          value={formData.price}
+                          onChange={handleChange}
+                          step="0.01"
+                          min="0"
+                          className={`${inputClassName} pl-8 font-mono bg-blue-50/50`}
+                        />
+                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
+                      </div>
                     </div>
-
-                    {/* Calculation Summary */}
-                    <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 text-center">
-                            <div>
-                                <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Imponibile Comm.</span>
-                                <span className="text-lg font-mono font-bold text-gray-700">€ {brokerageCalc.taxable.toFixed(2)}</span>
-                            </div>
-                            <div className="bg-purple-50 rounded-lg border border-purple-100 p-2">
-                                <span className="text-xs text-purple-600 uppercase font-bold block mb-1">Guadagno Agenzia</span>
-                                <span className="text-xl font-mono font-bold text-purple-700">€ {brokerageCalc.commAmount.toFixed(2)}</span>
-                            </div>
-
-                            <div className="bg-blue-50 rounded-lg border border-blue-100 p-2">
-                                <span className="text-xs text-blue-600 uppercase font-bold block mb-1">Netto Agenzia</span>
-                                <span className="text-xl font-mono font-bold text-blue-700">€ {(brokerageCalc.netAgency || 0).toFixed(2)}</span>
-                            </div>
-                             <div>
-                                <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Da Pagare a Fornitore</span>
-                                <span className="text-lg font-mono font-bold text-gray-700">€ {brokerageCalc.netSupplier.toFixed(2)}</span>
-                            </div>
-                        </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white text-center">
+                      <div className="w-full">
+                        <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Lordo</span>
+                        <span className="text-lg font-mono font-bold text-gray-700">€ {rentalGross.toFixed(2)}</span>
+                      </div>
                     </div>
+                    <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white text-center">
+                      <div className="w-full">
+                        <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Agente (5%)</span>
+                        <span className="text-lg font-mono font-bold text-gray-700">€ {rentalAgentShare.toFixed(2)}</span>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
             </div>

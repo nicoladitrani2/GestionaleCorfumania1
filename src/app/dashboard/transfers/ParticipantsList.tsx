@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Map as MapIcon } from 'lucide-react'
+import { Edit, Trash2, User, Users, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, Euro, Eye, RotateCcw, Map as MapIcon, X } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { generateParticipantPDF, generateParticipantsListPDF } from '@/lib/pdf-generator'
@@ -62,12 +62,27 @@ export function ParticipantsList({
     isOpen: boolean
     title: string
     message: string
-    variant: 'success' | 'error' | 'info' | 'warning'
+    variant: 'success' | 'danger' | 'info' | 'warning'
   }>({
     isOpen: false,
     title: '',
     message: '',
     variant: 'info'
+  })
+  const [transferDetails, setTransferDetails] = useState<any | null>(null)
+  const [approvingId, setApprovingId] = useState<string | null>(null)
+  const [transferApprovalModal, setTransferApprovalModal] = useState<{
+    isOpen: boolean
+    participantId: string
+    priceAdult: string
+    priceChild: string
+    maxParticipants: string
+  }>({
+    isOpen: false,
+    participantId: '',
+    priceAdult: '',
+    priceChild: '',
+    maxParticipants: ''
   })
 
   const fetchParticipants = async () => {
@@ -84,6 +99,18 @@ export function ParticipantsList({
     }
   }
 
+  const fetchTransfer = async () => {
+    try {
+      const res = await fetch(`/api/transfers/${transferId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setTransferDetails(data)
+      }
+    } catch (error) {
+      console.error('Error fetching transfer:', error)
+    }
+  }
+
   // Polling for live updates (every 5 seconds)
   useEffect(() => {
     const interval = setInterval(() => {
@@ -95,7 +122,143 @@ export function ParticipantsList({
 
   useEffect(() => {
     fetchParticipants()
+    fetchTransfer()
   }, [transferId, refreshTrigger])
+
+  const validateTransferApprovalData = () => {
+    const pa = parseFloat(transferApprovalModal.priceAdult)
+    const pc = parseFloat(transferApprovalModal.priceChild)
+    const mp = parseInt(transferApprovalModal.maxParticipants)
+
+    if (Number.isNaN(pa) || Number.isNaN(pc) || Number.isNaN(mp)) {
+      return { ok: false as const, error: 'Inserisci valori numerici validi per prezzi e limite massimo.' }
+    }
+    if (pa < 0 || pc < 0) {
+      return { ok: false as const, error: 'I prezzi non possono essere negativi.' }
+    }
+    if (pa <= 0 && pc <= 0) {
+      return { ok: false as const, error: 'Imposta almeno un prezzo (adulto o bambino) maggiore di 0.' }
+    }
+    if (mp <= 0) {
+      return { ok: false as const, error: 'Il limite massimo partecipanti deve essere maggiore di 0.' }
+    }
+
+    return { ok: true as const, pa, pc, mp }
+  }
+
+  const handleApproveParticipant = async (participantId: string) => {
+    if (approvingId) return
+    setApprovingId(participantId)
+    try {
+      if (!transferDetails) {
+        await fetchTransfer()
+      }
+      const isTransferPending = transferDetails?.approvalStatus && transferDetails.approvalStatus !== 'APPROVED'
+
+      if (isTransferPending) {
+        setTransferApprovalModal({
+          isOpen: true,
+          participantId,
+          priceAdult: typeof transferDetails?.priceAdult === 'number' ? String(transferDetails.priceAdult) : '',
+          priceChild: typeof transferDetails?.priceChild === 'number' ? String(transferDetails.priceChild) : '',
+          maxParticipants: typeof transferDetails?.maxParticipants === 'number' ? String(transferDetails.maxParticipants) : '',
+        })
+        setApprovingId(null)
+        return
+      }
+
+      const res = await fetch(`/api/participants/${participantId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'APPROVED' }),
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 409 && data?.code === 'TRANSFER_APPROVAL_REQUIRED') {
+          const t = data?.transfer || {}
+          setTransferApprovalModal({
+            isOpen: true,
+            participantId,
+            priceAdult: typeof t.priceAdult === 'number' ? String(t.priceAdult) : '',
+            priceChild: typeof t.priceChild === 'number' ? String(t.priceChild) : '',
+            maxParticipants: typeof t.maxParticipants === 'number' ? String(t.maxParticipants) : '',
+          })
+          return
+        }
+        throw new Error(data.error || 'Errore durante l\'approvazione')
+      }
+
+      await fetchParticipants()
+      await fetchTransfer()
+      if (onUpdate) onUpdate()
+    } catch (e: any) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: e.message || 'Errore durante l\'approvazione',
+        variant: 'danger'
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
+
+  const handleConfirmTransferApproval = async () => {
+    const participantId = transferApprovalModal.participantId
+    if (!participantId) return
+
+    const validation = validateTransferApprovalData()
+    if (!validation.ok) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: validation.error,
+        variant: 'danger'
+      })
+      return
+    }
+
+    setApprovingId(participantId)
+    try {
+      const res = await fetch(`/api/participants/${participantId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          status: 'APPROVED',
+          transferPriceAdult: validation.pa,
+          transferPriceChild: validation.pc,
+          transferMaxParticipants: validation.mp
+        })
+      })
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Errore durante l\'approvazione')
+      }
+
+      setTransferApprovalModal({
+        isOpen: false,
+        participantId: '',
+        priceAdult: '',
+        priceChild: '',
+        maxParticipants: ''
+      })
+
+      await fetchParticipants()
+      await fetchTransfer()
+      if (onUpdate) onUpdate()
+    } catch (e: any) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: e.message || 'Errore durante l\'approvazione',
+        variant: 'danger'
+      })
+    } finally {
+      setApprovingId(null)
+    }
+  }
 
   const handleDelete = (id: string) => {
     const p = participants.find(p => p.id === id)
@@ -208,7 +371,7 @@ export function ParticipantsList({
               isOpen: true,
               title: 'Errore',
               message: data.error || 'Errore durante la registrazione del saldo',
-              variant: 'error'
+              variant: 'danger'
             })
           }
         } catch (error) {
@@ -217,7 +380,7 @@ export function ParticipantsList({
             isOpen: true,
             title: 'Errore',
             message: 'Errore di connessione',
-            variant: 'error'
+            variant: 'danger'
           })
         }
       }
@@ -286,7 +449,7 @@ export function ParticipantsList({
           isOpen: true,
           title: 'Errore',
           message: `Errore: ${errorData.error}`,
-          variant: 'error'
+          variant: 'danger'
         })
       }
     } catch (error) {
@@ -295,7 +458,7 @@ export function ParticipantsList({
         isOpen: true,
         title: 'Errore',
         message: 'Errore di connessione',
-        variant: 'error'
+        variant: 'danger'
       })
     }
   }
@@ -491,6 +654,22 @@ export function ParticipantsList({
   const expiredParticipants = participants.filter(p => isParticipantExpired(p) && p.paymentType !== 'REFUNDED')
   const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
   const pendingParticipants = participants.filter(p => getApproval(p) === 'PENDING')
+  const rejectedParticipants = participants.filter(p => getApproval(p) === 'REJECTED')
+  const maxParticipants = typeof transferDetails?.maxParticipants === 'number' ? transferDetails.maxParticipants : null
+  const occupiedPax =
+    maxParticipants && maxParticipants > 0
+      ? participants.reduce((sum: number, p: any) => {
+          const approval = getApproval(p)
+          const isRejected = approval === 'REJECTED'
+          const isRefunded = p.paymentType === 'REFUNDED' || p.status === 'REFUNDED'
+          const isActive = !p.status || p.status === 'ACTIVE'
+          const isExpired = isParticipantExpired(p)
+          if (isRejected || isRefunded || !isActive || isExpired) return sum
+          const pax = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
+          return sum + (pax > 0 ? pax : 1)
+        }, 0)
+      : 0
+  const remainingPax = maxParticipants && maxParticipants > 0 ? maxParticipants - occupiedPax : null
 
   const handleExportClick = (list: any[], title: string, filename: string) => {
     setListToExport(list)
@@ -537,11 +716,6 @@ export function ParticipantsList({
                <th className={thClassName}>
                 <div className="flex items-center gap-2">
                   <MapIcon className="w-4 h-4" /> Destinazione
-                </div>
-              </th>
-              <th className={thClassName}>
-                <div className="flex items-center gap-2">
-                  <BadgeCheck className="w-4 h-4" /> Inserito da
                 </div>
               </th>
               <th className={thClassName}>
@@ -601,29 +775,6 @@ export function ParticipantsList({
                           )}
                       </div>
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
-                    <div className="flex flex-col">
-                      <span className="font-bold text-gray-900">{p.createdBy?.code || '-'}</span>
-                      <span className="text-xs text-gray-500">
-                        {p.createdBy?.firstName} {p.createdBy?.lastName}
-                      </span>
-                      {p.commissionPercentage > 0 && (
-                        <div className="text-xs text-blue-500">
-                          Comm: {p.commissionPercentage}
-                          {(() => {
-                              if (p.createdBy?.agency) {
-                                  return p.createdBy.agency.commissionType === 'FIXED' ? '€' : '%';
-                              }
-                              const creatorName = `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.toLowerCase();
-                              if (creatorName.includes('arianna') || creatorName.includes('amministrazione') || creatorName.includes('corfumania')) {
-                                  return '€';
-                              }
-                              return '%';
-                          })()}
-                        </div>
-                      )}
-                    </div>
-                  </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">
                     <div>
                       € {p.price?.toFixed(2) || '0.00'}
@@ -653,6 +804,40 @@ export function ParticipantsList({
                       
                       {canEdit && (
                         <>
+                          {/* Approval Buttons for Admin */}
+                          {userRole === 'ADMIN' && getApproval(p) === 'PENDING' && (
+                            <>
+                              <button
+                                onClick={() => {
+                                  handleApproveParticipant(p.id)
+                                }}
+                                disabled={approvingId === p.id}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-green-700 bg-green-50 hover:bg-green-100 rounded-md transition-colors border border-green-200"
+                                title="Approva Partecipante"
+                              >
+                                <CheckCircle className="w-3.5 h-3.5" />
+                                Approva
+                              </button>
+                               <button
+                                onClick={() => {
+                                   fetch(`/api/participants/${p.id}/approve`, {
+                                          method: 'POST',
+                                          headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ status: 'REJECTED' })
+                                      }).then(() => {
+                                          fetchParticipants()
+                                          if (onUpdate) onUpdate()
+                                      })
+                                }}
+                                className="flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-700 bg-red-50 hover:bg-red-100 rounded-md transition-colors border border-red-200"
+                                title="Rifiuta Partecipante"
+                              >
+                                <X className="w-3.5 h-3.5" />
+                                Rifiuta
+                              </button>
+                            </>
+                          )}
+
                           {(p.paymentType === 'DEPOSIT' || p.isOption) && (
                             <button
                               onClick={() => handleSettleBalance(p)}
@@ -767,10 +952,6 @@ export function ParticipantsList({
               <div className="flex justify-between items-center pt-2 border-t border-gray-100/50">
                  <div className="flex gap-4 text-sm">
                     <div className="flex flex-col">
-                       <span className="text-xs text-gray-400">Inserito da</span>
-                       <span>{p.createdBy?.firstName} {p.createdBy?.lastName}</span>
-                    </div>
-                    <div className="flex flex-col">
                        <span className="text-xs text-gray-400">Prezzo</span>
                        <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
                     </div>
@@ -877,6 +1058,32 @@ export function ParticipantsList({
         </div>
       </div>
 
+      {maxParticipants && maxParticipants > 0 && (
+        <div
+          className={`p-4 rounded-xl border ${
+            typeof remainingPax === 'number' && remainingPax < 0
+              ? 'bg-red-50 border-red-200'
+              : 'bg-blue-50 border-blue-200'
+          }`}
+        >
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <div className="flex items-center gap-2 font-semibold text-gray-900">
+              <Users className="w-4 h-4 text-blue-700" />
+              Posti
+            </div>
+            <div className="text-gray-800">
+              Massimi: <span className="font-bold">{maxParticipants}</span>
+            </div>
+            <div className="text-gray-800">
+              Occupati: <span className="font-bold">{occupiedPax}</span>
+            </div>
+            <div className={`${typeof remainingPax === 'number' && remainingPax < 0 ? 'text-red-700' : 'text-gray-800'}`}>
+              Disponibili: <span className="font-bold">{typeof remainingPax === 'number' ? remainingPax : '-'}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Lists */}
       <div className="space-y-8">
         {pendingParticipants.length > 0 && (
@@ -897,6 +1104,28 @@ export function ParticipantsList({
             <ParticipantsTable 
               data={pendingParticipants} 
               emptyMessage="Nessun partecipante in attesa." 
+            />
+          </div>
+        )}
+
+        {rejectedParticipants.length > 0 && (
+          <div className="opacity-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-lg font-semibold text-red-700 flex items-center gap-2">
+                <AlertCircle className="w-5 h-5" />
+                Rifiutati
+              </h3>
+              <button
+                onClick={() => handleExportClick(rejectedParticipants, 'Partecipanti rifiutati', 'partecipanti-trasferimento-rifiutati')}
+                className="flex items-center gap-2 px-3 py-1.5 bg-white border border-gray-300 rounded-md text-xs font-medium text-gray-700 hover:bg-gray-50 transition-colors shadow-sm"
+              >
+                <FileDown className="w-3.5 h-3.5" />
+                Esporta PDF
+              </button>
+            </div>
+            <ParticipantsTable
+              data={rejectedParticipants}
+              emptyMessage="Nessun partecipante rifiutato."
             />
           </div>
         )}
@@ -1006,7 +1235,6 @@ export function ParticipantsList({
             pickupLocation: selectedParticipant.pickupLocation,
             dropoffLocation: selectedParticipant.dropoffLocation
           }}
-          canEdit={userRole === 'ADMIN' || selectedParticipant.createdById === currentUserId}
         />
       )}
 
@@ -1018,8 +1246,7 @@ export function ParticipantsList({
             setParticipantToRefund(null)
           }}
           onConfirm={handleRefund}
-          participantName={`${participantToRefund.firstName} ${participantToRefund.lastName}`}
-          maxAmount={participantToRefund.deposit || 0}
+          participant={participantToRefund}
         />
       )}
 
@@ -1045,6 +1272,82 @@ export function ParticipantsList({
           onClose={() => setShowExportModal(false)}
           onExport={handleExport}
         />
+      )}
+
+      {transferApprovalModal.isOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="bg-green-600 px-6 py-4 flex justify-between items-center">
+              <h3 className="text-lg font-bold text-white">Approva Trasferimento</h3>
+              <button
+                onClick={() =>
+                  setTransferApprovalModal({
+                    isOpen: false,
+                    participantId: '',
+                    priceAdult: '',
+                    priceChild: '',
+                    maxParticipants: '',
+                  })
+                }
+                className="text-white/80 hover:text-white hover:bg-white/10 rounded-full p-1 transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo Adulti</label>
+                <input
+                  type="number"
+                  value={transferApprovalModal.priceAdult}
+                  onChange={(e) => setTransferApprovalModal(prev => ({ ...prev, priceAdult: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Prezzo Bambini</label>
+                <input
+                  type="number"
+                  value={transferApprovalModal.priceChild}
+                  onChange={(e) => setTransferApprovalModal(prev => ({ ...prev, priceChild: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Limite massimo partecipanti</label>
+                <input
+                  type="number"
+                  value={transferApprovalModal.maxParticipants}
+                  onChange={(e) => setTransferApprovalModal(prev => ({ ...prev, maxParticipants: e.target.value }))}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-green-500"
+                />
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <button
+                  onClick={() =>
+                    setTransferApprovalModal({
+                      isOpen: false,
+                      participantId: '',
+                      priceAdult: '',
+                      priceChild: '',
+                      maxParticipants: '',
+                    })
+                  }
+                  className="px-4 py-2 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+                >
+                  Annulla
+                </button>
+                <button
+                  onClick={handleConfirmTransferApproval}
+                  disabled={approvingId === transferApprovalModal.participantId}
+                  className="px-4 py-2 rounded-md bg-green-600 text-white hover:bg-green-700 disabled:opacity-50"
+                >
+                  Conferma e Approva
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       <ConfirmationModal

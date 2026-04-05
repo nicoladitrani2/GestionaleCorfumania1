@@ -15,6 +15,23 @@ interface SummaryStats {
   totalAssistantCommission?: number
   totalNetAgency?: number
   totalExternalAgencyCommission?: number
+  rentals?: {
+    gross: number
+    supplierOut: number
+    commissionTotal: number
+    commissionBaseTotal?: number
+    carExcludedCostsTotal?: number
+    carGrossBaseCount?: number
+    companyNow: number
+    companyFuture: number
+    companyTotal: number
+    agentTotal: number
+    agentNow?: number
+    agentFuture?: number
+    go4seaTotal: number
+    go4seaNow?: number
+    go4seaFuture?: number
+  }
 }
 
 interface BreakdownItem {
@@ -24,11 +41,24 @@ interface BreakdownItem {
   commission: number
   assistantCommission?: number
   supplierShare?: number
+  netAgency?: number
   count: number
   pax: number
   tax: number
   taxBookingRevenue?: number
 }
+interface RentalAgentItem {
+  id: string
+  code?: string
+  name: string
+  count: number
+  gross: number
+  commissionBase: number
+  agentShare: number
+  companyShare: number
+  go4seaShare: number
+}
+
 
 interface ReportData {
   summary: SummaryStats
@@ -37,6 +67,8 @@ interface ReportData {
   byAssistant: BreakdownItem[]
   byExcursion: BreakdownItem[]
   byTransfer: BreakdownItem[]
+  byRentalAgent?: RentalAgentItem[]
+  byRentalPaymentMethod?: { name: string; revenue: number; count: number }[]
   byRental: BreakdownItem[]
   bySpecialService: BreakdownItem[]
   taxStats?: {
@@ -61,6 +93,7 @@ export default function ReportsPage() {
   const [selectedProviders, setSelectedProviders] = useState<string[]>([])
   const [selectedAssistants, setSelectedAssistants] = useState<string[]>([])
   const [selectedExcursions, setSelectedExcursions] = useState<string[]>([])
+  const [includeFutureRentals, setIncludeFutureRentals] = useState(false)
 
   // Data State
   const [agencies, setAgencies] = useState<any[]>([])
@@ -119,6 +152,7 @@ export default function ReportsPage() {
       if (selectedAssistants.length) params.append('assistantIds', selectedAssistants.join(','))
       if (selectedExcursions.length) params.append('excursionIds', selectedExcursions.join(','))
       if (selectedTypes.length) params.append('types', selectedTypes.join(','))
+      params.append('includeFutureRentals', includeFutureRentals ? 'true' : 'false')
 
       const res = await fetch(`/api/reports?${params.toString()}`)
       if (res.ok) {
@@ -139,7 +173,7 @@ export default function ReportsPage() {
     }, 500)
 
     return () => clearTimeout(timer)
-  }, [startDate, endDate, selectedAgencies, selectedProviders, selectedAssistants, selectedExcursions, selectedTypes])
+  }, [startDate, endDate, selectedAgencies, selectedProviders, selectedAssistants, selectedExcursions, selectedTypes, includeFutureRentals])
 
   const resetFilters = () => {
     setStartDate('')
@@ -240,6 +274,19 @@ export default function ReportsPage() {
                 placeholder="A"
               />
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium text-gray-600">Opzioni</label>
+            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer select-none">
+              <input
+                type="checkbox"
+                checked={includeFutureRentals}
+                onChange={(e) => setIncludeFutureRentals(e.target.checked)}
+                className="w-4 h-4"
+              />
+              Includi incassi futuri (noleggi)
+            </label>
           </div>
 
           {/* Type Filter */}
@@ -396,12 +443,21 @@ export default function ReportsPage() {
 
           {/* Stats Cards */}
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-            <StatCard 
-              title="Incasso Totale" 
-              value={`€ ${((reportData?.summary?.totalRevenue ?? 0) + (reportData?.summary?.totalTaxRevenue ?? 0)).toFixed(2)}`} 
-              icon={<DollarSign className="w-6 h-6 text-green-600" />}
-              bg="bg-green-50"
-            />
+            {(() => {
+              const baseNow =
+                (reportData?.summary?.totalRevenue ?? 0) +
+                (reportData?.summary?.totalTaxRevenue ?? 0)
+              const withFuture = baseNow
+              const title = includeFutureRentals ? 'Incasso Totale (subito + futuri)' : 'Incasso Totale (solo subito)'
+              return (
+                <StatCard
+                  title={title}
+                  value={`€ ${withFuture.toFixed(2)}`}
+                  icon={<DollarSign className="w-6 h-6 text-green-600" />}
+                  bg="bg-green-50"
+                />
+              )
+            })()}
             <StatCard 
               title="Comm. Agenzia" 
               value={`€ ${(reportData?.summary?.totalExternalAgencyCommission ?? 0).toFixed(2)}`} 
@@ -410,7 +466,11 @@ export default function ReportsPage() {
             />
             <StatCard 
               title="Comm. Assistenti" 
-              value={`€ ${(reportData?.summary?.totalAssistantCommission ?? 0).toFixed(2)}`} 
+              value={`€ ${(
+                (reportData?.summary?.totalAssistantCommission ?? 0) +
+                (reportData?.summary?.rentals?.agentNow ?? 0) +
+                (includeFutureRentals ? (reportData?.summary?.rentals?.agentFuture ?? 0) : 0)
+              ).toFixed(2)}`} 
               icon={<Users className="w-6 h-6 text-indigo-600" />}
               bg="bg-indigo-50"
             />
@@ -632,24 +692,51 @@ export default function ReportsPage() {
               </div>
               <div className="p-4 space-y-4">
                 {/* Rental Summary Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                  <div className="bg-slate-50 p-4 rounded-xl border border-slate-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-slate-600">Entrate Totali (Lordo)</p>
+                      <p className="text-2xl font-bold text-slate-900">
+                        € {(reportData.summary.rentals?.gross ?? 0).toFixed(2)}
+                      </p>
+                    </div>
+                    <PieChart className="w-8 h-8 text-slate-300" />
+                  </div>
+                  <div className="bg-purple-50 p-4 rounded-xl border border-purple-100 flex items-center justify-between">
+                    <div>
+                      <p className="text-sm font-medium text-purple-700">Pagamenti Fornitori (80%)</p>
+                      <p className="text-2xl font-bold text-purple-800">
+                        € {(reportData.summary.rentals?.supplierOut ?? 0).toFixed(2)}
+                      </p>
+                    </div>
+                    <PieChart className="w-8 h-8 text-purple-300" />
+                  </div>
                   <div className="bg-blue-50 p-4 rounded-xl border border-blue-100 flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-blue-600">Totale Netto Agenzia (Noleggi)</p>
+                      <p className="text-sm font-medium text-blue-600">Totale Netto Corfumania</p>
                       <p className="text-2xl font-bold text-blue-700">
-                        € {reportData.byRental.reduce((acc, r) => acc + (r.netAgency ?? r.commission), 0).toFixed(2)}
+                        € {(includeFutureRentals
+                          ? (reportData.summary.rentals?.companyTotal ?? 0)
+                          : (reportData.summary.rentals?.companyNow ?? 0)
+                        ).toFixed(2)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Subito: € {(reportData.summary.rentals?.companyNow ?? 0).toFixed(2)} · Futuri: € {(reportData.summary.rentals?.companyFuture ?? 0).toFixed(2)}
                       </p>
                     </div>
                     <PieChart className="w-8 h-8 text-blue-300" />
                   </div>
-                  <div className="bg-green-50 p-4 rounded-xl border border-green-100 flex items-center justify-between">
+                  <div className="bg-orange-50 p-4 rounded-xl border border-orange-100 flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-green-600">Totale Quota Fornitore (Noleggi)</p>
-                      <p className="text-2xl font-bold text-green-700">
-                        € {reportData.byRental.reduce((acc, r) => acc + (r.supplierShare || 0), 0).toFixed(2)}
+                      <p className="text-sm font-medium text-orange-700">Commissione Totale (20%)</p>
+                      <p className="text-2xl font-bold text-orange-800">
+                        € {(reportData.summary.rentals?.commissionTotal ?? 0).toFixed(2)}
+                      </p>
+                      <p className="text-xs text-gray-500 mt-1">
+                        Agente (subito): € {(reportData.summary.rentals?.agentNow ?? 0).toFixed(2)} · Go4Sea (subito): € {(reportData.summary.rentals?.go4seaNow ?? 0).toFixed(2)}{includeFutureRentals ? ` · Agente (futuri): € ${(reportData.summary.rentals?.agentFuture ?? reportData.summary.rentals?.agentTotal ?? 0).toFixed(2)} · Go4Sea (futuri): € ${(reportData.summary.rentals?.go4seaFuture ?? reportData.summary.rentals?.go4seaTotal ?? 0).toFixed(2)}` : ''}
                       </p>
                     </div>
-                    <Users className="w-8 h-8 text-green-300" />
+                    <Briefcase className="w-8 h-8 text-orange-300" />
                   </div>
                 </div>
 
@@ -659,12 +746,40 @@ export default function ReportsPage() {
                   columns={[
                       { header: 'Tipo Noleggio', key: 'name' },
                       { header: 'Pax', key: 'pax', align: 'right' },
-                      { header: 'Comm. Tot.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
-                      { header: 'Comm. Ass.', key: 'assistantCommission', align: 'right', format: 'currency', color: 'text-purple-600' },
-                    { header: 'Netto Agenzia', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' },
-                      { header: 'Quota Fornitore', key: 'supplierShare', align: 'right', format: 'currency', color: 'text-green-600' }
+                      { header: 'Lordo', key: 'gross', align: 'right', format: 'currency', color: 'text-slate-700' },
+                      { header: 'Comm. 20%', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
+                      { header: 'Fornitore (80%)', key: 'supplierOut', align: 'right', format: 'currency', color: 'text-slate-700' },
+                      { header: 'Agente (5%)', key: 'agentShare', align: 'right', format: 'currency', color: 'text-purple-600' },
+                      { header: 'Quota Corfumania', key: 'companyShare', align: 'right', format: 'currency', color: 'text-blue-600' },
+                      { header: 'Quota Go4Sea', key: 'go4seaShare', align: 'right', format: 'currency', color: 'text-cyan-700' },
                   ]}
                 />
+
+                {reportData?.byRentalAgent && reportData.byRentalAgent.length > 0 && (
+                  <TableCard
+                    title="Commissioni Agenti (Noleggi)"
+                    data={reportData.byRentalAgent}
+                    columns={[
+                      { header: 'Codice', key: 'code' },
+                      { header: 'Agente', key: 'name' },
+                      { header: 'Noleggi', key: 'count', align: 'right' },
+                      { header: 'Lordo', key: 'gross', align: 'right', format: 'currency', color: 'text-slate-700' },
+                      { header: 'Agente (5%)', key: 'agentShare', align: 'right', format: 'currency', color: 'text-purple-600' },
+                    ]}
+                  />
+                )}
+
+                {reportData?.byRentalPaymentMethod && reportData.byRentalPaymentMethod.length > 0 && (
+                  <TableCard
+                    title="Metodi Pagamento (Commissione 20%)"
+                    data={reportData.byRentalPaymentMethod}
+                    columns={[
+                      { header: 'Metodo', key: 'name' },
+                      { header: 'Noleggi', key: 'count', align: 'right' },
+                      { header: 'Incasso 20%', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
+                    ]}
+                  />
+                )}
               </div>
             </div>
           )}

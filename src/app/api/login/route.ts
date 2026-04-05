@@ -3,18 +3,77 @@ import { prisma } from '@/lib/prisma'
 import { encrypt } from '@/lib/auth'
 import bcrypt from 'bcryptjs'
 import { cookies } from 'next/headers'
+import { addRateLimitHeaders, getClientIp, rateLimit } from '@/lib/rateLimit'
+import { enforceSameOrigin } from '@/lib/csrf'
+
+function getSessionTtlSeconds() {
+  const raw = process.env.SESSION_TTL_SECONDS
+  const parsed = raw ? Number(raw) : NaN
+  if (Number.isFinite(parsed) && parsed > 0) return Math.floor(parsed)
+  return 8 * 60 * 60
+}
+
+function isSecureCookie(request: Request) {
+  const forwardedProto = request.headers.get('x-forwarded-proto')
+  if (forwardedProto) return forwardedProto === 'https'
+  try {
+    return new URL(request.url).protocol === 'https:'
+  } catch {
+    return process.env.NODE_ENV === 'production'
+  }
+}
 
 export async function POST(request: Request) {
   try {
-    const body = await request.json()
-    const { email, password } = body
+    const csrf = enforceSameOrigin(request)
+    if (csrf) return csrf
+
+    const ip = getClientIp(request)
+    const rl = rateLimit(`login:ip:${ip}`, 30, 10 * 60 * 1000)
+    if (!rl.allowed) {
+      return addRateLimitHeaders(
+        NextResponse.json({ error: 'Troppe richieste. Riprova più tardi.' }, { status: 429 }),
+        rl,
+        30
+      )
+    }
+
+    let body: any = {}
+    try {
+      body = await request.json()
+    } catch {
+      body = {}
+    }
+
+    const email = typeof body?.email === 'string' ? body.email.trim() : ''
+    const password = typeof body?.password === 'string' ? body.password : ''
+    if (!email || !password) {
+      return addRateLimitHeaders(
+        NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 }),
+        rl,
+        30
+      )
+    }
+
+    const rlAccount = rateLimit(`login:ip-email:${ip}:${email.toLowerCase()}`, 10, 10 * 60 * 1000)
+    if (!rlAccount.allowed) {
+      return addRateLimitHeaders(
+        NextResponse.json({ error: 'Troppe richieste. Riprova più tardi.' }, { status: 429 }),
+        rlAccount,
+        10
+      )
+    }
 
     const user = await prisma.user.findUnique({
       where: { email }
     })
 
     if (!user) {
-      return NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 })
+      return addRateLimitHeaders(
+        NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 }),
+        rlAccount,
+        10
+      )
     }
 
     // Fetch agency separately to avoid Prisma Client mismatch issues
@@ -29,13 +88,16 @@ export async function POST(request: Request) {
     const isValid = await bcrypt.compare(password, user.password)
 
     if (!isValid) {
-      return NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 })
+      return addRateLimitHeaders(
+        NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 }),
+        rlAccount,
+        10
+      )
     }
 
     const session = await encrypt({
       user: {
         id: user.id,
-        email: user.email,
         role: user.role,
         firstName: user.firstName,
         lastName: user.lastName,
@@ -49,14 +111,19 @@ export async function POST(request: Request) {
     const cookieStore = await cookies()
     cookieStore.set('session', session, {
       httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      maxAge: 24 * 60 * 60, // 24 hours
+      secure: isSecureCookie(request),
+      sameSite: 'lax',
+      maxAge: getSessionTtlSeconds(),
       path: '/'
     })
 
-    return NextResponse.json({ success: true })
+    return addRateLimitHeaders(NextResponse.json({ success: true }), rl, 30)
   } catch (error: any) {
     console.error('Login error:', error)
-    return NextResponse.json({ error: error.message || 'Errore interno del server' }, { status: 500 })
+    const isDbUnreachable = String(error?.code) === 'P1001' || String(error?.message || '').includes("Can't reach database server")
+    const safeMessage = isDbUnreachable
+      ? 'Impossibile contattare il database. Verifica la connessione e riprova.'
+      : 'Errore interno del server'
+    return NextResponse.json({ error: safeMessage }, { status: 500 })
   }
 }
