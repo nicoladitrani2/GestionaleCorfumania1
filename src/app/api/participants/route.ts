@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
-import nodemailer from 'nodemailer'
+import { sendMail } from '@/lib/mailer'
 
 export const dynamic = 'force-dynamic'
 
@@ -381,6 +381,12 @@ export async function POST(request: Request) {
         select: { priceAdult: true, priceChild: true, approvalStatus: true }
       })
       if (transfer) {
+        if (transfer.approvalStatus === 'REJECTED') {
+          return NextResponse.json(
+            { error: 'Trasferimento rifiutato: non è possibile aggiungere partecipanti.' },
+            { status: 400 }
+          )
+        }
         const adultsNum = parseInt(adults) || 0
         const childrenNum = parseInt(children) || 0
         const calculated = (adultsNum * (transfer.priceAdult || 0)) + (childrenNum * (transfer.priceChild || 0))
@@ -519,7 +525,81 @@ export async function POST(request: Request) {
       resolvedRentalId
     )
 
-    // Send confirmation email with attachments if provided
+    const notifyAdminUserIds = Array.isArray((body as any).notifyAdminUserIds)
+      ? (body as any).notifyAdminUserIds.map((x: any) => String(x)).filter(Boolean)
+      : []
+
+    if (
+      session.user.role !== 'ADMIN' &&
+      (finalPaymentStatus === 'PENDING_APPROVAL' || approvalStatus === 'PENDING')
+    ) {
+      const admins = await prisma.user.findMany({
+        where: notifyAdminUserIds.length > 0 ? { id: { in: notifyAdminUserIds }, role: 'ADMIN' } : { role: 'ADMIN' },
+        select: { email: true },
+      })
+
+      const eventName = excursionId ? 'Escursione' : transferId ? 'Trasferimento' : resolvedRentalId ? 'Noleggio' : 'Prenotazione'
+      const safeName = name || `${firstName || ''} ${lastName || ''}`.trim() || 'Cliente'
+      const requestedLine = `Totale richiesto: €${finalTotalPrice.toFixed(2)}`
+      const requester = `${session.user.firstName || ''} ${session.user.lastName || ''}`.trim() || session.user.email || session.user.id
+
+      const text = [
+        'Richiesta in attesa di approvazione.',
+        `Tipo: ${eventName}`,
+        `Cliente: ${safeName}`,
+        requestedLine,
+        `Richiedente: ${requester}`,
+        `ID partecipante: ${participant.id}`,
+      ].filter(Boolean).join('\n')
+
+      const adminEmails = admins
+        .map(a => a.email)
+        .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+      if (adminEmails.length === 0) {
+        try {
+          await createAuditLog(
+            session.user.id,
+            'NOTIFY_ADMINS_SKIPPED',
+            'PARTICIPANT',
+            participant.id,
+            'Notifica admin non inviata: nessun destinatario valido',
+            excursionId || null,
+            transferId || null,
+            resolvedRentalId
+          )
+        } catch {}
+      }
+
+      let okCount = 0
+      let failCount = 0
+      for (const to of adminEmails) {
+        try {
+          await sendMail({
+            to,
+            subject: `Approvazione richiesta: ${eventName}`,
+            text,
+          })
+          okCount += 1
+        } catch {
+          failCount += 1
+        }
+      }
+
+      try {
+        await createAuditLog(
+          session.user.id,
+          'NOTIFY_ADMINS_APPROVAL',
+          'PARTICIPANT',
+          participant.id,
+          `Notifica admin inviata: ok=${okCount}, fail=${failCount}`,
+          excursionId || null,
+          transferId || null,
+          resolvedRentalId
+        )
+      } catch {}
+    }
+
+    // Send confirmation email to participant (attachments optional)
     try {
       // Send if email exists AND (payment is not pending OR it is a transfer pending approval)
       // Actually, user requested email for transfer pending approval.
@@ -527,22 +607,9 @@ export async function POST(request: Request) {
       // We need to allow email for PENDING_APPROVAL if it's a Transfer (or generally if requested?)
       // User said: "Email Transfer Non Approvati... deve indicare chiaramente che è in attesa"
       
-      const shouldSend = email && (finalPaymentStatus !== 'PENDING_APPROVAL' || transferId);
+      const shouldSend = !!email
       
-      if (shouldSend && (body.pdfAttachmentIT || body.pdfAttachmentEN)) {
-        const transporter = nodemailer.createTransport({
-          host: 'smtp.gmail.com',
-          port: 465,
-          secure: true,
-          auth: {
-            user: process.env.EMAIL_USER,
-            pass: process.env.EMAIL_PASS
-          },
-          tls: {
-            rejectUnauthorized: false
-          }
-        })
-        
+      if (shouldSend) {
         const attachments: any[] = []
         const safeName = name || `${firstName || ''} ${lastName || ''}`.trim() || 'Cliente'
 
@@ -562,22 +629,44 @@ export async function POST(request: Request) {
         let subject = 'Conferma Prenotazione - Corfumania'
         let text = `Gentile ${safeName},\n\nLa tua prenotazione è stata registrata. In allegato trovi il voucher (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`
         
-        if (finalPaymentStatus === 'PENDING_APPROVAL' && transferId) {
+        if (finalPaymentStatus === 'PENDING_APPROVAL') {
+             const paidLine = paidAmount > 0.01 ? `Hai versato: €${paidAmount.toFixed(2)}\n` : ''
              subject = 'Prenotazione in Attesa di Approvazione / Reservation Pending Approval - Corfumania'
-             text = `Gentile ${safeName},\n\nLa tua prenotazione per il trasferimento è stata ricevuta ed è in attesa di approvazione.\nRiceverai una conferma definitiva appena possibile.\n\nIn allegato trovi i dettagli della richiesta.\n\nCordiali saluti,\nTeam Corfumania\n\n---\n\nDear ${safeName},\n\nYour transfer reservation has been received and is pending approval.\nYou will receive a final confirmation as soon as possible.\n\nPlease find attached the request details.\n\nBest regards,\nCorfumania Team`
+             text = `Gentile ${safeName},\n\nLa tua prenotazione è stata ricevuta ed è in attesa di approvazione.\n${paidLine}Totale prenotazione: €${finalTotalPrice.toFixed(2)}\nRiceverai una conferma definitiva appena possibile.\n\nIn allegato trovi i dettagli della richiesta.\n\nCordiali saluti,\nTeam Corfumania\n\n---\n\nDear ${safeName},\n\nYour reservation has been received and is pending approval.\n${paidAmount > 0.01 ? `Paid: €${paidAmount.toFixed(2)}\n` : ''}Total: €${finalTotalPrice.toFixed(2)}\nYou will receive a final confirmation as soon as possible.\n\nPlease find attached the request details.\n\nBest regards,\nCorfumania Team`
         }
 
-        await transporter.sendMail({
-          from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+        const result = await sendMail({
           to: email,
           subject,
           text,
-          attachments
+          attachments: attachments.length > 0 ? attachments : undefined,
         })
-        console.log('[CREATE] Email sent to', email)
+        try {
+          await createAuditLog(
+            session.user.id,
+            'SEND_PARTICIPANT_EMAIL',
+            'PARTICIPANT',
+            participant.id,
+            `Inviata email (${subject}) a ${email}${result.previewUrl ? ` (preview: ${result.previewUrl})` : ''}`,
+            excursionId || null,
+            transferId || null,
+            resolvedRentalId
+          )
+        } catch {}
       }
     } catch (emailError) {
-      console.error('[CREATE] Email sending failed:', emailError)
+      try {
+        await createAuditLog(
+          session.user.id,
+          'SEND_PARTICIPANT_EMAIL_FAILED',
+          'PARTICIPANT',
+          participant.id,
+          `Invio email fallito: ${(emailError as any)?.message || 'Errore sconosciuto'}`,
+          excursionId || null,
+          transferId || null,
+          resolvedRentalId
+        )
+      } catch {}
     }
 
     let participantWithUser = await prisma.participant.findUnique({

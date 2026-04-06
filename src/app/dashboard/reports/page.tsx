@@ -88,7 +88,7 @@ export default function ReportsPage() {
   // Filters State
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
-  const [selectedTypes, setSelectedTypes] = useState<string[]>(['EXCURSION', 'TRANSFER', 'RENTAL_CAR', 'RENTAL_MOTO', 'RENTAL_BOAT', 'SPECIAL_BRACELET', 'SPECIAL_CITY_TAX', 'SPECIAL_AC'])
+  const [selectedTypes, setSelectedTypes] = useState<string[]>(['EXCURSION', 'TRANSFER', 'RENTAL_CAR', 'RENTAL_MOTO', 'RENTAL_BOAT', 'SPECIAL_BRACELET', 'SPECIAL_CITY_TAX'])
   const [selectedAgencies, setSelectedAgencies] = useState<string[]>([])
   const [selectedProviders, setSelectedProviders] = useState<string[]>([])
   const [selectedAssistants, setSelectedAssistants] = useState<string[]>([])
@@ -178,7 +178,7 @@ export default function ReportsPage() {
   const resetFilters = () => {
     setStartDate('')
     setEndDate('')
-    setSelectedTypes(['EXCURSION', 'TRANSFER', 'RENTAL_CAR', 'RENTAL_MOTO', 'RENTAL_BOAT', 'SPECIAL_BRACELET', 'SPECIAL_CITY_TAX', 'SPECIAL_AC'])
+    setSelectedTypes(['EXCURSION', 'TRANSFER', 'RENTAL_CAR', 'RENTAL_MOTO', 'RENTAL_BOAT', 'SPECIAL_BRACELET', 'SPECIAL_CITY_TAX'])
     setSelectedAgencies([])
     setSelectedProviders([])
     setSelectedAssistants([])
@@ -340,13 +340,6 @@ export default function ReportsPage() {
                   <Square className="w-4 h-4 text-gray-400" />
                 }
                 <span className="text-sm">Tassa Soggiorno</span>
-              </div>
-              <div className="flex items-center gap-2 cursor-pointer" onClick={() => toggleType('SPECIAL_AC')}>
-                {selectedTypes.includes('SPECIAL_AC') ? 
-                  <CheckSquare className="w-4 h-4 text-blue-600" /> : 
-                  <Square className="w-4 h-4 text-gray-400" />
-                }
-                <span className="text-sm">Aria Condizionata</span>
               </div>
             </div>
           </div>

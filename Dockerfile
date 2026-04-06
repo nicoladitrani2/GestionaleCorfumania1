@@ -1,7 +1,14 @@
 FROM node:20-bookworm-slim AS deps
 WORKDIR /app
+RUN apt-get update -y && apt-get install -y --no-install-recommends ca-certificates openssl && rm -rf /var/lib/apt/lists/*
 COPY package.json package-lock.json ./
-RUN npm ci
+RUN npm config set fetch-retries 5 \
+  && npm config set fetch-retry-factor 2 \
+  && npm config set fetch-retry-mintimeout 20000 \
+  && npm config set fetch-retry-maxtimeout 120000 \
+  && npm config set fund false \
+  && npm config set audit false
+RUN --mount=type=cache,target=/root/.npm npm ci --no-audit --no-fund --prefer-offline
 
 FROM node:20-bookworm-slim AS build
 WORKDIR /app

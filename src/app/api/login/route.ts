@@ -98,6 +98,7 @@ export async function POST(request: Request) {
     const session = await encrypt({
       user: {
         id: user.id,
+        email: user.email,
         role: user.role,
         firstName: user.firstName,
         lastName: user.lastName,

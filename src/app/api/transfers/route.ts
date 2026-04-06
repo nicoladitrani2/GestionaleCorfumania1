@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
+import { sendMail } from '@/lib/mailer'
 
 export const dynamic = 'force-dynamic'
 
@@ -15,6 +16,7 @@ export async function GET(request: Request) {
   const id = searchParams.get('id')
   const archived = searchParams.get('archived') === 'true'
   const pending = searchParams.get('pending') === 'true'
+  const rejected = searchParams.get('rejected') === 'true'
   const now = new Date()
   // Set to beginning of today
   now.setHours(0, 0, 0, 0)
@@ -41,10 +43,14 @@ export async function GET(request: Request) {
   } else {
     if (pending) {
       whereClause.approvalStatus = 'PENDING'
+    } else if (rejected) {
+      whereClause.approvalStatus = 'REJECTED'
     } else if (archived) {
       whereClause.date = { lt: now }
+      whereClause.approvalStatus = { not: 'REJECTED' }
     } else {
       whereClause.date = { gte: now }
+      whereClause.approvalStatus = { not: 'REJECTED' }
     }
   }
 
@@ -133,9 +139,10 @@ export async function GET(request: Request) {
         }
       })
 
-    const { participants, agencyCommissions, createdBy, ...rest } = transfer
+    const { id: transferId, participants, agencyCommissions, createdBy, ...rest } = transfer
     
     const result: any = {
+      id: transferId,
       ...rest,
       _count: {
         participants: activeParticipants
@@ -247,6 +254,67 @@ export async function POST(request: Request) {
       transfer.id
     )
 
+    if (approvalStatus === 'PENDING') {
+      try {
+        const admins = await prisma.user.findMany({
+          where: { role: 'ADMIN' },
+          select: { email: true },
+        })
+        const adminEmails = admins
+          .map(a => a.email)
+          .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+
+        const requester =
+          `${session.user.firstName || ''} ${session.user.lastName || ''}`.trim() || session.user.email || session.user.id
+        const transferDate = transfer.date ? new Date(transfer.date).toLocaleString('it-IT') : ''
+        const text = [
+          'Nuovo trasferimento in attesa di approvazione.',
+          `Nome: ${transfer.name}`,
+          transferDate ? `Data: ${transferDate}` : '',
+          `Fornitore: ${transfer.supplier || '-'}`,
+          `Richiedente: ${requester}`,
+          `ID: ${transfer.id}`,
+        ].filter(Boolean).join('\n')
+
+        let okCount = 0
+        let failCount = 0
+        for (const to of adminEmails) {
+          try {
+            await sendMail({
+              to,
+              subject: `Trasferimento da approvare: ${transfer.name}`,
+              text,
+            })
+            okCount += 1
+          } catch {
+            failCount += 1
+          }
+        }
+
+        await createAuditLog(
+          session.user.id,
+          'NOTIFY_ADMINS_TRANSFER_PENDING',
+          'TRANSFER',
+          transfer.id,
+          `Notifica admin creazione trasferimento: ok=${okCount}, fail=${failCount}`,
+          undefined,
+          transfer.id
+        )
+      } catch (e: any) {
+        try {
+          await createAuditLog(
+            session.user.id,
+            'NOTIFY_ADMINS_TRANSFER_PENDING_FAILED',
+            'TRANSFER',
+            transfer.id,
+            `Notifica admin creazione trasferimento fallita: ${e?.message || 'Errore sconosciuto'}`,
+            undefined,
+            transfer.id
+          )
+        } catch {}
+      }
+    }
+
     return NextResponse.json(transfer)
   } catch (error: any) {
     console.error('Error creating transfer:', error)
@@ -265,6 +333,18 @@ export async function PUT(request: Request) {
     const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, confirmationDeadline, maxParticipants } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
+
+    const existing = await prisma.transfer.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        date: true,
+        approvalStatus: true,
+        createdBy: { select: { email: true, firstName: true, lastName: true } },
+      },
+    })
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     if (date && endDate) {
         const start = new Date(date)
@@ -337,6 +417,55 @@ export async function PUT(request: Request) {
       undefined,
       transfer.id
     )
+
+    if (
+      typeof approvalStatus === 'string' &&
+      existing.approvalStatus !== transfer.approvalStatus &&
+      (transfer.approvalStatus === 'APPROVED' || transfer.approvalStatus === 'REJECTED') &&
+      existing.createdBy?.email
+    ) {
+      const createdByName =
+        `${existing.createdBy.firstName || ''} ${existing.createdBy.lastName || ''}`.trim() || 'Utente'
+      const transferName = transfer.name || existing.name || 'Trasferimento'
+      const transferDate = transfer.date ? new Date(transfer.date).toLocaleString('it-IT') : ''
+
+      const subject =
+        transfer.approvalStatus === 'APPROVED'
+          ? `Trasferimento approvato: ${transferName}`
+          : `Trasferimento rifiutato: ${transferName}`
+
+      const text =
+        transfer.approvalStatus === 'APPROVED'
+          ? `Ciao ${createdByName},\n\nil trasferimento "${transferName}" (${transferDate}) è stato approvato.\n\nPrezzi:\n- Adulti: €${(typeof transfer.priceAdult === 'number' ? transfer.priceAdult : 0).toFixed(2)}\n- Bambini: €${(typeof transfer.priceChild === 'number' ? transfer.priceChild : 0).toFixed(2)}\n\nPuoi procedere con le prenotazioni.\n\nCorfumania`
+          : `Ciao ${createdByName},\n\nil trasferimento "${transferName}" (${transferDate}) è stato rifiutato.\n\nCorfumania`
+
+      try {
+        await sendMail({
+          to: existing.createdBy.email,
+          subject,
+          text,
+        })
+        await createAuditLog(
+          session.user.id,
+          'SEND_TRANSFER_APPROVAL_EMAIL',
+          'TRANSFER',
+          transfer.id,
+          `Inviata email approvazione trasferimento a ${existing.createdBy.email}`,
+          undefined,
+          transfer.id
+        )
+      } catch (e: any) {
+        await createAuditLog(
+          session.user.id,
+          'SEND_TRANSFER_APPROVAL_EMAIL_FAILED',
+          'TRANSFER',
+          transfer.id,
+          `Invio email approvazione trasferimento fallito: ${e?.message || 'Errore sconosciuto'}`,
+          undefined,
+          transfer.id
+        )
+      }
+    }
 
     return NextResponse.json(transfer)
   } catch (error: any) {

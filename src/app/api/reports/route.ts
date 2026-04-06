@@ -221,6 +221,9 @@ export async function GET(request: Request) {
         
         // --- SPECIAL SERVICES ---
         if (p.specialServiceType) {
+             if (p.specialServiceType === 'AC') {
+                 return
+             }
              // Filter by specific Special Service Type
              if (types && types.length > 0) {
                  const currentSpecialType = `SPECIAL_${p.specialServiceType}`
@@ -236,7 +239,6 @@ export async function GET(request: Request) {
              let serviceName = p.specialServiceType
              if (serviceName === 'BRACELET') serviceName = 'Braccialetto'
              else if (serviceName === 'CITY_TAX') serviceName = 'Tassa di Soggiorno'
-             else if (serviceName === 'AC') serviceName = 'Aria Condizionata'
 
              if (!bySpecialService[serviceName]) {
                  bySpecialService[serviceName] = { name: serviceName, revenue: 0, commission: 0, count: 0, pax: 0 }

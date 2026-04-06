@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
-import nodemailer from 'nodemailer'
+import { sendMail } from '@/lib/mailer'
 
 export async function POST(
   request: Request,
@@ -79,19 +79,6 @@ export async function POST(
 
     if (participant.email && hasAttachments) {
       try {
-        const transporter = nodemailer.createTransport({
-                host: 'smtp.gmail.com',
-                port: 465,
-                secure: true, // true for 465, false for other ports
-                auth: {
-                    user: process.env.EMAIL_USER,
-                    pass: process.env.EMAIL_PASS
-                },
-                tls: {
-                    rejectUnauthorized: false
-                }
-            })
-
         const attachments = []
         if (pdfAttachmentIT && pdfAttachmentEN) {
              attachments.push({
@@ -109,14 +96,12 @@ export async function POST(
              })
         }
 
-        await transporter.sendMail({
-          from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+        await sendMail({
           to: participant.email,
           subject: 'Rimborso Effettuato - Corfumania',
           text: `Gentile ${safeName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
-          attachments: attachments,
+          attachments,
         })
-        console.log('Email rimborso inviata a:', participant.email)
       } catch (emailError) {
         console.error('Error sending refund email:', emailError)
       }

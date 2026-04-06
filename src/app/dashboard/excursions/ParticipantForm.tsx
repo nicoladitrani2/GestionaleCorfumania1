@@ -95,6 +95,11 @@ export function ParticipantForm({
   agencyCommissionType = 'PERCENTAGE',
   maxParticipants
 }: ParticipantFormProps) {
+  const [adminUsers, setAdminUsers] = useState<{ id: string; firstName: string | null; lastName: string | null; email: string }[]>([])
+  const [notifyAdminsEnabled, setNotifyAdminsEnabled] = useState(false)
+  const [notifyAllAdmins, setNotifyAllAdmins] = useState(true)
+  const [notifyAdminIds, setNotifyAdminIds] = useState<string[]>([])
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false)
   const [formData, setFormData] = useState({
     firstName: '',
     lastName: '',
@@ -726,8 +731,20 @@ export function ParticipantForm({
         payload.pdfAttachmentIT = base64IT
         payload.pdfAttachmentEN = base64EN
         
+        if (notifyAdminsEnabled && canNotifyAdmins) {
+          const ids = notifyAllAdmins ? adminUsers.map(a => a.id) : notifyAdminIds
+          if (ids.length > 0) {
+            payload.notifyAdminUserIds = ids
+          }
+        }
         await sendData(payload)
       } else {
+        if (notifyAdminsEnabled && canNotifyAdmins) {
+          const ids = notifyAllAdmins ? adminUsers.map(a => a.id) : notifyAdminIds
+          if (ids.length > 0) {
+            payload.notifyAdminUserIds = ids
+          }
+        }
         await sendData(payload)
       }
     } catch (error) {
@@ -834,6 +851,48 @@ export function ParticipantForm({
   const rentalCommissionBase = isRentalCar ? Math.max(0, rentalGross - rentalExcludedCosts) : Math.max(0, rentalGross)
   const rentalAgentShare = rentalCommissionBase * 0.05
   const selectedPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
+  const expectedPrice =
+    (type === 'EXCURSION' || type === 'TRANSFER')
+      ? ((formData.adults || 0) * (priceAdult || 0)) + ((formData.children || 0) * (priceChild || 0))
+      : 0
+  const baselinePrice =
+    expectedPrice > 0
+      ? expectedPrice
+      : (typeof (initialData as any)?.originalPrice === 'number'
+          ? (initialData as any).originalPrice
+          : (typeof (initialData as any)?.totalPrice === 'number' ? (initialData as any).totalPrice : 0))
+  const priceNeedsApproval =
+    (type === 'EXCURSION' || type === 'TRANSFER') &&
+    baselinePrice > 0 &&
+    Math.abs((Number(formData.price) || 0) - baselinePrice) > 0.01
+  const transferNeedsApproval = type === 'TRANSFER' && !!transferApprovalStatus && transferApprovalStatus !== 'APPROVED'
+  const mayNeedApproval = (userRole || '') !== 'ADMIN' && (priceNeedsApproval || transferNeedsApproval)
+  const canNotifyAdmins =
+    (userRole || '') !== 'ADMIN' && (type === 'EXCURSION' || type === 'TRANSFER') && !formData.isOption
+
+  useEffect(() => {
+    if (!canNotifyAdmins || !notifyAdminsEnabled) return
+    let cancelled = false
+    const loadAdmins = async () => {
+      try {
+        setAdminUsersLoading(true)
+        const res = await fetch('/api/users/admins')
+        if (!res.ok) return
+        const data = await res.json()
+        if (!cancelled && Array.isArray(data)) {
+          setAdminUsers(data)
+          setNotifyAdminIds(data.map((a: any) => String(a.id)))
+        }
+      } catch {
+      } finally {
+        if (!cancelled) setAdminUsersLoading(false)
+      }
+    }
+    loadAdmins()
+    return () => {
+      cancelled = true
+    }
+  }, [canNotifyAdmins, notifyAdminsEnabled])
   const showCapacity = !!(maxParticipants && maxParticipants > 0 && (excursionId || transferId))
   const remainingNow =
     showCapacity && typeof capacityInfo.activePax === 'number'
@@ -1541,6 +1600,65 @@ export function ParticipantForm({
                         <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">€</span>
                       </div>
                     </div>
+
+                    {canNotifyAdmins && (
+                      <div className="col-span-1 sm:col-span-2">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={notifyAdminsEnabled}
+                            onChange={e => setNotifyAdminsEnabled(e.target.checked)}
+                            className="h-4 w-4"
+                          />
+                          <span className="text-sm font-semibold text-gray-800">Notifica admin per approvazione (opzionale)</span>
+                        </div>
+
+                        {notifyAdminsEnabled && (
+                          <div className="mt-3 border border-gray-200 rounded-lg p-3 bg-gray-50 space-y-3">
+                            {adminUsersLoading && (
+                              <div className="text-sm text-gray-600">Caricamento admin...</div>
+                            )}
+                            {!adminUsersLoading && adminUsers.length === 0 && (
+                              <div className="text-sm text-gray-600">Nessun admin trovato</div>
+                            )}
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="checkbox"
+                                checked={notifyAllAdmins}
+                                onChange={e => setNotifyAllAdmins(e.target.checked)}
+                                className="h-4 w-4"
+                                disabled={adminUsers.length === 0}
+                              />
+                              <span className="text-sm text-gray-800">Notifica tutti gli admin</span>
+                            </div>
+
+                            {!notifyAllAdmins && adminUsers.length > 0 && (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                                {adminUsers.map(a => {
+                                  const label = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.email
+                                  const checked = notifyAdminIds.includes(a.id)
+                                  return (
+                                    <label key={a.id} className="flex items-center gap-2 text-sm text-gray-800">
+                                      <input
+                                        type="checkbox"
+                                        checked={checked}
+                                        onChange={e => {
+                                          setNotifyAdminIds(prev =>
+                                            e.target.checked ? [...prev, a.id] : prev.filter(x => x !== a.id)
+                                          )
+                                        }}
+                                        className="h-4 w-4"
+                                      />
+                                      <span className="truncate">{label}</span>
+                                    </label>
+                                  )
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    )}
 
                     {type === 'RENTAL' && rentalType === 'CAR' && (
                       <>

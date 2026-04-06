@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
-import nodemailer from 'nodemailer'
+import { sendMail } from '@/lib/mailer'
 
 function encodeDocumentInfo(docType?: string, docNumber?: string): string | null {
   if (!docType && !docNumber) return null
@@ -114,7 +114,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           lastName: true,
           email: true
         }
-      }
+      },
+      user: {
+        select: {
+          email: true,
+          firstName: true,
+          lastName: true
+        }
+      },
+      excursion: { select: { name: true, startDate: true, priceAdult: true, priceChild: true } },
+      transfer: { select: { name: true, date: true, priceAdult: true, priceChild: true } },
+      rental: { select: { name: true, type: true } }
     }
   })
   if (!participant) return NextResponse.json({ error: 'Not found' }, { status: 404 })
@@ -209,6 +219,33 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
                          maxParticipants: mp
                      }
                  })
+
+                 try {
+                     const tWithCreator = await prisma.transfer.findUnique({
+                         where: { id: transfer.id },
+                         select: {
+                             name: true,
+                             date: true,
+                             priceAdult: true,
+                             priceChild: true,
+                             createdBy: { select: { email: true, firstName: true, lastName: true } }
+                         }
+                     })
+                     if (!tWithCreator) return
+                     const creator = tWithCreator?.createdBy
+                     const to = creator?.email
+                     if (to) {
+                         const createdByName =
+                             `${creator?.firstName || ''} ${creator?.lastName || ''}`.trim() || 'Utente'
+                         const transferName = tWithCreator.name || 'Trasferimento'
+                         const transferDate = tWithCreator.date ? new Date(tWithCreator.date).toLocaleString('it-IT') : ''
+                         await sendMail({
+                             to,
+                             subject: `Trasferimento approvato: ${transferName}`,
+                             text: `Ciao ${createdByName},\n\nil trasferimento "${transferName}" (${transferDate}) è stato approvato.\n\nPrezzi:\n- Adulti: €${(typeof tWithCreator.priceAdult === 'number' ? tWithCreator.priceAdult : 0).toFixed(2)}\n- Bambini: €${(typeof tWithCreator.priceChild === 'number' ? tWithCreator.priceChild : 0).toFixed(2)}\n\nPuoi procedere con le prenotazioni.\n\nCorfumania`,
+                         })
+                     }
+                 } catch {}
 
                  try {
                      await createAuditLog(
@@ -424,6 +461,84 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       }
     })
 
+    const notifyAdminUserIds = Array.isArray(body.notifyAdminUserIds)
+      ? body.notifyAdminUserIds.map((x: any) => String(x)).filter(Boolean)
+      : []
+
+    if (
+      session.user.role !== 'ADMIN' &&
+      (paymentStatus === 'PENDING_APPROVAL' || approvalStatus === 'PENDING')
+    ) {
+      const admins = await prisma.user.findMany({
+        where: notifyAdminUserIds.length > 0 ? { id: { in: notifyAdminUserIds }, role: 'ADMIN' } : { role: 'ADMIN' },
+        select: { email: true, firstName: true, lastName: true },
+      })
+
+      const customerName =
+        `${body.firstName ?? participant.firstName ?? participant.client?.firstName ?? ''} ${body.lastName ?? participant.lastName ?? participant.client?.lastName ?? ''}`.trim() ||
+        'Cliente'
+
+      const eventName = participant.excursion?.name || participant.transfer?.name || participant.rental?.name || participant.rentalType || 'Prenotazione'
+      const requested = typeof body.price === 'number' ? body.price : typeof body.totalPrice === 'number' ? body.totalPrice : undefined
+      const requestedLine = typeof requested === 'number' ? `Totale richiesto: €${requested.toFixed(2)}` : ''
+      const requester = `${session.user.firstName || ''} ${session.user.lastName || ''}`.trim() || session.user.email || session.user.id
+
+      const text = [
+        'Richiesta in attesa di approvazione.',
+        `Evento: ${eventName}`,
+        `Cliente: ${customerName}`,
+        requestedLine,
+        `Richiedente: ${requester}`,
+        `ID partecipante: ${participant.id}`,
+      ].filter(Boolean).join('\n')
+
+      const adminEmails = admins
+        .map(a => a.email)
+        .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+      if (adminEmails.length === 0) {
+        try {
+          await createAuditLog(
+            session.user.id,
+            'NOTIFY_ADMINS_SKIPPED',
+            'PARTICIPANT',
+            participant.id,
+            'Notifica admin non inviata: nessun destinatario valido',
+            participant.excursionId,
+            participant.transferId,
+            participant.rentalId
+          )
+        } catch {}
+      }
+
+      let okCount = 0
+      let failCount = 0
+      for (const to of adminEmails) {
+        try {
+          await sendMail({
+            to,
+            subject: `Approvazione richiesta: ${eventName}`,
+            text,
+          })
+          okCount += 1
+        } catch {
+          failCount += 1
+        }
+      }
+
+      try {
+        await createAuditLog(
+          session.user.id,
+          'NOTIFY_ADMINS_APPROVAL',
+          'PARTICIPANT',
+          participant.id,
+          `Notifica admin inviata: ok=${okCount}, fail=${failCount}`,
+          participant.excursionId,
+          participant.transferId,
+          participant.rentalId
+        )
+      } catch {}
+    }
+
     let changes: string[] = []
     
     const formatDate = (d: Date | null) => d ? d.toISOString().split('T')[0] : 'N/A'
@@ -511,80 +626,34 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       details += `: ${changes.join(', ')}`
     }
 
+    const attachments: { filename: string; content: Buffer }[] = []
+    if (body.pdfAttachmentIT && body.pdfAttachmentEN) {
+      attachments.push({
+        filename: `Prenotazione_${participant.id}_IT.pdf`,
+        content: Buffer.from(body.pdfAttachmentIT, 'base64')
+      })
+      attachments.push({
+        filename: `Prenotazione_${participant.id}_EN.pdf`,
+        content: Buffer.from(body.pdfAttachmentEN, 'base64')
+      })
+    } else if (body.pdfAttachment) {
+      attachments.push({
+        filename: `Prenotazione_${participant.id}.pdf`,
+        content: Buffer.from(body.pdfAttachment, 'base64')
+      })
+    }
+
+    const safeName =
+      `${updated.firstName || participant.firstName || participant.client?.firstName || ''} ${updated.lastName || participant.lastName || participant.client?.lastName || ''}`.trim() ||
+      'Cliente'
+
     const recipientEmail = updated.email || participant.client?.email || participant.email
+
+    const effectiveApprovalStatus = approvalStatus ?? updated.approvalStatus
+    const effectivePaymentStatus = updated.paymentStatus
+
     if (recipientEmail) {
       try {
-        const allowSelfSigned =
-          process.env.SMTP_ALLOW_SELF_SIGNED === 'true' ||
-          process.env.NODE_ENV !== 'production'
-
-        if (allowSelfSigned) {
-          process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-        }
-
-        let transporter
-
-        if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-          transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-              user: process.env.EMAIL_USER,
-              pass: process.env.EMAIL_PASS
-            },
-            tls: {
-              rejectUnauthorized: !allowSelfSigned
-            }
-          })
-        } else if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-          transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT) || 587,
-            secure: false,
-            auth: {
-              user: process.env.SMTP_USER,
-              pass: process.env.SMTP_PASS
-            },
-            tls: allowSelfSigned ? { rejectUnauthorized: false } : undefined
-          })
-        } else {
-          const testAccount = await nodemailer.createTestAccount()
-          transporter = nodemailer.createTransport({
-            host: 'smtp.ethereal.email',
-            port: 587,
-            secure: false,
-            auth: {
-              user: testAccount.user,
-              pass: testAccount.pass
-            }
-          })
-        }
-
-        const attachments: { filename: string; content: Buffer }[] = []
-        if (body.pdfAttachmentIT && body.pdfAttachmentEN) {
-          attachments.push({
-            filename: `Prenotazione_${participant.id}_IT.pdf`,
-            content: Buffer.from(body.pdfAttachmentIT, 'base64')
-          })
-          attachments.push({
-            filename: `Prenotazione_${participant.id}_EN.pdf`,
-            content: Buffer.from(body.pdfAttachmentEN, 'base64')
-          })
-        } else if (body.pdfAttachment) {
-          attachments.push({
-            filename: `Prenotazione_${participant.id}.pdf`,
-            content: Buffer.from(body.pdfAttachment, 'base64')
-          })
-        }
-
-        const safeName =
-          `${updated.firstName || participant.firstName || participant.client?.firstName || ''} ${updated.lastName || participant.lastName || participant.client?.lastName || ''}`.trim() ||
-          'Cliente'
-
-        const effectiveApprovalStatus = approvalStatus ?? updated.approvalStatus
-        const effectivePaymentStatus = updated.paymentStatus
-
         let subject = 'Aggiornamento Prenotazione - Corfumania'
         let text = `Gentile ${safeName},\n\nLa tua prenotazione è stata aggiornata.\n\n${details}\n\nCordiali saluti,\nTeam Corfumania`
 
@@ -601,72 +670,55 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           subject = 'Prenotazione Confermata - Corfumania'
           text = `Gentile ${safeName},\n\nla tua prenotazione è stata confermata.${attachments.length > 0 ? '\nIn allegato trovi il voucher aggiornato.' : ''}\n\nCordiali saluti,\nTeam Corfumania`
         } else if (effectivePaymentStatus === 'PENDING_APPROVAL') {
+          const total = typeof updated.totalPrice === 'number' ? updated.totalPrice : 0
+          const paidValue = typeof updated.paidAmount === 'number' ? updated.paidAmount : 0
+          const paidLine = paidValue > 0.01 ? `Hai versato: €${paidValue.toFixed(2)}\n` : ''
           subject = 'Prenotazione in Attesa di Approvazione - Corfumania'
-          text = `Gentile ${safeName},\n\nabbiamo ricevuto la tua prenotazione ed è in attesa di approvazione.\nRiceverai una conferma definitiva appena possibile.\n\nCordiali saluti,\nTeam Corfumania`
+          text = `Gentile ${safeName},\n\nabbiamo ricevuto la tua prenotazione ed è in attesa di approvazione.\n${paidLine}Totale prenotazione: €${total.toFixed(2)}\nRiceverai una conferma definitiva appena possibile.\n\nCordiali saluti,\nTeam Corfumania`
         } else if (updated.paymentType === 'BALANCE') {
           subject = 'Conferma Saldo - Corfumania'
         }
 
-        const from =
-          process.env.MAIL_FROM ||
-          process.env.EMAIL_USER ||
-          process.env.SMTP_USER ||
-          'no-reply@localhost'
-
-        await transporter.sendMail({
-          from,
+        const mailResult = await sendMail({
           to: recipientEmail,
           subject,
           text,
-          attachments: attachments.length > 0 ? attachments : undefined
+          attachments: attachments.length > 0 ? attachments : undefined,
         })
 
-        try {
-          await createAuditLog(
-            session.user.id,
-            'SEND_PARTICIPANT_EMAIL',
-            'PARTICIPANT',
-            participant.id,
-            `Inviata email (${subject}) a ${recipientEmail}`,
-            participant.excursionId,
-            participant.transferId,
-            participant.rentalId
-          )
-        } catch (auditError) {
-          console.error('Audit log failed:', auditError)
-        }
-      } catch (emailError) {
-        console.error('Error sending participant email:', emailError)
-        try {
-          await createAuditLog(
-            session.user.id,
-            'SEND_PARTICIPANT_EMAIL_FAILED',
-            'PARTICIPANT',
-            participant.id,
-            `Invio email fallito: ${(emailError as any)?.message || 'Errore sconosciuto'}`,
-            participant.excursionId,
-            participant.transferId,
-            participant.rentalId
-          )
-        } catch (auditError) {
-          console.error('Audit log failed:', auditError)
-        }
-      }
-    } else {
-      try {
         await createAuditLog(
           session.user.id,
-          'SEND_PARTICIPANT_EMAIL_SKIPPED',
+          'SEND_PARTICIPANT_EMAIL',
           'PARTICIPANT',
           participant.id,
-          'Email non inviata: destinatario senza email',
+          `Inviata email (${subject}) a ${recipientEmail}${mailResult.previewUrl ? ` (preview: ${mailResult.previewUrl})` : ''}`,
           participant.excursionId,
           participant.transferId,
           participant.rentalId
         )
-      } catch (auditError) {
-        console.error('Audit log failed:', auditError)
+      } catch (emailError) {
+        await createAuditLog(
+          session.user.id,
+          'SEND_PARTICIPANT_EMAIL_FAILED',
+          'PARTICIPANT',
+          participant.id,
+          `Invio email fallito: ${(emailError as any)?.message || 'Errore sconosciuto'}`,
+          participant.excursionId,
+          participant.transferId,
+          participant.rentalId
+        )
       }
+    } else {
+      await createAuditLog(
+        session.user.id,
+        'SEND_PARTICIPANT_EMAIL_SKIPPED',
+        'PARTICIPANT',
+        participant.id,
+        'Email non inviata: destinatario senza email',
+        participant.excursionId,
+        participant.transferId,
+        participant.rentalId
+      )
     }
 
     await createAuditLog(
@@ -717,19 +769,6 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 
     if (participant.email && hasAttachments) {
       try {
-        const transporter = nodemailer.createTransport({
-                host: 'smtp.gmail.com',
-                port: 465,
-                secure: true, // true for 465, false for other ports
-                auth: {
-                    user: process.env.EMAIL_USER,
-                    pass: process.env.EMAIL_PASS
-                },
-                tls: {
-                    rejectUnauthorized: false
-                }
-            })
-
         const attachments = []
         const safeName = participant.name || 'Cliente'
 
@@ -749,14 +788,12 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
              })
         }
 
-        await transporter.sendMail({
-          from: `"Corfumania" <${process.env.EMAIL_USER}>`,
+        await sendMail({
           to: participant.email,
           subject: 'Cancellazione Prenotazione - Corfumania',
           text: `Gentile ${safeName},\n\nTi informiamo che la tua prenotazione è stata cancellata.\nIn allegato trovi il documento di riepilogo (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
-          attachments: attachments,
+          attachments,
         })
-        console.log('Email cancellazione inviata a:', participant.email)
       } catch (emailError) {
         console.error('Error sending cancellation email:', emailError)
       }

@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
+import { createAuditLog } from '@/lib/audit'
+import { sendMail } from '@/lib/mailer'
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const session = await getSession()
@@ -41,7 +43,10 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const body = await request.json()
     
     // Check if transfer exists
-    const existingTransfer = await prisma.transfer.findUnique({ where: { id } })
+    const existingTransfer = await prisma.transfer.findUnique({
+      where: { id },
+      include: { createdBy: { select: { email: true, firstName: true, lastName: true } } },
+    })
     if (!existingTransfer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
     // Permission check: Only Admin or Creator can edit? 
@@ -116,6 +121,55 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         }
     })
 
+    if (
+      typeof approvalStatus === 'string' &&
+      existingTransfer.approvalStatus !== updatedTransfer.approvalStatus &&
+      (updatedTransfer.approvalStatus === 'APPROVED' || updatedTransfer.approvalStatus === 'REJECTED') &&
+      existingTransfer.createdBy?.email
+    ) {
+      const createdByName =
+        `${existingTransfer.createdBy.firstName || ''} ${existingTransfer.createdBy.lastName || ''}`.trim() || 'Utente'
+      const transferName = updatedTransfer.name || existingTransfer.name || 'Trasferimento'
+      const transferDate = updatedTransfer.date ? new Date(updatedTransfer.date).toLocaleString('it-IT') : ''
+
+      const subject =
+        updatedTransfer.approvalStatus === 'APPROVED'
+          ? `Trasferimento approvato: ${transferName}`
+          : `Trasferimento rifiutato: ${transferName}`
+
+      const text =
+        updatedTransfer.approvalStatus === 'APPROVED'
+          ? `Ciao ${createdByName},\n\nil trasferimento "${transferName}" (${transferDate}) è stato approvato.\n\nPrezzi:\n- Adulti: €${(typeof updatedTransfer.priceAdult === 'number' ? updatedTransfer.priceAdult : 0).toFixed(2)}\n- Bambini: €${(typeof updatedTransfer.priceChild === 'number' ? updatedTransfer.priceChild : 0).toFixed(2)}\n\nPuoi procedere con le prenotazioni.\n\nCorfumania`
+          : `Ciao ${createdByName},\n\nil trasferimento "${transferName}" (${transferDate}) è stato rifiutato.\n\nCorfumania`
+
+      try {
+        await sendMail({
+          to: existingTransfer.createdBy.email,
+          subject,
+          text,
+        })
+        await createAuditLog(
+          session.user.id,
+          'SEND_TRANSFER_APPROVAL_EMAIL',
+          'TRANSFER',
+          updatedTransfer.id,
+          `Inviata email approvazione trasferimento a ${existingTransfer.createdBy.email}`,
+          undefined,
+          updatedTransfer.id
+        )
+      } catch (e: any) {
+        await createAuditLog(
+          session.user.id,
+          'SEND_TRANSFER_APPROVAL_EMAIL_FAILED',
+          'TRANSFER',
+          updatedTransfer.id,
+          `Invio email approvazione trasferimento fallito: ${e?.message || 'Errore sconosciuto'}`,
+          undefined,
+          updatedTransfer.id
+        )
+      }
+    }
+
     return NextResponse.json(updatedTransfer)
 
   } catch (e) {
@@ -146,6 +200,18 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   }
 
   await prisma.transfer.delete({ where: { id } })
+
+  try {
+    await createAuditLog(
+      session.user.id,
+      'DELETE_TRANSFER',
+      'TRANSFER',
+      id,
+      `Eliminato trasferimento: ${transfer.name}`,
+      undefined,
+      id
+    )
+  } catch {}
 
   return NextResponse.json({ success: true })
 }

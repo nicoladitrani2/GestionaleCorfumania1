@@ -30,7 +30,7 @@ export function TransfersManager({
   agencyCommissionType
 }: TransfersManagerProps) {
   const [transfers, setTransfers] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState<'ACTIVE' | 'ARCHIVE' | 'PENDING'>('ACTIVE')
+  const [activeTab, setActiveTab] = useState<'ACTIVE' | 'ARCHIVE' | 'PENDING' | 'REJECTED'>('ACTIVE')
   const [loading, setLoading] = useState(true)
   const [selectedTransfer, setSelectedTransfer] = useState<any>(null)
   
@@ -191,6 +191,7 @@ export function TransfersManager({
       const params = new URLSearchParams()
       if (activeTab === 'ARCHIVE') params.append('archived', 'true')
       if (activeTab === 'PENDING') params.append('pending', 'true')
+      if (activeTab === 'REJECTED') params.append('rejected', 'true')
       
       const res = await fetch(`/api/transfers?${params.toString()}`)
       if (res.ok) {
@@ -204,17 +205,46 @@ export function TransfersManager({
     }
   }
 
-  const handleDeleteTransfer = async (id: string, name: string, e: React.MouseEvent) => {
+  const handleDeleteTransfer = async (transfer: any, e: React.MouseEvent) => {
     e.stopPropagation()
+
+    let id: string = typeof transfer?.id === 'string' ? transfer.id : ''
+    if (!id) {
+      try {
+        const params = new URLSearchParams()
+        if (activeTab === 'ARCHIVE') params.append('archived', 'true')
+        if (activeTab === 'PENDING') params.append('pending', 'true')
+        const res = await fetch(`/api/transfers?${params.toString()}`)
+        if (res.ok) {
+          const data = await res.json()
+          const match = Array.isArray(data)
+            ? data.find((t: any) => t && t.name === transfer?.name && String(t.date) === String(transfer?.date))
+            : null
+          if (match?.id && typeof match.id === 'string') {
+            id = match.id
+          }
+        }
+      } catch {}
+    }
+
+    if (!id) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: 'Impossibile eliminare: ID trasferimento mancante. Ricarica la pagina e riprova.',
+        variant: 'danger'
+      })
+      return
+    }
     
     setConfirmModal({
       isOpen: true,
       title: 'Elimina Trasferimento',
-      message: `Sei sicuro di voler eliminare il trasferimento "${name}"? Questa azione è irreversibile.`,
+      message: `Sei sicuro di voler eliminare il trasferimento "${transfer?.name || ''}"? Questa azione è irreversibile.`,
       variant: 'danger',
       onConfirm: async () => {
         try {
-          const res = await fetch(`/api/transfers?id=${id}`, {
+          const res = await fetch(`/api/transfers/${id}`, {
             method: 'DELETE'
           })
 
@@ -440,11 +470,45 @@ export function TransfersManager({
     fetchTransfers()
   }
 
+  const resolveTransferId = async (transfer: any) => {
+    const direct = typeof transfer?.id === 'string' ? transfer.id : ''
+    if (direct) return direct
+
+    const fromUrl = searchParams.get('id')
+    if (fromUrl) return fromUrl
+
+    try {
+      const params = new URLSearchParams()
+      if (activeTab === 'ARCHIVE') params.append('archived', 'true')
+      if (activeTab === 'PENDING') params.append('pending', 'true')
+      const res = await fetch(`/api/transfers?${params.toString()}`)
+      if (!res.ok) return ''
+      const data = await res.json()
+      const match = Array.isArray(data)
+        ? data.find((t: any) => t && t.name === transfer?.name && String(t.date) === String(transfer?.date))
+        : null
+      return typeof match?.id === 'string' ? match.id : ''
+    } catch {
+      return ''
+    }
+  }
+
   const handleApprovalAction = async (transfer: any, status: 'APPROVED' | 'REJECTED') => {
+    const id = await resolveTransferId(transfer)
+    if (!id) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: 'Impossibile procedere: ID trasferimento mancante. Ricarica la pagina e riprova.',
+        variant: 'danger'
+      })
+      return
+    }
+
     if (status === 'APPROVED') {
       setApprovalModal({
         isOpen: true,
-        transferId: transfer.id,
+        transferId: id,
         priceAdult: transfer.priceAdult ? transfer.priceAdult.toString() : '',
         priceChild: transfer.priceChild ? transfer.priceChild.toString() : ''
       })
@@ -455,7 +519,7 @@ export function TransfersManager({
       const res = await fetch('/api/transfers', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: transfer.id, approvalStatus: status })
+        body: JSON.stringify({ id, approvalStatus: status })
       })
 
       if (!res.ok) {
@@ -465,7 +529,7 @@ export function TransfersManager({
 
       const updated = await res.json()
 
-      if (selectedTransfer && selectedTransfer.id === transfer.id) {
+      if (selectedTransfer && selectedTransfer.id === id) {
         setSelectedTransfer({ ...selectedTransfer, ...updated })
       }
 
@@ -483,6 +547,17 @@ export function TransfersManager({
 
   const submitApproval = async () => {
     try {
+      const id = typeof approvalModal.transferId === 'string' ? approvalModal.transferId : ''
+      if (!id) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: 'Impossibile approvare: ID trasferimento mancante.',
+          variant: 'danger'
+        })
+        return
+      }
+
       const pa = parseFloat(approvalModal.priceAdult || '0')
       const pc = parseFloat(approvalModal.priceChild || '0')
 
@@ -500,7 +575,7 @@ export function TransfersManager({
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
-          id: approvalModal.transferId, 
+          id, 
           approvalStatus: 'APPROVED',
           priceAdult: pa,
           priceChild: pc
@@ -514,7 +589,7 @@ export function TransfersManager({
 
       const updated = await res.json()
 
-      if (selectedTransfer && selectedTransfer.id === approvalModal.transferId) {
+      if (selectedTransfer && selectedTransfer.id === id) {
         setSelectedTransfer({ ...selectedTransfer, ...updated })
       }
 
@@ -1050,24 +1125,24 @@ export function TransfersManager({
                  </div>
                  <button
                   onClick={() => setIsAddingParticipant(true)}
-                  disabled={userRole !== 'ADMIN' && selectedTransfer.approvalStatus === 'REJECTED'}
+                  disabled={selectedTransfer.approvalStatus === 'REJECTED'}
                   className={`flex items-center gap-2 px-6 py-2.5 rounded-lg font-medium shadow-md transition-all transform hover:-translate-y-0.5 ${
-                    userRole !== 'ADMIN' && selectedTransfer.approvalStatus === 'REJECTED'
+                    selectedTransfer.approvalStatus === 'REJECTED'
                       ? 'bg-gray-200 text-gray-500 cursor-not-allowed shadow-none hover:translate-y-0 hover:shadow-none'
                       : 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg'
                   }`}
                 >
                   <Plus className="w-5 h-5" />
-                  {userRole !== 'ADMIN' && selectedTransfer.approvalStatus === 'REJECTED'
+                  {selectedTransfer.approvalStatus === 'REJECTED'
                     ? 'Trasferimento Rifiutato'
                     : 'Aggiungi Partecipante'}
                 </button>
-                {userRole === 'ADMIN' && selectedTransfer.approvalStatus === 'PENDING' && (
+                {userRole === 'ADMIN' && (
                   <div className="flex flex-col gap-2">
                     <div className="flex gap-2">
                       <button
                         type="button"
-                        onClick={() => handleApprovalAction(selectedTransfer.id, 'APPROVED')}
+                        onClick={() => handleApprovalAction(selectedTransfer, 'APPROVED')}
                         className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium shadow-sm hover:bg-emerald-700 transition-colors"
                       >
                         <Check className="w-4 h-4" />
@@ -1075,7 +1150,7 @@ export function TransfersManager({
                       </button>
                       <button
                         type="button"
-                        onClick={() => handleApprovalAction(selectedTransfer.id, 'REJECTED')}
+                        onClick={() => handleApprovalAction(selectedTransfer, 'REJECTED')}
                         className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium shadow-sm hover:bg-red-700 transition-colors"
                       >
                         <X className="w-4 h-4" />
@@ -1234,10 +1309,18 @@ export function TransfersManager({
           </div>
 
           <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-            {(['ACTIVE', 'ARCHIVE', 'PENDING'] as const).map((tab) => {
-              const label = tab === 'ACTIVE' ? 'Attivi' : tab === 'ARCHIVE' ? 'Archivio' : 'Da approvare'
+            {(['ACTIVE', 'ARCHIVE', 'PENDING', 'REJECTED'] as const).map((tab) => {
+              const label =
+                tab === 'ACTIVE'
+                  ? 'Attivi'
+                  : tab === 'ARCHIVE'
+                    ? 'Archivio'
+                    : tab === 'PENDING'
+                      ? 'Da approvare'
+                      : 'Rifiutati'
               const isPending = tab === 'PENDING'
-              if (isPending && userRole !== 'ADMIN') return null
+              const isRejected = tab === 'REJECTED'
+              if ((isPending || isRejected) && userRole !== 'ADMIN') return null
               return (
                 <button
                   key={tab}
@@ -1245,12 +1328,16 @@ export function TransfersManager({
                   className={`
                     px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200
                     ${activeTab === tab 
-                      ? isPending 
-                        ? 'bg-orange-500 text-white shadow-sm' 
-                        : 'bg-white text-gray-900 shadow-sm' 
+                      ? isPending
+                        ? 'bg-orange-500 text-white shadow-sm'
+                        : isRejected
+                          ? 'bg-red-500 text-white shadow-sm'
+                          : 'bg-white text-gray-900 shadow-sm' 
                       : isPending
                         ? 'text-orange-600 hover:text-orange-700 hover:bg-orange-50'
-                        : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}
+                        : isRejected
+                          ? 'text-red-600 hover:text-red-700 hover:bg-red-50'
+                          : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}
                   `}
                 >
                   {label}
@@ -1276,10 +1363,18 @@ export function TransfersManager({
               ) : (
                 transfers.map((transfer) => (
                   <div 
-                    key={transfer.id}
+                    key={transfer.id || `${transfer.name}-${transfer.date}`}
                     onClick={() => {
+                        if (!transfer?.id) {
+                          setAlertModal({
+                            isOpen: true,
+                            title: 'Errore',
+                            message: 'Trasferimento senza ID. Ricarica la pagina e riprova.',
+                            variant: 'danger'
+                          })
+                          return
+                        }
                         setSelectedTransfer(transfer)
-                        // Add to URL
                         const url = new URL(window.location.href)
                         url.searchParams.set('id', transfer.id)
                         window.history.pushState({}, '', url.toString())
@@ -1292,17 +1387,19 @@ export function TransfersManager({
                       <div className="p-2.5 bg-blue-50 rounded-lg group-hover:bg-blue-100 transition-colors">
                         <MapIcon className="w-6 h-6 text-blue-600" />
                       </div>
-                      {userRole === 'ADMIN' && (
+                      {(userRole === 'ADMIN' || (transfer?.approvalStatus === 'PENDING' && transfer?.createdBy?.id === currentUserId)) && (
                         <div className="flex gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                           {userRole === 'ADMIN' && (
+                             <button
+                               onClick={(e) => handleEditTransfer(transfer, e)}
+                               className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
+                               title="Modifica"
+                             >
+                               <Edit className="w-4 h-4" />
+                             </button>
+                           )}
                            <button
-                             onClick={(e) => handleEditTransfer(transfer, e)}
-                             className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-md transition-colors"
-                             title="Modifica"
-                           >
-                             <Edit className="w-4 h-4" />
-                           </button>
-                           <button
-                             onClick={(e) => handleDeleteTransfer(transfer.id, transfer.name, e)}
+                             onClick={(e) => handleDeleteTransfer(transfer, e)}
                              className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-md transition-colors"
                              title="Elimina"
                            >

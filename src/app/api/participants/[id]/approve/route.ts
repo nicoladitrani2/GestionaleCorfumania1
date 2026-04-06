@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
-import nodemailer from 'nodemailer'
+import { sendMail } from '@/lib/mailer'
 
 export async function POST(
   request: Request,
@@ -162,53 +162,6 @@ export async function POST(
     const recipientEmail = existing.email || existing.client?.email
     if (recipientEmail) {
       try {
-        const allowSelfSigned =
-          process.env.SMTP_ALLOW_SELF_SIGNED === 'true' ||
-          process.env.NODE_ENV !== 'production'
-
-        if (allowSelfSigned) {
-          process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-        }
-
-        let transporter
-
-        if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-          transporter = nodemailer.createTransport({
-            host: 'smtp.gmail.com',
-            port: 465,
-            secure: true,
-            auth: {
-              user: process.env.EMAIL_USER,
-              pass: process.env.EMAIL_PASS
-            },
-            tls: {
-              rejectUnauthorized: !allowSelfSigned
-            }
-          })
-        } else if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-          transporter = nodemailer.createTransport({
-            host: process.env.SMTP_HOST,
-            port: Number(process.env.SMTP_PORT) || 587,
-            secure: false,
-            auth: {
-              user: process.env.SMTP_USER,
-              pass: process.env.SMTP_PASS
-            },
-            tls: allowSelfSigned ? { rejectUnauthorized: false } : undefined
-          })
-        } else {
-          const testAccount = await nodemailer.createTestAccount()
-          transporter = nodemailer.createTransport({
-            host: 'smtp.ethereal.email',
-            port: 587,
-            secure: false,
-            auth: {
-              user: testAccount.user,
-              pass: testAccount.pass
-            }
-          })
-        }
-
         const safeName =
           `${existing.firstName || existing.client?.firstName || ''} ${existing.lastName || existing.client?.lastName || ''}`.trim() ||
           'Cliente'
@@ -230,18 +183,7 @@ export async function POST(
           text = `Gentile ${safeName},\n\nla tua prenotazione è stata confermata.\nTotale: €${nextTotalPrice.toFixed(2)}.\n\nCordiali saluti,\nTeam Corfumania`
         }
 
-        const from =
-          process.env.MAIL_FROM ||
-          process.env.EMAIL_USER ||
-          process.env.SMTP_USER ||
-          'no-reply@localhost'
-
-        await transporter.sendMail({
-          from,
-          to: recipientEmail,
-          subject,
-          text
-        })
+        await sendMail({ to: recipientEmail, subject, text })
 
         await createAuditLog(
           session.user.id,

@@ -1,6 +1,4 @@
-import { EncryptJWT, SignJWT, jwtDecrypt, jwtVerify } from 'jose'
-import { cookies } from 'next/headers'
-import { createHash } from 'node:crypto'
+import { SignJWT, jwtVerify } from 'jose'
 
 function getKey() {
   const fromEnv = process.env.JWT_SECRET
@@ -11,17 +9,6 @@ function getKey() {
   return new TextEncoder().encode('dev-jwt-secret-change-me')
 }
 
-function getEncKey() {
-  const fromEnv = process.env.JWT_SECRET
-  if (fromEnv && fromEnv.trim()) {
-    return createHash('sha256').update(fromEnv).digest()
-  }
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('Missing JWT_SECRET')
-  }
-  return createHash('sha256').update('dev-jwt-secret-change-me').digest()
-}
-
 function getSessionTtlSeconds() {
   const raw = process.env.SESSION_TTL_SECONDS
   const parsed = raw ? Number(raw) : NaN
@@ -30,26 +17,22 @@ function getSessionTtlSeconds() {
 }
 
 export async function encrypt(payload: any) {
-  return await new EncryptJWT(payload)
-    .setProtectedHeader({ alg: 'dir', enc: 'A256GCM' })
+  return await new SignJWT(payload)
+    .setProtectedHeader({ alg: 'HS256' })
     .setIssuedAt()
     .setExpirationTime(`${getSessionTtlSeconds()}s`)
-    .encrypt(getEncKey())
+    .sign(getKey())
 }
 
 export async function decrypt(input: string): Promise<any> {
-  try {
-    const { payload } = await jwtDecrypt(input, getEncKey())
-    return payload
-  } catch {
-    const { payload } = await jwtVerify(input, getKey(), {
-      algorithms: ['HS256'],
-    })
-    return payload
-  }
+  const { payload } = await jwtVerify(input, getKey(), {
+    algorithms: ['HS256'],
+  })
+  return payload
 }
 
 export async function getSession() {
+  const { cookies } = await import('next/headers')
   const session = (await cookies()).get('session')?.value
   if (!session) return null
   try {

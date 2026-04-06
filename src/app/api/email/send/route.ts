@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server'
-import nodemailer from 'nodemailer'
 import { Buffer } from 'node:buffer'
 import { getSession } from '@/lib/auth'
 import { addRateLimitHeaders, getClientIp, rateLimit } from '@/lib/rateLimit'
 import { enforceSameOrigin } from '@/lib/csrf'
+import { sendMail } from '@/lib/mailer'
 
 export const dynamic = 'force-dynamic'
 
@@ -53,65 +53,32 @@ export async function POST(request: Request) {
       return addRateLimitHeaders(NextResponse.json({ error: 'Parametri email mancanti' }, { status: 400 }), rl, 60)
     }
 
-    const allowSelfSigned = process.env.NODE_ENV !== 'production' && process.env.SMTP_ALLOW_SELF_SIGNED === 'true'
-
-    let transporter
-
-    if (process.env.EMAIL_USER && process.env.EMAIL_PASS) {
-      transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 465,
-        secure: true,
-        auth: {
-          user: process.env.EMAIL_USER,
-          pass: process.env.EMAIL_PASS
-        },
-        tls: {
-          rejectUnauthorized: !allowSelfSigned
-        }
-      })
-    } else if (process.env.SMTP_HOST && process.env.SMTP_USER && process.env.SMTP_PASS) {
-      transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST,
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: false,
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS
-        },
-        tls: allowSelfSigned ? { rejectUnauthorized: false } : undefined
-      })
-    } else {
-      const testAccount = await nodemailer.createTestAccount()
-      transporter = nodemailer.createTransport({
-        host: 'smtp.ethereal.email',
-        port: 587,
-        secure: false,
-        auth: {
-          user: testAccount.user,
-          pass: testAccount.pass
-        }
-      })
+    const recipients = to
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (recipients.length === 0 || recipients.some(r => !emailRegex.test(r))) {
+      return addRateLimitHeaders(NextResponse.json({ error: 'Destinatario email non valido' }, { status: 400 }), rl, 60)
     }
 
-    const info = await transporter.sendMail({
-      from: process.env.MAIL_FROM || 'no-reply@localhost',
+    const { messageId, previewUrl } = await sendMail({
       to,
       subject,
       text,
-      attachments: attachments.length > 0 ? attachments : undefined
+      attachments: attachments.length > 0 ? attachments : undefined,
     })
-
-    const previewUrl = nodemailer.getTestMessageUrl(info)
 
     const response = NextResponse.json({
       success: true,
-      messageId: info.messageId,
+      messageId,
       previewUrl
     })
     return addRateLimitHeaders(response, rl, 60)
   } catch (error) {
     console.error('Email send error:', error)
-    return NextResponse.json({ error: 'Invio email fallito' }, { status: 500 })
+    const debug = process.env.EMAIL_DEBUG === 'true'
+    const details = debug ? (error instanceof Error ? error.message : String(error)) : undefined
+    return NextResponse.json({ error: 'Invio email fallito', details }, { status: 500 })
   }
 }
