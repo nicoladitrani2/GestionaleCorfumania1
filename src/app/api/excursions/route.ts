@@ -1,9 +1,50 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
 
 export const dynamic = 'force-dynamic'
+
+function buildApiErrorPayload(error: unknown, fallback: string) {
+  const details = error instanceof Error ? error.message : String(error)
+  const payload: {
+    error: string
+    details?: string
+    code?: string
+    meta?: Record<string, unknown>
+    hint?: string[]
+  } = { error: fallback, details }
+
+  const hints: string[] = []
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    payload.code = error.code
+    payload.meta = (error.meta ?? {}) as Record<string, unknown>
+  } else if (error instanceof Prisma.PrismaClientInitializationError) {
+    payload.code = 'PRISMA_INIT'
+  } else if (error instanceof Prisma.PrismaClientRustPanicError) {
+    payload.code = 'PRISMA_PANIC'
+  } else if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    payload.code = 'PRISMA_UNKNOWN'
+  }
+
+  const lower = String(details || '').toLowerCase()
+  if (lower.includes('does not exist') || lower.includes('relation') || payload.code === 'P2021') {
+    hints.push('Sembra mancare una tabella/colonna nel database: verifica di aver eseguito le migrazioni Prisma.')
+    hints.push('Esegui: npx prisma migrate dev (oppure npx prisma migrate deploy in produzione).')
+  }
+  if (lower.includes("can't reach database") || lower.includes('p1001')) {
+    hints.push('Il database non è raggiungibile: verifica host/porta e che il container/servizio sia avviato.')
+  }
+
+  if (hints.length > 0) payload.hint = hints
+  if (process.env.NODE_ENV !== 'production' && error instanceof Error) {
+    payload.meta = { ...(payload.meta || {}), stack: error.stack }
+  }
+
+  return payload
+}
 
 export async function GET(request: Request) {
   const session = await getSession()
@@ -74,6 +115,9 @@ export async function GET(request: Request) {
       where: whereClause,
       orderBy: { startDate: 'asc' },
       include: {
+        priceTiers: {
+          orderBy: { sortOrder: 'asc' }
+        },
         agencyCommissions: {
           include: {
             agency: true
@@ -141,7 +185,7 @@ export async function GET(request: Request) {
     return NextResponse.json(excursions)
   } catch (error: any) {
     console.error('Error fetching excursions:', error)
-    return NextResponse.json({ error: 'Errore durante il recupero delle escursioni', details: error.message }, { status: 500 })
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante il recupero delle escursioni'), { status: 500 })
   }
 }
 
@@ -153,7 +197,7 @@ export async function POST(request: Request) {
     }
 
     const body = await request.json()
-    const { name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, transferDepartureLocation, transferDestinationLocation, transferTime, maxParticipants } = body
+    const { name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, priceTiers, transferDepartureLocation, transferDestinationLocation, transferTime, maxParticipants } = body
 
     // Validation - All fields are optional per user request
     // if (!startDate) {
@@ -176,6 +220,21 @@ export async function POST(request: Request) {
     const deadlineLead = (start && deadline) ? start.getTime() - deadline.getTime() : 0
 
     const createExcursion = async (s: Date | null, e: Date | null, d: Date | null) => {
+      const tiers = Array.isArray(priceTiers) ? priceTiers : null
+      const tiersToCreate =
+        tiers && tiers.length > 0
+          ? tiers
+              .map((t: any, idx: number) => ({
+                label: String(t?.label || '').trim(),
+                price: parseFloat(String(t?.price || 0)) || 0,
+                sortOrder: typeof t?.sortOrder === 'number' ? t.sortOrder : idx,
+              }))
+              .filter((t: any) => !!t.label)
+          : [
+              { label: 'Adulti', price: priceAdult ? parseFloat(priceAdult) : 0, sortOrder: 0 },
+              { label: 'Bambini', price: priceChild ? parseFloat(priceChild) : 0, sortOrder: 1 },
+            ]
+
       return await prisma.excursion.create({
         data: {
           name: name || undefined,
@@ -188,6 +247,7 @@ export async function POST(request: Request) {
           transferDepartureLocation,
           transferDestinationLocation,
           transferTime,
+          ...(tiersToCreate.length > 0 ? { priceTiers: { create: tiersToCreate } } : {}),
           agencyCommissions: commissions ? {
             create: commissions
               .map((c: any) => ({
@@ -267,10 +327,7 @@ export async function POST(request: Request) {
     }
   } catch (error) {
     console.error('Error creating excursion:', error)
-    return NextResponse.json(
-      { error: 'Errore durante la creazione dell\'escursione', details: error instanceof Error ? error.message : String(error) },
-      { status: 500 }
-    )
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante la creazione dell\'escursione'), { status: 500 })
   }
 }
 
@@ -281,7 +338,7 @@ export async function PUT(request: Request) {
   }
 
   const body = await request.json()
-  const { id, name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, transferDepartureLocation, transferDestinationLocation, transferTime, maxParticipants } = body
+  const { id, name, startDate, endDate, confirmationDeadline, commissions, recurrence, priceAdult, priceChild, priceTiers, transferDepartureLocation, transferDestinationLocation, transferTime, maxParticipants } = body
 
   // Validation
   const start = startDate ? new Date(startDate) : undefined
@@ -294,6 +351,20 @@ export async function PUT(request: Request) {
   if (start && deadline && deadline > start) {
     return NextResponse.json({ error: 'La data di scadenza non può essere successiva alla data di inizio.' }, { status: 400 })
   }
+
+  const tiersUpdate =
+    Array.isArray(priceTiers)
+      ? {
+          deleteMany: {},
+          create: priceTiers
+            .map((t: any, idx: number) => ({
+              label: String(t?.label || '').trim(),
+              price: parseFloat(String(t?.price || 0)) || 0,
+              sortOrder: typeof t?.sortOrder === 'number' ? t.sortOrder : idx,
+            }))
+            .filter((t: any) => !!t.label)
+        }
+      : undefined
 
   const excursion = await prisma.excursion.update({
     where: { id },
@@ -308,6 +379,7 @@ export async function PUT(request: Request) {
       transferDepartureLocation,
       transferDestinationLocation,
       transferTime,
+      priceTiers: tiersUpdate,
       agencyCommissions: commissions ? {
         deleteMany: {},
         create: commissions
@@ -335,6 +407,21 @@ export async function PUT(request: Request) {
     const deadlineLead = deadline ? start.getTime() - deadline.getTime() : 0
 
     const createExcursion = async (s: Date, e: Date | null, d: Date | null) => {
+      const tiers = Array.isArray(priceTiers) ? priceTiers : null
+      const tiersToCreate =
+        tiers && tiers.length > 0
+          ? tiers
+              .map((t: any, idx: number) => ({
+                label: String(t?.label || '').trim(),
+                price: parseFloat(String(t?.price || 0)) || 0,
+                sortOrder: typeof t?.sortOrder === 'number' ? t.sortOrder : idx,
+              }))
+              .filter((t: any) => !!t.label)
+          : [
+              { label: 'Adulti', price: priceAdult !== undefined ? parseFloat(priceAdult) : (excursion.priceAdult || 0), sortOrder: 0 },
+              { label: 'Bambini', price: priceChild !== undefined ? parseFloat(priceChild) : (excursion.priceChild || 0), sortOrder: 1 },
+            ]
+
       return await prisma.excursion.create({
         data: {
           name,
@@ -346,6 +433,7 @@ export async function PUT(request: Request) {
           transferDepartureLocation,
           transferDestinationLocation,
           transferTime,
+          priceTiers: { create: tiersToCreate },
           agencyCommissions: commissions ? {
             create: commissions
               .map((c: any) => ({

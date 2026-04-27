@@ -46,8 +46,10 @@ export function ExcursionsManager({
   const [newConfirmationDeadline, setNewConfirmationDeadline] = useState('')
   const [newExcursionName, setNewExcursionName] = useState('')
   const [newMaxParticipants, setNewMaxParticipants] = useState('')
-  const [newPriceAdult, setNewPriceAdult] = useState('')
-  const [newPriceChild, setNewPriceChild] = useState('')
+  const [newPriceTiers, setNewPriceTiers] = useState<Array<{ id: string; label: string; price: string }>>([
+    { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
+    { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
+  ])
   const [newTransferDepartureLocation, setNewTransferDepartureLocation] = useState('')
   const [newTransferDestinationLocation, setNewTransferDestinationLocation] = useState('')
   const [newTransferTime, setNewTransferTime] = useState('')
@@ -291,8 +293,10 @@ export function ExcursionsManager({
     setEditingExcursionId(null)
     setNewExcursionName('')
     setNewMaxParticipants('')
-    setNewPriceAdult('')
-    setNewPriceChild('')
+    setNewPriceTiers([
+      { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
+      { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
+    ])
     setNewTransferDepartureLocation('')
     setNewTransferDestinationLocation('')
     setNewTransferTime('')
@@ -327,13 +331,47 @@ export function ExcursionsManager({
       ':' + pad(date.getMinutes())
   }
 
+  const getTierPriceByLabel = (tiers: Array<{ label: string; price: string }>, labelToFind: string) => {
+    const match = tiers.find(t => t.label.trim().toLowerCase() === labelToFind.trim().toLowerCase())
+    if (!match) return 0
+    const n = parseFloat(match.price || '0')
+    return isNaN(n) ? 0 : n
+  }
+
+  const addPriceTier = () => {
+    setNewPriceTiers(prev => [
+      ...prev,
+      { id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`, label: '', price: '' },
+    ])
+  }
+
+  const removePriceTier = (id: string) => {
+    setNewPriceTiers(prev => prev.filter(t => t.id !== id))
+  }
+
+  const updatePriceTier = (id: string, patch: Partial<{ label: string; price: string }>) => {
+    setNewPriceTiers(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)))
+  }
+
   const handleEditExcursion = (excursion: any, e: React.MouseEvent) => {
     e.stopPropagation()
     setEditingExcursionId(excursion.id)
     setNewExcursionName(excursion.name)
     setNewMaxParticipants(excursion.maxParticipants ? excursion.maxParticipants.toString() : '')
-    setNewPriceAdult(excursion.priceAdult ? excursion.priceAdult.toString() : '')
-    setNewPriceChild(excursion.priceChild ? excursion.priceChild.toString() : '')
+    if (Array.isArray(excursion.priceTiers) && excursion.priceTiers.length > 0) {
+      setNewPriceTiers(
+        excursion.priceTiers.map((t: any, idx: number) => ({
+          id: String(t?.id || `${Date.now().toString(36)}_${idx}`),
+          label: String(t?.label || ''),
+          price: typeof t?.price === 'number' && !isNaN(t.price) ? t.price.toString() : String(t?.price || ''),
+        }))
+      )
+    } else {
+      setNewPriceTiers([
+        { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: excursion.priceAdult ? excursion.priceAdult.toString() : '' },
+        { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: excursion.priceChild ? excursion.priceChild.toString() : '' },
+      ])
+    }
     setNewTransferDepartureLocation(excursion.transferDepartureLocation || '')
     setNewTransferDestinationLocation(excursion.transferDestinationLocation || '')
     setNewTransferTime(excursion.transferTime || '')
@@ -440,14 +478,30 @@ export function ExcursionsManager({
     try {
       const url = '/api/excursions'
       const method = editingExcursionId ? 'PUT' : 'POST'
+      const tiersPayload = newPriceTiers
+        .map((t, idx) => ({
+          label: t.label.trim(),
+          price: parseFloat(t.price || '0') || 0,
+          sortOrder: idx
+        }))
+        .filter(t => !!t.label)
+      const normalizedLabels = tiersPayload.map(t => t.label.trim().toLowerCase()).filter(Boolean)
+      const uniqueLabelCount = new Set(normalizedLabels).size
+      if (normalizedLabels.length !== uniqueLabelCount) {
+        setError('Ci sono fasce con etichetta duplicata. Ogni etichetta deve essere unica.')
+        return
+      }
+      const priceAdult = getTierPriceByLabel(newPriceTiers, 'Adulti')
+      const priceChild = getTierPriceByLabel(newPriceTiers, 'Bambini')
       const payload: any = {
         name: newExcursionName,
         maxParticipants: newMaxParticipants,
         startDate: newStartDate,
         endDate: newEndDate,
         confirmationDeadline: newConfirmationDeadline || newStartDate, // Default to startDate if not provided (only if startDate exists, handled by API/Backend logic if needed)
-        priceAdult: newPriceAdult,
-        priceChild: newPriceChild,
+        priceAdult,
+        priceChild,
+        priceTiers: tiersPayload,
         transferDepartureLocation: newTransferDepartureLocation,
         transferDestinationLocation: newTransferDestinationLocation,
         transferTime: newTransferTime,
@@ -474,7 +528,19 @@ export function ExcursionsManager({
 
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}))
-        throw new Error(errorData.error || errorData.details || 'Errore durante il salvataggio')
+        const lines: string[] = []
+        if (typeof errorData.error === 'string' && errorData.error.trim()) lines.push(errorData.error.trim())
+        if (typeof errorData.details === 'string' && errorData.details.trim() && errorData.details.trim() !== errorData.error?.trim()) {
+          lines.push(errorData.details.trim())
+        }
+        if (typeof errorData.code === 'string' && errorData.code.trim()) lines.push(`Codice: ${errorData.code.trim()}`)
+        if (Array.isArray(errorData.hint) && errorData.hint.length > 0) {
+          lines.push('Suggerimenti:')
+          for (const h of errorData.hint) {
+            if (typeof h === 'string' && h.trim()) lines.push(`- ${h.trim()}`)
+          }
+        }
+        throw new Error(lines.length > 0 ? lines.join('\n') : 'Errore durante il salvataggio')
       }
       
       const savedExcursion = await res.json()
@@ -669,7 +735,7 @@ export function ExcursionsManager({
             
             <form onSubmit={handleSaveExcursion} className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1">
               {error && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
+                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-start gap-2 border border-red-100 whitespace-pre-line break-words">
                    <AlertCircle className="w-4 h-4 shrink-0" />
                    {error}
                 </div>
@@ -785,30 +851,57 @@ export function ExcursionsManager({
                     />
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-2">
-                  <div>
-                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulti (€)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={newPriceAdult}
-                      onChange={(e) => setNewPriceAdult(e.target.value)}
-                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
-                      placeholder="0.00"
-                    />
+                <div className="md:col-span-2">
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="block text-sm font-bold text-gray-900">Fasce Prezzo</label>
+                    <button
+                      type="button"
+                      onClick={addPriceTier}
+                      className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-all"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Aggiungi fascia
+                    </button>
                   </div>
-                  <div>
-                    <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambini (€)</label>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={newPriceChild}
-                      onChange={(e) => setNewPriceChild(e.target.value)}
-                      className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900"
-                      placeholder="0.00"
-                    />
+
+                  <div className="space-y-2">
+                    {newPriceTiers.map((tier) => (
+                      <div key={tier.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                        <div className="md:col-span-7">
+                          <input
+                            type="text"
+                            value={tier.label}
+                            onChange={(e) => updatePriceTier(tier.id, { label: e.target.value })}
+                            className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                            placeholder="Es. 0-5 anni, Senior, Studenti..."
+                          />
+                        </div>
+                        <div className="md:col-span-4">
+                          <div className="relative">
+                            <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={tier.price}
+                              onChange={(e) => updatePriceTier(tier.id, { price: e.target.value })}
+                              className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                              placeholder="0.00"
+                            />
+                          </div>
+                        </div>
+                        <div className="md:col-span-1 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => removePriceTier(tier.id)}
+                            className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Rimuovi fascia"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               </div>
@@ -1188,6 +1281,7 @@ export function ExcursionsManager({
                   userRole={userRole}
                   priceAdult={selectedExcursion.priceAdult}
                   priceChild={selectedExcursion.priceChild}
+                  priceTiers={selectedExcursion.priceTiers}
                   userAgencyId={userAgencyId}
                   defaultSupplier={userRole === 'ASSISTANT' ? currentUserSupplierName : undefined}
                   excursionTransferDepartureLocation={selectedExcursion.transferDepartureLocation}

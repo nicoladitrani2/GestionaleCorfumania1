@@ -12,6 +12,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const transfer = await prisma.transfer.findUnique({
     where: { id },
     include: {
+      priceTiers: {
+        orderBy: { sortOrder: 'asc' }
+      },
       agencyCommissions: {
         include: {
           agency: true
@@ -65,7 +68,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const { 
         name, date, supplier, pickupLocation, dropoffLocation, endDate, 
         commissions, priceAdult, priceChild, confirmationDeadline, maxParticipants,
-        approvalStatus 
+        approvalStatus,
+        priceTiers
     } = body
 
     const updateData: any = {}
@@ -111,10 +115,26 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         }
     }
 
+    if (Array.isArray(priceTiers)) {
+      updateData.priceTiers = {
+        deleteMany: {},
+        create: priceTiers
+          .map((t: any, idx: number) => ({
+            label: String(t?.label || '').trim(),
+            price: parseFloat(String(t?.price || 0)) || 0,
+            sortOrder: typeof t?.sortOrder === 'number' ? t.sortOrder : idx,
+          }))
+          .filter((t: any) => !!t.label)
+      }
+    }
+
     const updatedTransfer = await prisma.transfer.update({
         where: { id },
         data: updateData,
         include: {
+            priceTiers: {
+              orderBy: { sortOrder: 'asc' }
+            },
             agencyCommissions: {
                 include: { agency: true }
             }

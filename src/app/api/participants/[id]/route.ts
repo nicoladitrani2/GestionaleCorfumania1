@@ -1,8 +1,49 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
 import { sendMail } from '@/lib/mailer'
+
+function buildApiErrorPayload(error: unknown, fallback: string) {
+  const details = error instanceof Error ? error.message : String(error)
+  const payload: {
+    error: string
+    details?: string
+    code?: string
+    meta?: Record<string, unknown>
+    hint?: string[]
+  } = { error: fallback, details }
+
+  const hints: string[] = []
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    payload.code = error.code
+    payload.meta = (error.meta ?? {}) as Record<string, unknown>
+  } else if (error instanceof Prisma.PrismaClientInitializationError) {
+    payload.code = 'PRISMA_INIT'
+  } else if (error instanceof Prisma.PrismaClientRustPanicError) {
+    payload.code = 'PRISMA_PANIC'
+  } else if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    payload.code = 'PRISMA_UNKNOWN'
+  }
+
+  const lower = String(details || '').toLowerCase()
+  if (lower.includes('does not exist') || lower.includes('relation') || payload.code === 'P2021') {
+    hints.push('Sembra mancare una tabella/colonna nel database: verifica di aver eseguito le migrazioni Prisma.')
+    hints.push('Esegui: npx prisma migrate dev (oppure npx prisma migrate deploy in produzione).')
+  }
+  if (lower.includes("can't reach database") || lower.includes('p1001')) {
+    hints.push('Il database non è raggiungibile: verifica host/porta e che il container/servizio sia avviato.')
+  }
+
+  if (hints.length > 0) payload.hint = hints
+  if (process.env.NODE_ENV !== 'production' && error instanceof Error) {
+    payload.meta = { ...(payload.meta || {}), stack: error.stack }
+  }
+
+  return payload
+}
 
 function encodeDocumentInfo(docType?: string, docNumber?: string): string | null {
   if (!docType && !docNumber) return null
@@ -27,6 +68,49 @@ function decodeDocumentInfo(ticketNumber?: string | null): { docType?: string | 
   } catch {
     return { docNumber: ticketNumber }
   }
+}
+
+function normalizeCountsByTier(raw: unknown): Record<string, number> | null {
+  if (!raw || typeof raw !== 'object') return null
+  const result: Record<string, number> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = String(key || '').trim()
+    if (!id) continue
+    const n = typeof value === 'number' ? value : parseInt(String(value || '0'))
+    if (!Number.isFinite(n)) continue
+    const qty = Math.max(0, Math.floor(n))
+    if (qty > 0) result[id] = qty
+  }
+  return Object.keys(result).length > 0 ? result : null
+}
+
+function sumCountsByTier(counts: Record<string, number> | null): number {
+  if (!counts) return 0
+  return Object.values(counts).reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0)
+}
+
+function computeExpectedPriceFromTiers(
+  counts: Record<string, number> | null,
+  tiers: Array<{ id: string; price: number }> | null | undefined
+): number | null {
+  if (!counts || !tiers || tiers.length === 0) return null
+  const priceById = new Map<string, number>()
+  for (const t of tiers) {
+    const id = String(t.id || '')
+    if (!id) continue
+    const price = Number(t.price || 0)
+    priceById.set(id, Number.isFinite(price) ? price : 0)
+  }
+  let total = 0
+  let hasAny = false
+  for (const [tierId, qty] of Object.entries(counts)) {
+    if (!tierId) continue
+    const q = Number(qty || 0)
+    if (!Number.isFinite(q) || q <= 0) continue
+    hasAny = true
+    total += q * (priceById.get(tierId) || 0)
+  }
+  return hasAny ? total : 0
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -317,15 +401,22 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       const adults = body.adults !== undefined ? parseInt(body.adults) : (participant.adults || 0)
       const children = body.children !== undefined ? parseInt(body.children) : (participant.children || 0)
       const infants = body.infants !== undefined ? parseInt(body.infants) : (participant.infants || 0)
+      const normalizedCounts = body.countsByTier !== undefined ? normalizeCountsByTier(body.countsByTier) : null
+      const paxFromTiers = sumCountsByTier(normalizedCounts)
+      const paxFromLegacy = (adults + children + infants)
 
-      if ((adults + children + infants) < 1) {
+      if ((paxFromTiers > 0 ? paxFromTiers : paxFromLegacy) < 1) {
         return NextResponse.json({ error: 'Il numero di partecipanti deve essere almeno 1.' }, { status: 400 })
       }
     }
     
+    const normalizedCountsByTier = body.countsByTier !== undefined ? normalizeCountsByTier(body.countsByTier) : (participant.countsByTier ? normalizeCountsByTier(participant.countsByTier as any) : null)
+    const paxFromTiers = sumCountsByTier(normalizedCountsByTier)
+
     const finalAdults = body.adults !== undefined ? parseInt(body.adults) : (participant.adults || 0)
     const finalChildren = body.children !== undefined ? parseInt(body.children) : (participant.children || 0)
     const finalInfants = body.infants !== undefined ? parseInt(body.infants) : (participant.infants || 0)
+    const paxTotal = paxFromTiers > 0 ? paxFromTiers : (finalAdults + finalChildren + finalInfants)
 
     const finalPaymentType = body.paymentType || participant.paymentType || 'BALANCE'
     const finalTotalPrice = body.price !== undefined ? parseFloat(String(body.price)) : participant.totalPrice
@@ -340,25 +431,29 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       paymentStatus = 'REJECTED'
     }
 
-    if ((participant.excursionId || participant.transferId) && (body.price !== undefined || body.adults !== undefined || body.children !== undefined)) {
+    if ((participant.excursionId || participant.transferId) && (body.price !== undefined || body.adults !== undefined || body.children !== undefined || body.countsByTier !== undefined)) {
       let expectedPrice = 0
       let transferNotApproved = false
       
       if (participant.excursionId) {
           const excursion = await prisma.excursion.findUnique({
             where: { id: participant.excursionId },
-            select: { priceAdult: true, priceChild: true }
+            select: { priceAdult: true, priceChild: true, priceTiers: { select: { id: true, price: true } } }
           })
           if (excursion) {
-             expectedPrice = (finalAdults * (excursion.priceAdult || 0)) + (finalChildren * (excursion.priceChild || 0))
+             const expectedFromTiers = computeExpectedPriceFromTiers(normalizedCountsByTier, excursion.priceTiers)
+             const expectedLegacy = (finalAdults * (excursion.priceAdult || 0)) + (finalChildren * (excursion.priceChild || 0))
+             expectedPrice = expectedFromTiers ?? expectedLegacy
           }
       } else if (participant.transferId) {
           const transfer = await prisma.transfer.findUnique({
             where: { id: participant.transferId },
-            select: { priceAdult: true, priceChild: true, approvalStatus: true }
+            select: { priceAdult: true, priceChild: true, approvalStatus: true, priceTiers: { select: { id: true, price: true } } }
           })
           if (transfer) {
-             expectedPrice = (finalAdults * (transfer.priceAdult || 0)) + (finalChildren * (transfer.priceChild || 0))
+             const expectedFromTiers = computeExpectedPriceFromTiers(normalizedCountsByTier, transfer.priceTiers)
+             const expectedLegacy = (finalAdults * (transfer.priceAdult || 0)) + (finalChildren * (transfer.priceChild || 0))
+             expectedPrice = expectedFromTiers ?? expectedLegacy
              transferNotApproved = transfer.approvalStatus !== 'APPROVED'
           }
       }
@@ -423,9 +518,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         approvalStatus: approvalStatus ?? participant.approvalStatus,
         ...(isStatusUpdateOnly ? {} : {
           nationality: body.nationality,
-          adults: finalAdults,
-          children: finalChildren,
-          infants: finalInfants,
+          adults: paxFromTiers > 0 ? paxTotal : finalAdults,
+          children: paxFromTiers > 0 ? 0 : finalChildren,
+          infants: paxFromTiers > 0 ? 0 : finalInfants,
+          ...(body.countsByTier !== undefined
+            ? { countsByTier: (normalizeCountsByTier(body.countsByTier) ?? Prisma.DbNull) }
+            : {}),
           phone: body.phoneNumber ?? participant.phone,
           email: body.email ?? participant.email,
           notes: body.notes ?? participant.notes,
@@ -743,10 +841,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         )
     }
 
-    return NextResponse.json(
-      { error: 'Errore durante l\'aggiornamento del partecipante. Riprova più tardi.' },
-      { status: 500 }
-    )
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante l\'aggiornamento del partecipante'), { status: 500 })
   }
 }
 

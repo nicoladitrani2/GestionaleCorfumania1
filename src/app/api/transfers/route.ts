@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
@@ -6,85 +7,128 @@ import { sendMail } from '@/lib/mailer'
 
 export const dynamic = 'force-dynamic'
 
+function buildApiErrorPayload(error: unknown, fallback: string) {
+  const details = error instanceof Error ? error.message : String(error)
+  const payload: {
+    error: string
+    details?: string
+    code?: string
+    meta?: Record<string, unknown>
+    hint?: string[]
+  } = { error: fallback, details }
+
+  const hints: string[] = []
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    payload.code = error.code
+    payload.meta = (error.meta ?? {}) as Record<string, unknown>
+  } else if (error instanceof Prisma.PrismaClientInitializationError) {
+    payload.code = 'PRISMA_INIT'
+  } else if (error instanceof Prisma.PrismaClientRustPanicError) {
+    payload.code = 'PRISMA_PANIC'
+  } else if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    payload.code = 'PRISMA_UNKNOWN'
+  }
+
+  const lower = String(details || '').toLowerCase()
+  if (lower.includes('does not exist') || lower.includes('relation') || payload.code === 'P2021') {
+    hints.push('Sembra mancare una tabella/colonna nel database: verifica di aver eseguito le migrazioni Prisma.')
+    hints.push('Esegui: npx prisma migrate dev (oppure npx prisma migrate deploy in produzione).')
+  }
+  if (lower.includes("can't reach database") || lower.includes('p1001')) {
+    hints.push('Il database non è raggiungibile: verifica host/porta e che il container/servizio sia avviato.')
+  }
+
+  if (hints.length > 0) payload.hint = hints
+  if (process.env.NODE_ENV !== 'production' && error instanceof Error) {
+    payload.meta = { ...(payload.meta || {}), stack: error.stack }
+  }
+
+  return payload
+}
+
 export async function GET(request: Request) {
   const session = await getSession()
   if (!session) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   }
 
-  const { searchParams } = new URL(request.url)
-  const id = searchParams.get('id')
-  const archived = searchParams.get('archived') === 'true'
-  const pending = searchParams.get('pending') === 'true'
-  const rejected = searchParams.get('rejected') === 'true'
-  const now = new Date()
-  // Set to beginning of today
-  now.setHours(0, 0, 0, 0)
+  try {
+    const { searchParams } = new URL(request.url)
+    const id = searchParams.get('id')
+    const archived = searchParams.get('archived') === 'true'
+    const pending = searchParams.get('pending') === 'true'
+    const rejected = searchParams.get('rejected') === 'true'
+    const now = new Date()
+    now.setHours(0, 0, 0, 0)
 
-  let currentUserAgencyId: string | null = null
-  if (session.user.role !== 'ADMIN') {
-    try {
-      if (session.user.id) {
-        const user = await prisma.user.findUnique({
-          where: { id: session.user.id },
-          select: { agencyId: true }
-        })
-        currentUserAgencyId = user?.agencyId || null
+    let currentUserAgencyId: string | null = null
+    if (session.user.role !== 'ADMIN') {
+      try {
+        if (session.user.id) {
+          const user = await prisma.user.findUnique({
+            where: { id: session.user.id },
+            select: { agencyId: true }
+          })
+          currentUserAgencyId = user?.agencyId || null
+        }
+      } catch (e) {
+        console.error('Error fetching user agency:', e)
       }
-    } catch (e) {
-      console.error('Error fetching user agency:', e)
     }
-  }
 
-  const whereClause: any = {}
-  
-  if (id) {
-    whereClause.id = id
-  } else {
-    if (pending) {
-      whereClause.approvalStatus = 'PENDING'
-    } else if (rejected) {
-      whereClause.approvalStatus = 'REJECTED'
-    } else if (archived) {
-      whereClause.date = { lt: now }
-      whereClause.approvalStatus = { not: 'REJECTED' }
+    const whereClause: any = {}
+    
+    if (id) {
+      whereClause.id = id
     } else {
-      whereClause.date = { gte: now }
-      whereClause.approvalStatus = { not: 'REJECTED' }
-    }
-  }
-
-  const transfersData = await prisma.transfer.findMany({
-    where: whereClause,
-    orderBy: { date: 'asc' },
-    include: {
-      agencyCommissions: {
-        include: {
-          agency: true
-        }
-      },
-      participants: {
-        select: { 
-          adults: true,
-          children: true,
-          infants: true,
-          paidAmount: true,
-          totalPrice: true,
-          paymentType: true,
-          paymentStatus: true
-        }
-      },
-      createdBy: {
-        select: {
-          id: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          role: true
-        }
+      if (pending) {
+        whereClause.approvalStatus = 'PENDING'
+      } else if (rejected) {
+        whereClause.approvalStatus = 'REJECTED'
+      } else if (archived) {
+        whereClause.date = { lt: now }
+        whereClause.approvalStatus = { not: 'REJECTED' }
+      } else {
+        whereClause.date = { gte: now }
+        whereClause.approvalStatus = { not: 'REJECTED' }
       }
     }
-  })
+
+    const transfersData = await prisma.transfer.findMany({
+      where: whereClause,
+      orderBy: { date: 'asc' },
+      include: {
+        priceTiers: {
+          orderBy: { sortOrder: 'asc' }
+        },
+        agencyCommissions: {
+          include: {
+            agency: true
+          }
+        },
+        participants: {
+          select: { 
+            adults: true,
+            children: true,
+            infants: true,
+            paidAmount: true,
+            totalPrice: true,
+            paymentType: true,
+            paymentStatus: true
+          }
+        },
+        createdBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            role: true
+          }
+        }
+      }
+    })
 
     const transfers = transfersData.map(transfer => {
       // Calculate stats
@@ -170,7 +214,11 @@ export async function GET(request: Request) {
     return result
   })
 
-  return NextResponse.json(transfers)
+    return NextResponse.json(transfers)
+  } catch (error) {
+    console.error('Error fetching transfers:', error)
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante il recupero dei trasferimenti'), { status: 500 })
+  }
 }
 
 export async function POST(request: Request) {
@@ -181,7 +229,7 @@ export async function POST(request: Request) {
 
   try {
     const body = await request.json()
-    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions, priceAdult, priceChild, confirmationDeadline, maxParticipants } = body
+    const { name, date, supplier, pickupLocation, dropoffLocation, endDate, commissions, priceAdult, priceChild, priceTiers, confirmationDeadline, maxParticipants } = body
 
     if (!name || !date || !supplier) {
         return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
@@ -218,6 +266,21 @@ export async function POST(request: Request) {
 
     const approvalStatus = session.user.role === 'ADMIN' ? 'APPROVED' : 'PENDING'
 
+    const tiers = Array.isArray(priceTiers) ? priceTiers : null
+    const tiersToCreate =
+      tiers && tiers.length > 0
+        ? tiers
+            .map((t: any, idx: number) => ({
+              label: String(t?.label || '').trim(),
+              price: parseFloat(String(t?.price || 0)) || 0,
+              sortOrder: typeof t?.sortOrder === 'number' ? t.sortOrder : idx,
+            }))
+            .filter((t: any) => !!t.label)
+        : [
+            { label: 'Adulti', price: priceAdult ? parseFloat(priceAdult) : 0, sortOrder: 0 },
+            { label: 'Bambini', price: priceChild ? parseFloat(priceChild) : 0, sortOrder: 1 },
+          ]
+
     const transfer = await prisma.transfer.create({
       data: {
         name,
@@ -232,6 +295,9 @@ export async function POST(request: Request) {
         maxParticipants: maxParticipants ? parseInt(maxParticipants) : null,
         approvalStatus,
         createdById: session.user.id,
+        priceTiers: {
+          create: tiersToCreate
+        },
         agencyCommissions: commissions ? {
           create: commissions
             .map((c: any) => ({
@@ -318,7 +384,7 @@ export async function POST(request: Request) {
     return NextResponse.json(transfer)
   } catch (error: any) {
     console.error('Error creating transfer:', error)
-    return NextResponse.json({ error: error.message || 'Errore durante la creazione' }, { status: 500 })
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante la creazione del trasferimento'), { status: 500 })
   }
 }
 
@@ -330,7 +396,7 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, confirmationDeadline, maxParticipants } = body
+    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, priceTiers, confirmationDeadline, maxParticipants } = body
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
@@ -403,9 +469,26 @@ export async function PUT(request: Request) {
         }
     }
 
+    if (Array.isArray(priceTiers)) {
+      updateData.priceTiers = {
+        deleteMany: {},
+        create: priceTiers
+          .map((t: any, idx: number) => ({
+            label: String(t?.label || '').trim(),
+            price: parseFloat(String(t?.price || 0)) || 0,
+            sortOrder: typeof t?.sortOrder === 'number' ? t.sortOrder : idx,
+          }))
+          .filter((t: any) => !!t.label)
+      }
+    }
+
     const transfer = await prisma.transfer.update({
       where: { id },
-      data: updateData
+      data: updateData,
+      include: {
+        priceTiers: { orderBy: { sortOrder: 'asc' } },
+        agencyCommissions: { include: { agency: true } },
+      }
     })
 
     await createAuditLog(
@@ -520,6 +603,6 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('Error deleting transfer:', error)
-    return NextResponse.json({ error: 'Errore durante l\'eliminazione' }, { status: 500 })
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante l\'eliminazione del trasferimento'), { status: 500 })
   }
 }

@@ -57,9 +57,24 @@ model Excursion {
   auditLogs            AuditLog[]
   agencyCommissions    ExcursionAgencyCommission[]
   participants         Participant[]
+  priceTiers           ExcursionPriceTier[]
   transferDepartureLocation String?
   transferDestinationLocation String?
   transferTime         String?
+}
+
+model ExcursionPriceTier {
+  id         String   @id @default(cuid())
+  excursionId String
+  label      String
+  price      Float    @default(0)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  excursion  Excursion @relation(fields: [excursionId], references: [id], onDelete: Cascade)
+
+  @@unique([excursionId, label])
 }
 
 model ExcursionAgencyCommission {
@@ -92,9 +107,24 @@ model Transfer {
   agencyCommissions    TransferAgencyCommission[]
   auditLogs            AuditLog[]
   participants         Participant[]
+  priceTiers           TransferPriceTier[]
   approvalStatus       String        @default("APPROVED") // PENDING, APPROVED, REJECTED
   createdById          String?
   createdBy            User?         @relation("UserCreatedTransfers", fields: [createdById], references: [id])
+}
+
+model TransferPriceTier {
+  id         String   @id @default(cuid())
+  transferId String
+  label      String
+  price      Float    @default(0)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  transfer   Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+
+  @@unique([transferId, label])
 }
 
 model TransferAgencyCommission {
@@ -134,6 +164,7 @@ model Participant {
   adults                Int
   children              Int
   infants               Int
+  countsByTier          Json?
   totalPrice            Float
   paidAmount            Float
   paymentMethod         String

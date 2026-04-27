@@ -47,8 +47,10 @@ export function TransfersManager({
   const [newEndDate, setNewEndDate] = useState('')
   const [newConfirmationDeadline, setNewConfirmationDeadline] = useState('')
   const [newSupplier, setNewSupplier] = useState('GO4SEA')
-  const [newPriceAdult, setNewPriceAdult] = useState('')
-  const [newPriceChild, setNewPriceChild] = useState('')
+  const [newPriceTiers, setNewPriceTiers] = useState<Array<{ id: string; label: string; price: string }>>([
+    { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
+    { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
+  ])
   const [newMaxParticipants, setNewMaxParticipants] = useState('')
   const [suppliers, setSuppliers] = useState<{ id: string, name: string }[]>([])
   
@@ -82,13 +84,14 @@ export function TransfersManager({
   const [approvalModal, setApprovalModal] = useState<{
     isOpen: boolean
     transferId: string
-    priceAdult: string
-    priceChild: string
+    priceTiers: Array<{ id: string; label: string; price: string }>
   }>({
     isOpen: false,
     transferId: '',
-    priceAdult: '',
-    priceChild: ''
+    priceTiers: [
+      { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
+      { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
+    ]
   })
 
   // State for agencies and commissions
@@ -281,8 +284,10 @@ export function TransfersManager({
     setNewReturnPickupLocation('')
     setNewEndDate('')
     setNewConfirmationDeadline('')
-    setNewPriceAdult('')
-    setNewPriceChild('')
+    setNewPriceTiers([
+      { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
+      { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
+    ])
     setNewMaxParticipants('')
     
     // Reset commissions
@@ -322,6 +327,52 @@ export function TransfersManager({
     )
   }
 
+  const getTierPriceByLabel = (tiers: Array<{ label: string; price: string }>, labelToFind: string) => {
+    const match = tiers.find(t => t.label.trim().toLowerCase() === labelToFind.trim().toLowerCase())
+    if (!match) return 0
+    const n = parseFloat(match.price || '0')
+    return isNaN(n) ? 0 : n
+  }
+
+  const addPriceTier = () => {
+    setNewPriceTiers(prev => [
+      ...prev,
+      { id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`, label: '', price: '' },
+    ])
+  }
+
+  const removePriceTier = (id: string) => {
+    setNewPriceTiers(prev => prev.filter(t => t.id !== id))
+  }
+
+  const updatePriceTier = (id: string, patch: Partial<{ label: string; price: string }>) => {
+    setNewPriceTiers(prev => prev.map(t => (t.id === id ? { ...t, ...patch } : t)))
+  }
+
+  const addApprovalTier = () => {
+    setApprovalModal(prev => ({
+      ...prev,
+      priceTiers: [
+        ...prev.priceTiers,
+        { id: `${Date.now().toString(36)}_${Math.random().toString(36).slice(2)}`, label: '', price: '' },
+      ]
+    }))
+  }
+
+  const removeApprovalTier = (id: string) => {
+    setApprovalModal(prev => ({
+      ...prev,
+      priceTiers: prev.priceTiers.filter(t => t.id !== id)
+    }))
+  }
+
+  const updateApprovalTier = (id: string, patch: Partial<{ label: string; price: string }>) => {
+    setApprovalModal(prev => ({
+      ...prev,
+      priceTiers: prev.priceTiers.map(t => (t.id === id ? { ...t, ...patch } : t))
+    }))
+  }
+
   const handleEditTransfer = (transfer: any, e: React.MouseEvent) => {
     e.stopPropagation()
     setEditingTransferId(transfer.id)
@@ -332,16 +383,20 @@ export function TransfersManager({
     setNewEndDate(transfer.endDate ? toLocalISOString(transfer.endDate) : '')
     setNewConfirmationDeadline(transfer.confirmationDeadline ? toLocalISOString(transfer.confirmationDeadline) : '')
     setNewSupplier(transfer.supplier || 'GO4SEA')
-    setNewPriceAdult(
-      typeof transfer.priceAdult === 'number' && !isNaN(transfer.priceAdult)
-        ? transfer.priceAdult.toString()
-        : ''
-    )
-    setNewPriceChild(
-      typeof transfer.priceChild === 'number' && !isNaN(transfer.priceChild)
-        ? transfer.priceChild.toString()
-        : ''
-    )
+    if (Array.isArray(transfer.priceTiers) && transfer.priceTiers.length > 0) {
+      setNewPriceTiers(
+        transfer.priceTiers.map((t: any, idx: number) => ({
+          id: String(t?.id || `${Date.now().toString(36)}_${idx}`),
+          label: String(t?.label || ''),
+          price: typeof t?.price === 'number' && !isNaN(t.price) ? t.price.toString() : String(t?.price || ''),
+        }))
+      )
+    } else {
+      setNewPriceTiers([
+        { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: typeof transfer.priceAdult === 'number' && !isNaN(transfer.priceAdult) ? transfer.priceAdult.toString() : '' },
+        { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: typeof transfer.priceChild === 'number' && !isNaN(transfer.priceChild) ? transfer.priceChild.toString() : '' },
+      ])
+    }
     setNewMaxParticipants(transfer.maxParticipants ? transfer.maxParticipants.toString() : '')
     
     // Populate commissions
@@ -397,10 +452,16 @@ export function TransfersManager({
     }
 
     if (userRole === 'ADMIN') {
-      const pa = parseFloat(newPriceAdult || '0')
-      const pc = parseFloat(newPriceChild || '0')
-      if (isNaN(pa) || isNaN(pc) || (pa <= 0 && pc <= 0)) {
-        setError('Per gli amministratori è obbligatorio impostare almeno un prezzo (adulto o bambino) maggiore di 0.')
+      const tiersPayload = newPriceTiers
+        .map((t, idx) => ({
+          label: t.label.trim(),
+          price: parseFloat(t.price || '0') || 0,
+          sortOrder: idx
+        }))
+        .filter(t => !!t.label)
+      const hasValidPrice = tiersPayload.some(t => typeof t.price === 'number' && !isNaN(t.price) && t.price > 0)
+      if (!hasValidPrice) {
+        setError('Per gli amministratori è obbligatorio impostare almeno un prezzo maggiore di 0.')
         return
       }
     }
@@ -410,6 +471,22 @@ export function TransfersManager({
       const method = editingTransferId ? 'PUT' : 'POST'
       
       const generatedName = `${newPickupLocation} -> ${newDropoffLocation}`
+
+      const tiersPayload = newPriceTiers
+        .map((t, idx) => ({
+          label: t.label.trim(),
+          price: parseFloat(t.price || '0') || 0,
+          sortOrder: idx
+        }))
+        .filter(t => !!t.label)
+      const normalizedLabels = tiersPayload.map(t => t.label.trim().toLowerCase()).filter(Boolean)
+      const uniqueLabelCount = new Set(normalizedLabels).size
+      if (normalizedLabels.length !== uniqueLabelCount) {
+        setError('Ci sono fasce con etichetta duplicata. Ogni etichetta deve essere unica.')
+        return
+      }
+      const priceAdult = getTierPriceByLabel(newPriceTiers, 'Adulti')
+      const priceChild = getTierPriceByLabel(newPriceTiers, 'Bambini')
       
       const payload: any = {
         name: generatedName,
@@ -420,14 +497,13 @@ export function TransfersManager({
         dropoffLocation: newDropoffLocation,
         supplier: newSupplier,
         maxParticipants: newMaxParticipants ? parseInt(newMaxParticipants) : null,
-        commissions // Add commissions
+        commissions, // Add commissions
+        priceTiers: tiersPayload
       }
 
       if (userRole === 'ADMIN') {
-        const pa = parseFloat(newPriceAdult || '0')
-        const pc = parseFloat(newPriceChild || '0')
-        payload.priceAdult = isNaN(pa) ? 0 : pa
-        payload.priceChild = isNaN(pc) ? 0 : pc
+        payload.priceAdult = priceAdult
+        payload.priceChild = priceChild
       }
 
       const body = editingTransferId 
@@ -440,20 +516,35 @@ export function TransfersManager({
         body: JSON.stringify(body),
       })
 
-      const data = await res.json()
+      const contentType = res.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          const lines: string[] = []
+          if (typeof data.error === 'string' && data.error.trim()) lines.push(data.error.trim())
+          if (typeof data.details === 'string' && data.details.trim() && data.details.trim() !== data.error?.trim()) lines.push(data.details.trim())
+          if (typeof data.code === 'string' && data.code.trim()) lines.push(`Codice: ${data.code.trim()}`)
+          if (Array.isArray(data.hint) && data.hint.length > 0) {
+            lines.push('Suggerimenti:')
+            for (const h of data.hint) {
+              if (typeof h === 'string' && h.trim()) lines.push(`- ${h.trim()}`)
+            }
+          }
+          throw new Error(lines.length > 0 ? lines.join('\n') : 'Errore durante il salvataggio')
+        }
 
-      if (!res.ok) {
-        throw new Error(data.error || 'Errore durante il salvataggio')
-      }
-      
-      const savedTransfer = data
-
-      if (editingTransferId && selectedTransfer && editingTransferId === selectedTransfer.id) {
-        setSelectedTransfer({
-          ...selectedTransfer,
-          ...savedTransfer
-        })
-        setRefreshParticipantsTrigger(prev => prev + 1)
+        const savedTransfer = data
+        if (editingTransferId && selectedTransfer && editingTransferId === selectedTransfer.id) {
+          setSelectedTransfer({
+            ...selectedTransfer,
+            ...savedTransfer
+          })
+          setRefreshParticipantsTrigger(prev => prev + 1)
+        }
+      } else {
+        const text = await res.text()
+        const snippet = String(text || '').slice(0, 800).trim()
+        throw new Error(`Errore del server: ${res.status} ${res.statusText}${snippet ? `\nDettagli:\n${snippet}` : ''}`)
       }
 
       setIsCreating(false)
@@ -506,11 +597,21 @@ export function TransfersManager({
     }
 
     if (status === 'APPROVED') {
+      const tiers =
+        Array.isArray(transfer?.priceTiers) && transfer.priceTiers.length > 0
+          ? transfer.priceTiers.map((t: any, idx: number) => ({
+              id: String(t?.id || `${Date.now().toString(36)}_${idx}`),
+              label: String(t?.label || ''),
+              price: typeof t?.price === 'number' && !isNaN(t.price) ? t.price.toString() : String(t?.price || ''),
+            }))
+          : [
+              { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: transfer.priceAdult ? transfer.priceAdult.toString() : '' },
+              { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: transfer.priceChild ? transfer.priceChild.toString() : '' },
+            ]
       setApprovalModal({
         isOpen: true,
         transferId: id,
-        priceAdult: transfer.priceAdult ? transfer.priceAdult.toString() : '',
-        priceChild: transfer.priceChild ? transfer.priceChild.toString() : ''
+        priceTiers: tiers
       })
       return
     }
@@ -522,15 +623,32 @@ export function TransfersManager({
         body: JSON.stringify({ id, approvalStatus: status })
       })
 
-      if (!res.ok) {
+      const contentType = res.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || 'Errore durante l\'aggiornamento dello stato')
-      }
+        if (!res.ok) {
+          const lines: string[] = []
+          if (typeof data.error === 'string' && data.error.trim()) lines.push(data.error.trim())
+          if (typeof data.details === 'string' && data.details.trim() && data.details.trim() !== data.error?.trim()) lines.push(data.details.trim())
+          if (typeof data.code === 'string' && data.code.trim()) lines.push(`Codice: ${data.code.trim()}`)
+          if (Array.isArray(data.hint) && data.hint.length > 0) {
+            lines.push('Suggerimenti:')
+            for (const h of data.hint) {
+              if (typeof h === 'string' && h.trim()) lines.push(`- ${h.trim()}`)
+            }
+          }
+          throw new Error(lines.length > 0 ? lines.join('\n') : 'Errore durante l\'aggiornamento dello stato')
+        }
 
-      const updated = await res.json()
+        const updated = data
 
-      if (selectedTransfer && selectedTransfer.id === id) {
-        setSelectedTransfer({ ...selectedTransfer, ...updated })
+        if (selectedTransfer && selectedTransfer.id === id) {
+          setSelectedTransfer({ ...selectedTransfer, ...updated })
+        }
+      } else {
+        const text = await res.text()
+        const snippet = String(text || '').slice(0, 800).trim()
+        throw new Error(`Errore del server: ${res.status} ${res.statusText}${snippet ? `\nDettagli:\n${snippet}` : ''}`)
       }
 
       fetchTransfers()
@@ -558,10 +676,27 @@ export function TransfersManager({
         return
       }
 
-      const pa = parseFloat(approvalModal.priceAdult || '0')
-      const pc = parseFloat(approvalModal.priceChild || '0')
+      const tiersPayload = approvalModal.priceTiers
+        .map((t, idx) => ({
+          label: t.label.trim(),
+          price: parseFloat(t.price || '0') || 0,
+          sortOrder: idx
+        }))
+        .filter(t => !!t.label)
+      const normalizedLabels = tiersPayload.map(t => t.label.trim().toLowerCase()).filter(Boolean)
+      const uniqueLabelCount = new Set(normalizedLabels).size
+      if (normalizedLabels.length !== uniqueLabelCount) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: 'Ci sono fasce con etichetta duplicata. Ogni etichetta deve essere unica.',
+          variant: 'danger'
+        })
+        return
+      }
+      const hasValidPrice = tiersPayload.some(t => typeof t.price === 'number' && !isNaN(t.price) && t.price > 0)
 
-      if (isNaN(pa) || isNaN(pc) || (pa <= 0 && pc <= 0)) {
+      if (!hasValidPrice) {
         setAlertModal({
           isOpen: true,
           title: 'Errore',
@@ -571,29 +706,57 @@ export function TransfersManager({
         return
       }
 
+      const priceAdult = getTierPriceByLabel(approvalModal.priceTiers, 'Adulti')
+      const priceChild = getTierPriceByLabel(approvalModal.priceTiers, 'Bambini')
+
       const res = await fetch('/api/transfers', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
           id, 
           approvalStatus: 'APPROVED',
-          priceAdult: pa,
-          priceChild: pc
+          priceAdult,
+          priceChild,
+          priceTiers: tiersPayload
         })
       })
 
-      if (!res.ok) {
+      const contentType = res.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
         const data = await res.json().catch(() => ({}))
-        throw new Error(data.error || 'Errore durante l\'approvazione')
+        if (!res.ok) {
+          const lines: string[] = []
+          if (typeof data.error === 'string' && data.error.trim()) lines.push(data.error.trim())
+          if (typeof data.details === 'string' && data.details.trim() && data.details.trim() !== data.error?.trim()) lines.push(data.details.trim())
+          if (typeof data.code === 'string' && data.code.trim()) lines.push(`Codice: ${data.code.trim()}`)
+          if (Array.isArray(data.hint) && data.hint.length > 0) {
+            lines.push('Suggerimenti:')
+            for (const h of data.hint) {
+              if (typeof h === 'string' && h.trim()) lines.push(`- ${h.trim()}`)
+            }
+          }
+          throw new Error(lines.length > 0 ? lines.join('\n') : 'Errore durante l\'approvazione')
+        }
+
+        const updated = data
+
+        if (selectedTransfer && selectedTransfer.id === id) {
+          setSelectedTransfer({ ...selectedTransfer, ...updated })
+        }
+      } else {
+        const text = await res.text()
+        const snippet = String(text || '').slice(0, 800).trim()
+        throw new Error(`Errore del server: ${res.status} ${res.statusText}${snippet ? `\nDettagli:\n${snippet}` : ''}`)
       }
 
-      const updated = await res.json()
-
-      if (selectedTransfer && selectedTransfer.id === id) {
-        setSelectedTransfer({ ...selectedTransfer, ...updated })
-      }
-
-      setApprovalModal({ isOpen: false, transferId: '', priceAdult: '', priceChild: '' })
+      setApprovalModal({
+        isOpen: false,
+        transferId: '',
+        priceTiers: [
+          { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
+          { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
+        ]
+      })
       fetchTransfers()
     } catch (e: any) {
       console.error(e)
@@ -705,41 +868,58 @@ export function TransfersManager({
                 I futuri partecipanti useranno automaticamente questi prezzi.
               </p>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulto</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Euro className="h-4 w-4 text-gray-500" />
+              <div className="flex items-center justify-between">
+                <div className="text-sm font-bold text-gray-900">Fasce Prezzo</div>
+                <button
+                  type="button"
+                  onClick={addApprovalTier}
+                  className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-green-700 bg-green-50 hover:bg-green-100 rounded-lg border border-green-200 transition-all"
+                >
+                  <Plus className="w-4 h-4" />
+                  Aggiungi fascia
+                </button>
+              </div>
+
+              <div className="space-y-2">
+                {approvalModal.priceTiers.map((tier) => (
+                  <div key={tier.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                    <div className="md:col-span-7">
+                      <input
+                        type="text"
+                        value={tier.label}
+                        onChange={(e) => updateApprovalTier(tier.id, { label: e.target.value })}
+                        className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all text-sm text-gray-900 placeholder-gray-500"
+                        placeholder="Es. Adulti, Bambini, 0-5..."
+                      />
                     </div>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={approvalModal.priceAdult}
-                      onChange={(e) => setApprovalModal({ ...approvalModal, priceAdult: e.target.value })}
-                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      placeholder="0.00"
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambino</label>
-                  <div className="relative">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <Euro className="h-4 w-4 text-gray-500" />
+                    <div className="md:col-span-4">
+                      <div className="relative">
+                        <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                          <Euro className="h-4 w-4 text-gray-500" />
+                        </div>
+                        <input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={tier.price}
+                          onChange={(e) => updateApprovalTier(tier.id, { price: e.target.value })}
+                          className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all text-sm text-gray-900 placeholder-gray-500"
+                          placeholder="0.00"
+                        />
+                      </div>
                     </div>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.01"
-                      value={approvalModal.priceChild}
-                      onChange={(e) => setApprovalModal({ ...approvalModal, priceChild: e.target.value })}
-                      className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-green-500 focus:border-green-500"
-                      placeholder="0.00"
-                    />
+                    <div className="md:col-span-1 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => removeApprovalTier(tier.id)}
+                        className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                        title="Rimuovi fascia"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
-                </div>
+                ))}
               </div>
 
               <div className="flex justify-end gap-3 pt-4">
@@ -779,7 +959,7 @@ export function TransfersManager({
             
             <form onSubmit={handleSaveTransfer} className="p-4 sm:p-6 space-y-5">
               {error && (
-                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-center gap-2 border border-red-100">
+                <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-start gap-2 border border-red-100 whitespace-pre-line break-words">
                    <AlertCircle className="w-4 h-4 shrink-0" />
                    {error}
                 </div>
@@ -832,36 +1012,57 @@ export function TransfersManager({
 
               {userRole === 'ADMIN' && (
                 <>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                      <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Adulto</label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={newPriceAdult}
-                          onChange={(e) => setNewPriceAdult(e.target.value)}
-                          className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
-                          placeholder="Es. 15.00"
-                        />
-                      </div>
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <label className="block text-sm font-bold text-gray-900">Fasce Prezzo</label>
+                      <button
+                        type="button"
+                        onClick={addPriceTier}
+                        className="inline-flex items-center gap-2 px-3 py-1.5 text-xs font-bold text-blue-700 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-200 transition-all"
+                      >
+                        <Plus className="w-4 h-4" />
+                        Aggiungi fascia
+                      </button>
                     </div>
-                    <div>
-                      <label className="block text-sm font-bold text-gray-900 mb-1">Prezzo Bambino</label>
-                      <div className="relative">
-                        <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={newPriceChild}
-                          onChange={(e) => setNewPriceChild(e.target.value)}
-                          className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
-                          placeholder="Es. 10.00"
-                        />
-                      </div>
+
+                    <div className="space-y-2">
+                      {newPriceTiers.map((tier) => (
+                        <div key={tier.id} className="grid grid-cols-1 md:grid-cols-12 gap-2 items-center">
+                          <div className="md:col-span-7">
+                            <input
+                              type="text"
+                              value={tier.label}
+                              onChange={(e) => updatePriceTier(tier.id, { label: e.target.value })}
+                              className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                              placeholder="Es. Adulti, Bambini, 0-5..."
+                            />
+                          </div>
+                          <div className="md:col-span-4">
+                            <div className="relative">
+                              <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500 text-sm">€</span>
+                              <input
+                                type="number"
+                                min="0"
+                                step="0.01"
+                                value={tier.price}
+                                onChange={(e) => updatePriceTier(tier.id, { price: e.target.value })}
+                                className="block w-full border border-gray-300 rounded-lg p-2.5 pl-7 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                                placeholder="0.00"
+                              />
+                            </div>
+                          </div>
+                          <div className="md:col-span-1 flex justify-end">
+                            <button
+                              type="button"
+                              onClick={() => removePriceTier(tier.id)}
+                              className="p-2 text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                              title="Rimuovi fascia"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
                   
@@ -1288,6 +1489,7 @@ export function TransfersManager({
                 agencyCommissionType={agencyCommissionType}
                 priceAdult={selectedTransfer.priceAdult || 0}
                 priceChild={selectedTransfer.priceChild || 0}
+                priceTiers={selectedTransfer.priceTiers}
               />
             </div>
           )}

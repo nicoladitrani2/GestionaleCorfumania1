@@ -33,6 +33,7 @@ interface ParticipantFormProps {
   userRole?: string
   priceAdult?: number
   priceChild?: number
+  priceTiers?: Array<{ id: string; label: string; price: number; sortOrder?: number }>
   userAgencyId?: string
   excursionTransferDepartureLocation?: string
   excursionTransferDestinationLocation?: string
@@ -86,6 +87,7 @@ export function ParticipantForm({
   userRole,
   priceAdult = 0,
   priceChild = 0,
+  priceTiers,
   userAgencyId,
   defaultSupplier,
   excursionTransferDepartureLocation,
@@ -142,6 +144,7 @@ export function ParticipantForm({
     assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType,
     agencyId: initialData?.agencyId || userAgencyId || ''
   })
+  const [countsByTier, setCountsByTier] = useState<Record<string, number>>({})
   const [customNationality, setCustomNationality] = useState('')
   const [error, setError] = useState('')
   const [depositError, setDepositError] = useState('')
@@ -157,6 +160,60 @@ export function ParticipantForm({
     loading: false,
     activePax: null
   })
+
+  const hasTierPricing =
+    (type === 'EXCURSION' || type === 'TRANSFER') &&
+    Array.isArray(priceTiers) &&
+    priceTiers.length > 0
+
+  const sumTierCounts = (counts: Record<string, number>) =>
+    Object.values(counts).reduce((sum, v) => sum + (Number.isFinite(v) ? Math.max(0, v) : 0), 0)
+
+  const computeTierPrice = (counts: Record<string, number>) => {
+    if (!hasTierPricing) return 0
+    const tiers = priceTiers || []
+    return tiers.reduce((sum, t) => {
+      const qty = counts[t.id] || 0
+      const line = (Number.isFinite(qty) ? Math.max(0, qty) : 0) * (Number.isFinite(t.price) ? t.price : 0)
+      return sum + line
+    }, 0)
+  }
+
+  const normalizeTierCounts = (counts: Record<string, number>) => {
+    const next: Record<string, number> = {}
+    for (const [k, v] of Object.entries(counts || {})) {
+      const n = typeof v === 'number' ? v : parseInt(String(v), 10)
+      if (!Number.isFinite(n) || n <= 0) continue
+      next[k] = Math.floor(n)
+    }
+    return next
+  }
+
+  useEffect(() => {
+    if (!hasTierPricing) return
+    if (!initialData) {
+      setCountsByTier(prev => {
+        if (Object.keys(prev).length > 0) return prev
+        const tiers = priceTiers || []
+        const preferred =
+          tiers.find(t => String(t.label || '').trim().toLowerCase() === 'adulti') ||
+          tiers.find(t => String(t.label || '').trim().toLowerCase().includes('adult')) ||
+          tiers[0]
+        if (!preferred) return prev
+        return { [preferred.id]: 1 }
+      })
+      return
+    }
+
+    const raw = (initialData as any)?.countsByTier
+    if (!raw) return
+    try {
+      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        setCountsByTier(normalizeTierCounts(parsed as Record<string, number>))
+      }
+    } catch {}
+  }, [hasTierPricing, initialData, priceTiers])
 
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean
@@ -395,10 +452,10 @@ export function ParticipantForm({
   }, [type, formData.price, (formData as any).rentalType, (formData as any).tax, (formData as any).insurancePrice, (formData as any).supplementPrice])
 
   useEffect(() => {
-    if (!initialData && (type === 'EXCURSION' || type === 'TRANSFER') && (priceAdult > 0 || priceChild > 0)) {
+    if (!initialData && (type === 'EXCURSION' || type === 'TRANSFER')) {
       setFormData(prev => {
         if (prev.price === 0) {
-          const newPrice = (prev.adults * priceAdult) + (prev.children * priceChild)
+          const newPrice = hasTierPricing ? computeTierPrice(countsByTier) : (prev.adults * priceAdult) + (prev.children * priceChild)
           return { 
             ...prev, 
             price: newPrice,
@@ -408,9 +465,10 @@ export function ParticipantForm({
         return prev
       })
     }
-  }, [initialData, type, priceAdult, priceChild])
+  }, [initialData, type, priceAdult, priceChild, hasTierPricing, countsByTier])
 
   const handleCounterChange = (field: 'adults' | 'children' | 'infants', value: number) => {
+    if (hasTierPricing) return
     setFormData(prev => {
         const adults = field === 'adults' ? value : prev.adults
         const children = field === 'children' ? value : prev.children
@@ -427,6 +485,21 @@ export function ParticipantForm({
             price: newPrice,
             deposit: prev.paymentType === 'BALANCE' ? newPrice : prev.deposit
         }
+    })
+  }
+
+  const handleTierCountChange = (tierId: string, value: number) => {
+    if (!hasTierPricing) return
+    setCountsByTier(prev => {
+      const next = { ...prev, [tierId]: Math.max(0, Math.floor(value || 0)) }
+      if (next[tierId] === 0) delete next[tierId]
+      const newPrice = computeTierPrice(next)
+      setFormData(fd => ({
+        ...fd,
+        price: newPrice,
+        deposit: fd.paymentType === 'BALANCE' ? newPrice : fd.deposit
+      }))
+      return next
     })
   }
 
@@ -517,7 +590,9 @@ export function ParticipantForm({
             const pax = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
             return sum + (pax > 0 ? pax : 1)
           }, 0)
-          const newPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
+          const tierPax = hasTierPricing ? sumTierCounts(countsByTier) : 0
+          const legacyPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
+          const newPax = tierPax > 0 ? tierPax : legacyPax
           if (activeCount + (newPax || 1) > maxParticipants) {
             setLoading(false)
             setError(`Numero massimo di partecipanti raggiunto (${maxParticipants}).`)
@@ -553,7 +628,13 @@ export function ParticipantForm({
       return
     }
 
-    if (((type === 'EXCURSION') ? (formData.adults + formData.children) : (formData.adults + formData.children + formData.infants)) < 1) {
+    const paxFromTiers = hasTierPricing ? sumTierCounts(countsByTier) : 0
+    const paxFromLegacy =
+      type === 'EXCURSION'
+        ? (formData.adults + formData.children)
+        : (formData.adults + formData.children + formData.infants)
+    const paxTotal = paxFromTiers > 0 ? paxFromTiers : paxFromLegacy
+    if (paxTotal < 1) {
       setError('Il numero di partecipanti deve essere almeno 1.')
       setLoading(false)
       return
@@ -603,6 +684,7 @@ export function ParticipantForm({
       })() : 0
       const commissionBase = isCarRental ? Math.max(0, priceVal - excludedCostsForCar) : Math.max(0, priceVal)
       const depositAmount = type === 'RENTAL' ? (commissionBase * 0.2) : (isManaged ? (parseFloat(String(formData.deposit)) || 0) : 0)
+      const normalizedCountsByTier = hasTierPricing ? normalizeTierCounts(countsByTier) : undefined
       const payload: any = {
         ...formData,
         nationality: formData.nationality === 'OTHER' ? customNationality : formData.nationality,
@@ -610,9 +692,9 @@ export function ParticipantForm({
         deposit: Math.round(Math.max(0, depositAmount) * 100) / 100,
         tax: type === 'RENTAL' && (formData as any).rentalType === 'CAR' ? (parseFloat(String((formData as any).tax)) || 0) : 0,
         commissionPercentage: type === 'RENTAL' ? 0 : (parseFloat(String(formData.commissionPercentage)) || 0),
-        adults: formData.adults,
-        children: formData.children,
-        infants: formData.infants,
+        adults: hasTierPricing ? paxTotal : formData.adults,
+        children: hasTierPricing ? 0 : formData.children,
+        infants: hasTierPricing ? 0 : formData.infants,
         excursionId: type === 'EXCURSION' ? excursionId : undefined,
         transferId: type === 'TRANSFER' ? transferId : undefined,
         isRental: type === 'RENTAL',
@@ -628,6 +710,7 @@ export function ParticipantForm({
         paymentMethod: formData.depositPaymentMethod, // Legacy sync
         depositPaymentMethod: formData.depositPaymentMethod,
         balancePaymentMethod: formData.balancePaymentMethod,
+        countsByTier: normalizedCountsByTier,
       }
 
       // Se c'è un'email, genera il PDF (sia per creazione che per modifica)
@@ -773,7 +856,19 @@ export function ParticipantForm({
       const contentType = res.headers.get("content-type");
       if (contentType && contentType.indexOf("application/json") !== -1) {
         const data = await res.json()
-        if (!res.ok) throw new Error(data.error || 'Errore durante il salvataggio')
+        if (!res.ok) {
+          const lines: string[] = []
+          if (typeof data.error === 'string' && data.error.trim()) lines.push(data.error.trim())
+          if (typeof data.details === 'string' && data.details.trim() && data.details.trim() !== data.error?.trim()) lines.push(data.details.trim())
+          if (typeof data.code === 'string' && data.code.trim()) lines.push(`Codice: ${data.code.trim()}`)
+          if (Array.isArray(data.hint) && data.hint.length > 0) {
+            lines.push('Suggerimenti:')
+            for (const h of data.hint) {
+              if (typeof h === 'string' && h.trim()) lines.push(`- ${h.trim()}`)
+            }
+          }
+          throw new Error(lines.length > 0 ? lines.join('\n') : 'Errore durante il salvataggio')
+        }
         
         // Check for pending approval
         if (data.approvalStatus === 'PENDING') {
@@ -788,7 +883,8 @@ export function ParticipantForm({
         // Se non è JSON, probabilmente è un errore del server o HTML di errore
         const text = await res.text()
         console.error("Non-JSON response:", text)
-        throw new Error(`Errore del server: ${res.status} ${res.statusText}`)
+        const snippet = String(text || '').slice(0, 800).trim()
+        throw new Error(`Errore del server: ${res.status} ${res.statusText}${snippet ? `\nDettagli:\n${snippet}` : ''}`)
       }
 
       onSuccess()
@@ -850,10 +946,12 @@ export function ParticipantForm({
   const rentalExcludedCosts = isRentalCar ? Math.max(0, rentalTax) + Math.max(0, rentalInsurance) + Math.max(0, rentalSupplement) : 0
   const rentalCommissionBase = isRentalCar ? Math.max(0, rentalGross - rentalExcludedCosts) : Math.max(0, rentalGross)
   const rentalAgentShare = rentalCommissionBase * 0.05
-  const selectedPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
+  const selectedPax = hasTierPricing
+    ? sumTierCounts(countsByTier)
+    : (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
   const expectedPrice =
     (type === 'EXCURSION' || type === 'TRANSFER')
-      ? ((formData.adults || 0) * (priceAdult || 0)) + ((formData.children || 0) * (priceChild || 0))
+      ? (hasTierPricing ? computeTierPrice(countsByTier) : ((formData.adults || 0) * (priceAdult || 0)) + ((formData.children || 0) * (priceChild || 0)))
       : 0
   const baselinePrice =
     expectedPrice > 0
@@ -923,7 +1021,7 @@ export function ParticipantForm({
 
       <div className="overflow-y-auto p-4 custom-scrollbar flex-1">
         {error && (
-          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-center gap-3">
+          <div className="mb-6 p-4 bg-red-50 border border-red-200 text-red-700 rounded-xl flex items-start gap-3 whitespace-pre-line break-words">
             <div className="p-2 bg-red-100 rounded-full shrink-0">
               <X className="w-4 h-4" />
             </div>
@@ -981,14 +1079,13 @@ export function ParticipantForm({
                     />
                  </div>
                  <div>
-                    <label className={labelClassName}>Data Fine</label>
+                    <label className={labelClassName}>Data Fine (Opz.)</label>
                     <input
                       type="date"
                       name="rentalEndDate"
                       value={(formData as any).rentalEndDate}
                       onChange={handleChange}
                       className={inputClassName}
-                      required
                     />
                  </div>
                </div>
@@ -1078,36 +1175,68 @@ export function ParticipantForm({
                 />
               </div>
 
-              <div className={peopleGridClass}>
-                <div>
-                    <label className={labelClassName}>Adulti</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        name="adults"
-                        value={formData.adults}
-                        onChange={(e) => handleCounterChange('adults', parseInt(e.target.value) || 0)}
-                        min="1"
-                        className={`${inputClassName} pl-8`}
-                      />
-                      <User className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    </div>
+              {hasTierPricing ? (
+                <div className="sm:col-span-2 md:col-span-2">
+                  <label className={labelClassName}>Partecipanti</label>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    {(priceTiers || []).map((tier) => {
+                      const label = String(tier.label || '').trim()
+                      const lower = label.toLowerCase()
+                      const isChildLike = lower.includes('bamb') || lower.includes('inf') || lower.includes('baby')
+                      return (
+                        <div key={tier.id}>
+                          <div className="relative">
+                            <input
+                              type="number"
+                              value={countsByTier[tier.id] ?? 0}
+                              onChange={(e) => handleTierCountChange(tier.id, parseInt(e.target.value) || 0)}
+                              min="0"
+                              className={`${inputClassName} pl-8`}
+                            />
+                            {isChildLike ? (
+                              <Baby className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            ) : (
+                              <User className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                            )}
+                          </div>
+                          <div className="mt-1 text-xs font-medium text-gray-700">{label || 'Fascia'}</div>
+                        </div>
+                      )
+                    })}
+                  </div>
                 </div>
-                <div>
-                    <label className={labelClassName}>Bambini</label>
-                    <div className="relative">
-                      <input
-                        type="number"
-                        name="children"
-                        value={formData.children}
-                        onChange={(e) => handleCounterChange('children', parseInt(e.target.value) || 0)}
-                        min="0"
-                        className={`${inputClassName} pl-8`}
-                      />
-                      <UserPlus className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                    </div>
+              ) : (
+                <div className={peopleGridClass}>
+                  <div>
+                      <label className={labelClassName}>Adulti</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          name="adults"
+                          value={formData.adults}
+                          onChange={(e) => handleCounterChange('adults', parseInt(e.target.value) || 0)}
+                          min="1"
+                          className={`${inputClassName} pl-8`}
+                        />
+                        <User className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      </div>
+                  </div>
+                  <div>
+                      <label className={labelClassName}>Bambini</label>
+                      <div className="relative">
+                        <input
+                          type="number"
+                          name="children"
+                          value={formData.children}
+                          onChange={(e) => handleCounterChange('children', parseInt(e.target.value) || 0)}
+                          min="0"
+                          className={`${inputClassName} pl-8`}
+                        />
+                        <UserPlus className="w-4 h-4 text-gray-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                      </div>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label className={labelClassName}>Nazionalità</label>
@@ -1530,7 +1659,7 @@ export function ParticipantForm({
                   <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 sm:gap-6">
                     {allowDeposit && (
                         <div>
-                        <label className={labelClassName}>Tipo Pagamento</label>
+                        <label className={labelClassName}>Stato Pagamento</label>
                         <select
                             name="paymentType"
                             value={formData.paymentType}

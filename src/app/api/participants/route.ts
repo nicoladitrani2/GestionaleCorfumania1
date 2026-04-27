@@ -1,10 +1,51 @@
 import { NextResponse } from 'next/server'
+import { Prisma } from '@prisma/client'
 import { prisma } from '@/lib/prisma'
 import { getSession } from '@/lib/auth'
 import { createAuditLog } from '@/lib/audit'
 import { sendMail } from '@/lib/mailer'
 
 export const dynamic = 'force-dynamic'
+
+function buildApiErrorPayload(error: unknown, fallback: string) {
+  const details = error instanceof Error ? error.message : String(error)
+  const payload: {
+    error: string
+    details?: string
+    code?: string
+    meta?: Record<string, unknown>
+    hint?: string[]
+  } = { error: fallback, details }
+
+  const hints: string[] = []
+
+  if (error instanceof Prisma.PrismaClientKnownRequestError) {
+    payload.code = error.code
+    payload.meta = (error.meta ?? {}) as Record<string, unknown>
+  } else if (error instanceof Prisma.PrismaClientInitializationError) {
+    payload.code = 'PRISMA_INIT'
+  } else if (error instanceof Prisma.PrismaClientRustPanicError) {
+    payload.code = 'PRISMA_PANIC'
+  } else if (error instanceof Prisma.PrismaClientUnknownRequestError) {
+    payload.code = 'PRISMA_UNKNOWN'
+  }
+
+  const lower = String(details || '').toLowerCase()
+  if (lower.includes('does not exist') || lower.includes('relation') || payload.code === 'P2021') {
+    hints.push('Sembra mancare una tabella/colonna nel database: verifica di aver eseguito le migrazioni Prisma.')
+    hints.push('Esegui: npx prisma migrate dev (oppure npx prisma migrate deploy in produzione).')
+  }
+  if (lower.includes("can't reach database") || lower.includes('p1001')) {
+    hints.push('Il database non è raggiungibile: verifica host/porta e che il container/servizio sia avviato.')
+  }
+
+  if (hints.length > 0) payload.hint = hints
+  if (process.env.NODE_ENV !== 'production' && error instanceof Error) {
+    payload.meta = { ...(payload.meta || {}), stack: error.stack }
+  }
+
+  return payload
+}
 
 const carGrossSuppliers = new Set(
   (process.env.RENTAL_CAR_GROSS_SUPPLIERS || process.env.NEXT_PUBLIC_RENTAL_CAR_GROSS_SUPPLIERS || '')
@@ -46,6 +87,49 @@ function normalizeRentalType(raw: any): string | null {
   if (normalized === 'AUTO') return 'CAR'
   if (normalized === 'BARCA') return 'BOAT'
   return normalized
+}
+
+function normalizeCountsByTier(raw: unknown): Record<string, number> | null {
+  if (!raw || typeof raw !== 'object') return null
+  const result: Record<string, number> = {}
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const id = String(key || '').trim()
+    if (!id) continue
+    const n = typeof value === 'number' ? value : parseInt(String(value || '0'))
+    if (!Number.isFinite(n)) continue
+    const qty = Math.max(0, Math.floor(n))
+    if (qty > 0) result[id] = qty
+  }
+  return Object.keys(result).length > 0 ? result : null
+}
+
+function sumCountsByTier(counts: Record<string, number> | null): number {
+  if (!counts) return 0
+  return Object.values(counts).reduce((sum, n) => sum + (Number.isFinite(n) ? n : 0), 0)
+}
+
+function computeExpectedPriceFromTiers(
+  counts: Record<string, number> | null,
+  tiers: Array<{ id: string; price: number }> | null | undefined
+): number | null {
+  if (!counts || !tiers || tiers.length === 0) return null
+  const priceById = new Map<string, number>()
+  for (const t of tiers) {
+    const id = String(t.id || '')
+    if (!id) continue
+    const price = Number(t.price || 0)
+    priceById.set(id, Number.isFinite(price) ? price : 0)
+  }
+  let total = 0
+  let hasAny = false
+  for (const [tierId, qty] of Object.entries(counts)) {
+    if (!tierId) continue
+    const q = Number(qty || 0)
+    if (!Number.isFinite(q) || q <= 0) continue
+    hasAny = true
+    total += q * (priceById.get(tierId) || 0)
+  }
+  return hasAny ? total : 0
 }
 
 function computeRentalBreakdown(p: any) {
@@ -135,87 +219,86 @@ export async function GET(request: Request) {
   const session = await getSession()
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
-  const { searchParams } = new URL(request.url)
-  const excursionId = searchParams.get('excursionId')
-  const transferId = searchParams.get('transferId')
-  const isRental = searchParams.get('isRental') === 'true'
-  const search = searchParams.get('search') || undefined
+  try {
+    const { searchParams } = new URL(request.url)
+    const excursionId = searchParams.get('excursionId')
+    const transferId = searchParams.get('transferId')
+    const isRental = searchParams.get('isRental') === 'true'
+    const search = searchParams.get('search') || undefined
 
-  if (!excursionId && !transferId && !isRental) return NextResponse.json({ error: 'Excursion ID, Transfer ID, or isRental required' }, { status: 400 })
+    if (!excursionId && !transferId && !isRental) return NextResponse.json({ error: 'Excursion ID, Transfer ID, or isRental required' }, { status: 400 })
 
-  const whereClause: any = {}
-  if (excursionId) whereClause.excursionId = excursionId
-  if (transferId) whereClause.transferId = transferId
-  if (isRental) whereClause.rentalId = { not: null }
-  if (search) {
-    whereClause.notes = { contains: search, mode: 'insensitive' }
-  }
+    const whereClause: any = {}
+    if (excursionId) whereClause.excursionId = excursionId
+    if (transferId) whereClause.transferId = transferId
+    if (isRental) whereClause.rentalId = { not: null }
+    if (search) {
+      whereClause.notes = { contains: search, mode: 'insensitive' }
+    }
 
-  // Auto-expire logic DISABLED due to schema changes
-  /*
-  const now = new Date()
-  if (excursionId) { ... }
-  */
-
-  const participants = await prisma.participant.findMany({
-    where: whereClause,
-    orderBy: { createdAt: 'desc' },
-    include: {
-      user: {
-        select: {
-          firstName: true,
-          lastName: true,
-          email: true,
-          code: true,
-          role: true,
-          agencyId: true,
-          agency: {
-            select: {
-              name: true,
-              defaultCommission: true,
-              commissionType: true
+    const participants = await prisma.participant.findMany({
+      where: whereClause,
+      orderBy: { createdAt: 'desc' },
+      include: {
+        user: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+            code: true,
+            role: true,
+            agencyId: true,
+            agency: {
+              select: {
+                name: true,
+                defaultCommission: true,
+                commissionType: true
+              }
             }
           }
-        }
-      },
-      assignedTo: {
-        select: {
-          firstName: true,
-          lastName: true,
-          email: true,
-          code: true,
-          role: true,
-          agencyId: true,
-          agency: {
-            select: {
-              name: true,
-              defaultCommission: true,
-              commissionType: true
+        },
+        assignedTo: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+            code: true,
+            role: true,
+            agencyId: true,
+            agency: {
+              select: {
+                name: true,
+                defaultCommission: true,
+                commissionType: true
+              }
             }
           }
-        }
-      },
-      client: {
-        select: {
-          firstName: true,
-          lastName: true,
-          email: true,
-          phoneNumber: true,
-          nationality: true,
-        }
-      },
-      agency: {
-        select: {
-          id: true,
-          name: true
+        },
+        client: {
+          select: {
+            firstName: true,
+            lastName: true,
+            email: true,
+            phoneNumber: true,
+            nationality: true,
+          }
+        },
+        agency: {
+          select: {
+            id: true,
+            name: true
+          }
         }
       }
-    }
-  })
+    })
 
-  const mapped = participants.map(mapParticipantForClient)
+    const mapped = participants.map(mapParticipantForClient)
 
-  return NextResponse.json(mapped)
+    return NextResponse.json(mapped)
+  } catch (error) {
+    console.error('Error fetching participants:', error)
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante il recupero dei partecipanti'), { status: 500 })
+  }
 }
 
 export async function POST(request: Request) {
@@ -234,6 +317,7 @@ export async function POST(request: Request) {
       excursionId, transferId, rentalId,
       firstName, lastName, email, phoneNumber, 
       adults, children, infants,
+      countsByTier,
       price, tax, 
       paymentType, paymentMethod,
       notes, supplier, pickupLocation, dropoffLocation,
@@ -270,6 +354,11 @@ export async function POST(request: Request) {
     const totalPrice = parseFloat(String(price)) || 0
     const totalTax = parseFloat(String(tax)) || 0
     const depositAmount = parseFloat(String(deposit || 0)) || 0
+
+    const normalizedCountsByTier = normalizeCountsByTier(countsByTier)
+    const paxFromTiers = sumCountsByTier(normalizedCountsByTier)
+    const paxFromLegacy = (parseInt(adults) || 0) + (parseInt(children) || 0) + (parseInt(infants) || 0)
+    const paxTotal = paxFromTiers > 0 ? paxFromTiers : paxFromLegacy
     
     // Check Max Participants
     if (excursionId) {
@@ -288,7 +377,7 @@ export async function POST(request: Request) {
           _sum: { adults: true, children: true, infants: true }
         })
         const currentTotal = (currentStats._sum.adults || 0) + (currentStats._sum.children || 0) + (currentStats._sum.infants || 0)
-        const newTotal = (parseInt(adults) || 0) + (parseInt(children) || 0) + (parseInt(infants) || 0)
+        const newTotal = paxTotal
         
         if (currentTotal + newTotal > excursion.maxParticipants) {
           return NextResponse.json({ error: `Numero massimo di partecipanti raggiunto (${excursion.maxParticipants}).` }, { status: 400 })
@@ -310,7 +399,7 @@ export async function POST(request: Request) {
           _sum: { adults: true, children: true, infants: true }
         })
         const currentTotal = (currentStats._sum.adults || 0) + (currentStats._sum.children || 0) + (currentStats._sum.infants || 0)
-        const newTotal = (parseInt(adults) || 0) + (parseInt(children) || 0) + (parseInt(infants) || 0)
+        const newTotal = paxTotal
         
         if (currentTotal + newTotal > transfer.maxParticipants) {
           return NextResponse.json({ error: `Numero massimo di partecipanti raggiunto (${transfer.maxParticipants}).` }, { status: 400 })
@@ -359,12 +448,14 @@ export async function POST(request: Request) {
     if (excursionId) {
       const excursion = await prisma.excursion.findUnique({
         where: { id: excursionId },
-        select: { priceAdult: true, priceChild: true }
+        select: { priceAdult: true, priceChild: true, priceTiers: { select: { id: true, price: true } } }
       })
       if (excursion) {
+        const calculatedFromTiers = computeExpectedPriceFromTiers(normalizedCountsByTier, excursion.priceTiers)
         const adultsNum = parseInt(adults) || 0
         const childrenNum = parseInt(children) || 0
-        const calculated = (adultsNum * (excursion.priceAdult || 0)) + (childrenNum * (excursion.priceChild || 0))
+        const calculatedLegacy = (adultsNum * (excursion.priceAdult || 0)) + (childrenNum * (excursion.priceChild || 0))
+        const calculated = calculatedFromTiers ?? calculatedLegacy
         if (finalTotalPrice <= 0) finalTotalPrice = calculated
         const isAdmin = session.user.role === 'ADMIN'
         if (!isAdmin && Math.abs(finalTotalPrice - calculated) > 0.01) {
@@ -378,7 +469,7 @@ export async function POST(request: Request) {
     } else if (transferId) {
       const transfer = await prisma.transfer.findUnique({
         where: { id: transferId },
-        select: { priceAdult: true, priceChild: true, approvalStatus: true }
+        select: { priceAdult: true, priceChild: true, approvalStatus: true, priceTiers: { select: { id: true, price: true } } }
       })
       if (transfer) {
         if (transfer.approvalStatus === 'REJECTED') {
@@ -387,9 +478,11 @@ export async function POST(request: Request) {
             { status: 400 }
           )
         }
+        const calculatedFromTiers = computeExpectedPriceFromTiers(normalizedCountsByTier, transfer.priceTiers)
         const adultsNum = parseInt(adults) || 0
         const childrenNum = parseInt(children) || 0
-        const calculated = (adultsNum * (transfer.priceAdult || 0)) + (childrenNum * (transfer.priceChild || 0))
+        const calculatedLegacy = (adultsNum * (transfer.priceAdult || 0)) + (childrenNum * (transfer.priceChild || 0))
+        const calculated = calculatedFromTiers ?? calculatedLegacy
         if (finalTotalPrice <= 0) finalTotalPrice = calculated
         const isAdmin = session.user.role === 'ADMIN'
         
@@ -472,9 +565,10 @@ export async function POST(request: Request) {
         email,
         phone: phoneNumber,
         nationality,
-        adults: parseInt(adults) || 0,
-        children: parseInt(children) || 0,
-        infants: parseInt(infants) || 0,
+        adults: paxFromTiers > 0 ? paxFromTiers : (parseInt(adults) || 0),
+        children: paxFromTiers > 0 ? 0 : (parseInt(children) || 0),
+        infants: paxFromTiers > 0 ? 0 : (parseInt(infants) || 0),
+        ...(normalizedCountsByTier ? { countsByTier: normalizedCountsByTier } : {}),
         notes,
         supplier,
         pickupLocation,
@@ -733,6 +827,6 @@ export async function POST(request: Request) {
     return NextResponse.json(responsePayload)
   } catch (error) {
     console.error('Error creating participant:', error)
-    return NextResponse.json({ error: 'Internal Server Error' }, { status: 500 })
+    return NextResponse.json(buildApiErrorPayload(error, 'Errore durante il salvataggio del partecipante'), { status: 500 })
   }
 }
