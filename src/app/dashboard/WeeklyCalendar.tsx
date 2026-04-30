@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronLeft, ChevronRight, Calendar, Users, Clock, Timer, AlertCircle, Bus, Car } from 'lucide-react'
 
@@ -12,6 +12,9 @@ interface WeeklyCalendarProps {
 export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
   const router = useRouter()
   const [currentDate, setCurrentDate] = useState(new Date())
+  const [view, setView] = useState<'WEEK' | 'MONTH' | 'RANGE'>('WEEK')
+  const [rangeStart, setRangeStart] = useState<string>('')
+  const [rangeEnd, setRangeEnd] = useState<string>('')
   const [rentals, setRentals] = useState<any[]>([])
 
   // Helper to get start of week (Monday)
@@ -22,34 +25,125 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
     return new Date(d.setDate(diff))
   }
 
-  const startOfWeek = getStartOfWeek(currentDate)
-  
-  // Generate 7 days
-  const weekDays = Array.from({ length: 7 }, (_, i) => {
-    const d = new Date(startOfWeek)
-    d.setDate(startOfWeek.getDate() + i)
+  const addDays = (date: Date, days: number) => {
+    const d = new Date(date)
+    d.setDate(d.getDate() + days)
     return d
-  })
+  }
+
+  const startOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1)
+  const endOfMonth = (date: Date) => new Date(date.getFullYear(), date.getMonth() + 1, 0)
+
+  const dateToInputValue = (date: Date) => {
+    const y = date.getFullYear()
+    const m = `${date.getMonth() + 1}`.padStart(2, '0')
+    const d = `${date.getDate()}`.padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  const inputValueToDate = (value: string) => {
+    if (!value) return null
+    const d = new Date(`${value}T00:00:00`)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
+  const isSameDay = (a: Date, b: Date) =>
+    a.getDate() === b.getDate() && a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear()
+
+  const isWithinInclusive = (date: Date, start: Date, end: Date) =>
+    date.getTime() >= start.getTime() && date.getTime() <= end.getTime()
+
+  const dayKey = (date: Date) => {
+    const y = date.getFullYear()
+    const m = `${date.getMonth() + 1}`.padStart(2, '0')
+    const d = `${date.getDate()}`.padStart(2, '0')
+    return `${y}-${m}-${d}`
+  }
+
+  const startOfWeek = getStartOfWeek(currentDate)
+  const endOfWeek = addDays(startOfWeek, 6)
+
+  const rangeStartDate = useMemo(() => inputValueToDate(rangeStart), [rangeStart])
+  const rangeEndDate = useMemo(() => inputValueToDate(rangeEnd), [rangeEnd])
+
+  const viewStart = useMemo(() => {
+    if (view === 'MONTH') return getStartOfWeek(startOfMonth(currentDate))
+    if (view === 'RANGE' && rangeStartDate) return getStartOfWeek(rangeStartDate)
+    return startOfWeek
+  }, [view, currentDate, rangeStartDate])
+
+  const viewEnd = useMemo(() => {
+    if (view === 'MONTH') {
+      const last = endOfMonth(currentDate)
+      const lastStart = getStartOfWeek(last)
+      return addDays(lastStart, 6)
+    }
+    if (view === 'RANGE' && rangeEndDate) {
+      const lastStart = getStartOfWeek(rangeEndDate)
+      return addDays(lastStart, 6)
+    }
+    return endOfWeek
+  }, [view, currentDate, rangeEndDate, endOfWeek])
+
+  const days = useMemo(() => {
+    const list: Date[] = []
+    const start = new Date(viewStart)
+    const end = new Date(viewEnd)
+    for (let d = start; d.getTime() <= end.getTime(); d = addDays(d, 1)) {
+      list.push(new Date(d))
+    }
+    return list
+  }, [viewStart, viewEnd])
 
   const nextWeek = () => {
     const d = new Date(currentDate)
+    if (view === 'MONTH') {
+      d.setMonth(d.getMonth() + 1)
+      setCurrentDate(d)
+      return
+    }
+    if (view === 'RANGE') {
+      if (!rangeStartDate || !rangeEndDate) return
+      const diffDays = Math.max(1, Math.round((rangeEndDate.getTime() - rangeStartDate.getTime()) / (24 * 60 * 60 * 1000)) + 1)
+      setRangeStart(dateToInputValue(addDays(rangeStartDate, diffDays)))
+      setRangeEnd(dateToInputValue(addDays(rangeEndDate, diffDays)))
+      return
+    }
     d.setDate(d.getDate() + 7)
     setCurrentDate(d)
   }
 
   const prevWeek = () => {
     const d = new Date(currentDate)
+    if (view === 'MONTH') {
+      d.setMonth(d.getMonth() - 1)
+      setCurrentDate(d)
+      return
+    }
+    if (view === 'RANGE') {
+      if (!rangeStartDate || !rangeEndDate) return
+      const diffDays = Math.max(1, Math.round((rangeEndDate.getTime() - rangeStartDate.getTime()) / (24 * 60 * 60 * 1000)) + 1)
+      setRangeStart(dateToInputValue(addDays(rangeStartDate, -diffDays)))
+      setRangeEnd(dateToInputValue(addDays(rangeEndDate, -diffDays)))
+      return
+    }
     d.setDate(d.getDate() - 7)
     setCurrentDate(d)
   }
 
-  const today = () => setCurrentDate(new Date())
+  const today = () => {
+    const now = new Date()
+    setCurrentDate(now)
+    if (view === 'RANGE') {
+      const start = getStartOfWeek(now)
+      setRangeStart(dateToInputValue(start))
+      setRangeEnd(dateToInputValue(addDays(start, 6)))
+    }
+  }
   
   const isToday = (date: Date) => {
     const t = new Date()
-    return date.getDate() === t.getDate() &&
-           date.getMonth() === t.getMonth() &&
-           date.getFullYear() === t.getFullYear()
+    return isSameDay(date, t)
   }
 
   const getDuration = (start: string, end: string | null) => {
@@ -79,6 +173,71 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
     loadRentals()
   }, [])
 
+  useEffect(() => {
+    if (view !== 'RANGE') return
+    if (rangeStart && rangeEnd) return
+    const start = getStartOfWeek(currentDate)
+    setRangeStart(dateToInputValue(start))
+    setRangeEnd(dateToInputValue(addDays(start, 6)))
+  }, [view, currentDate, rangeStart, rangeEnd])
+
+  const excursionsByDay = useMemo(() => {
+    const map = new Map<string, any[]>()
+    for (const ex of excursions || []) {
+      if (!ex?.startDate) continue
+      const k = dayKey(new Date(ex.startDate))
+      const list = map.get(k) || []
+      list.push(ex)
+      map.set(k, list)
+    }
+    for (const [k, list] of map.entries()) {
+      list.sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+      map.set(k, list)
+    }
+    return map
+  }, [excursions])
+
+  const transfersByDay = useMemo(() => {
+    const map = new Map<string, any[]>()
+    for (const tr of transfers || []) {
+      if (!tr?.date) continue
+      const k = dayKey(new Date(tr.date))
+      const list = map.get(k) || []
+      list.push(tr)
+      map.set(k, list)
+    }
+    for (const [k, list] of map.entries()) {
+      list.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
+      map.set(k, list)
+    }
+    return map
+  }, [transfers])
+
+  const rentalsByDay = useMemo(() => {
+    const map = new Map<string, any[]>()
+    for (const r of rentals || []) {
+      if (!r?.bookingDate) continue
+      const k = dayKey(new Date(r.bookingDate))
+      const list = map.get(k) || []
+      list.push(r)
+      map.set(k, list)
+    }
+    for (const [k, list] of map.entries()) {
+      list.sort((a, b) => new Date(a.bookingDate).getTime() - new Date(b.bookingDate).getTime())
+      map.set(k, list)
+    }
+    return map
+  }, [rentals])
+
+  const headerSubtitle = useMemo(() => {
+    if (view === 'MONTH') {
+      return currentDate.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
+    }
+    const start = viewStart
+    const end = viewEnd
+    return `${start.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })} - ${end.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`
+  }, [view, currentDate, viewStart, viewEnd])
+
   return (
     <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8 transition-all hover:shadow-lg">
       <div className="p-4 border-b border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4 bg-gradient-to-r from-gray-50 to-white">
@@ -87,56 +246,73 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
                 <Calendar className="w-5 h-5 text-white" />
             </div>
             <div>
-                <h2 className="font-bold text-gray-900 text-lg">Calendario Escursioni</h2>
-                <p className="text-sm text-gray-500 font-medium">
-                    {startOfWeek.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })} - {new Date(startOfWeek.getTime() + 6 * 24 * 60 * 60 * 1000).toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}
-                </p>
+                <h2 className="font-bold text-gray-900 text-lg">Calendario</h2>
+                <p className="text-sm text-gray-500 font-medium">{headerSubtitle}</p>
             </div>
         </div>
-        <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
+        <div className="flex flex-col sm:flex-row items-center gap-3">
+          <div className="flex items-center gap-1 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
+            <button
+              onClick={() => setView('WEEK')}
+              className={`text-xs font-bold px-3 py-2 rounded-md transition-colors ${view === 'WEEK' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+            >
+              Settimana
+            </button>
+            <button
+              onClick={() => setView('MONTH')}
+              className={`text-xs font-bold px-3 py-2 rounded-md transition-colors ${view === 'MONTH' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+            >
+              Mese
+            </button>
+            <button
+              onClick={() => setView('RANGE')}
+              className={`text-xs font-bold px-3 py-2 rounded-md transition-colors ${view === 'RANGE' ? 'bg-blue-600 text-white' : 'text-gray-700 hover:bg-gray-50'}`}
+            >
+              Periodo
+            </button>
+          </div>
+
+          {view === 'RANGE' && (
+            <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 p-2 shadow-sm">
+              <input
+                type="date"
+                value={rangeStart}
+                onChange={(e) => setRangeStart(e.target.value)}
+                className="text-xs px-2 py-1 border border-gray-200 rounded-md"
+              />
+              <span className="text-xs text-gray-400">-</span>
+              <input
+                type="date"
+                value={rangeEnd}
+                onChange={(e) => setRangeEnd(e.target.value)}
+                className="text-xs px-2 py-1 border border-gray-200 rounded-md"
+              />
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 bg-white rounded-lg border border-gray-200 p-1 shadow-sm">
             <button onClick={prevWeek} className="p-2 hover:bg-gray-50 rounded-md transition-colors text-gray-600 hover:text-blue-600"><ChevronLeft className="w-5 h-5" /></button>
             <button onClick={today} className="text-sm font-semibold px-4 py-2 hover:bg-gray-50 rounded-md transition-colors text-gray-700 hover:text-blue-600 border-x border-transparent hover:border-gray-100">Oggi</button>
             <button onClick={nextWeek} className="p-2 hover:bg-gray-50 rounded-md transition-colors text-gray-600 hover:text-blue-600"><ChevronRight className="w-5 h-5" /></button>
+          </div>
         </div>
       </div>
       
       <div className="grid grid-cols-1 md:grid-cols-7 divide-y md:divide-y-0 md:divide-x divide-gray-200 min-h-[400px]">
-        {weekDays.map((day) => {
-            const dayExcursions = excursions.filter(e => {
-                if (!e.startDate) return false
-                const eDate = new Date(e.startDate)
-                return eDate.getDate() === day.getDate() &&
-                       eDate.getMonth() === day.getMonth() &&
-                       eDate.getFullYear() === day.getFullYear()
-            }).sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
-
-            const dayTransfers = transfers.filter(t => {
-                if (!t.date) return false
-                const tDate = new Date(t.date)
-                return tDate.getDate() === day.getDate() &&
-                       tDate.getMonth() === day.getMonth() &&
-                       tDate.getFullYear() === day.getFullYear()
-            }).sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime())
-
-            const dayRentals = rentals
-              .filter(r => {
-                if (!r.bookingDate) return false
-                const rDate = new Date(r.bookingDate)
-                return (
-                  rDate.getDate() === day.getDate() &&
-                  rDate.getMonth() === day.getMonth() &&
-                  rDate.getFullYear() === day.getFullYear()
-                )
-              })
-              .sort(
-                (a, b) =>
-                  new Date(a.bookingDate).getTime() - new Date(b.bookingDate).getTime()
-              )
-
+        {days.map((day) => {
             const isCurrentDay = isToday(day)
+            const isOutsideRange =
+              view === 'RANGE' && rangeStartDate && rangeEndDate
+                ? !isWithinInclusive(day, rangeStartDate, rangeEndDate)
+                : false
+
+            const key = dayKey(day)
+            const dayExcursions = isOutsideRange ? [] : (excursionsByDay.get(key) || [])
+            const dayTransfers = isOutsideRange ? [] : (transfersByDay.get(key) || [])
+            const dayRentals = isOutsideRange ? [] : (rentalsByDay.get(key) || [])
 
             return (
-                <div key={day.toISOString()} className={`flex flex-row md:flex-col transition-colors duration-300 ${isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}>
+                <div key={day.toISOString()} className={`group flex flex-row md:flex-col transition-colors duration-300 ${isOutsideRange ? 'bg-gray-50/60 opacity-60' : isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}>
                     <div className={`p-3 text-center border-r md:border-r-0 border-b-0 md:border-b border-gray-100 transition-colors shrink-0 w-24 md:w-auto flex flex-col justify-center md:block ${isCurrentDay ? 'bg-blue-100/60' : ''}`}>
                         <span className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isCurrentDay ? 'text-blue-700' : 'text-gray-500'}`}>
                             {new Intl.DateTimeFormat('it-IT', { weekday: 'short' }).format(day)}
