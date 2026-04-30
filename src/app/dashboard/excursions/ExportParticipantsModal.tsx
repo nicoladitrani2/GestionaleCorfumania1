@@ -43,7 +43,7 @@ export function ExportParticipantsModal({ onClose, onExport }: ExportParticipant
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <FileDown className="w-6 h-6" />
@@ -57,7 +57,7 @@ export function ExportParticipantsModal({ onClose, onExport }: ExportParticipant
           </button>
         </div>
 
-        <div className="p-6">
+        <div className="p-6 overflow-y-auto flex-1">
           <p className="text-sm text-gray-500 mb-4">
             I seguenti campi sono <strong>obbligatori</strong> e verranno sempre inclusi:
             <br />

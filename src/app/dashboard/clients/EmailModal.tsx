@@ -76,7 +76,7 @@ export function EmailModal({ clientId, clientEmail, clientName, onClose, onEmail
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gradient-to-r from-blue-600 to-indigo-600">
           <div className="flex items-center gap-2 text-white">
             <Mail className="w-5 h-5" />
@@ -91,7 +91,7 @@ export function EmailModal({ clientId, clientEmail, clientName, onClose, onEmail
           </button>
         </div>
         
-        <div className="p-6 space-y-4">
+        <div className="p-6 space-y-4 overflow-y-auto flex-1">
           {error && (
             <div className="p-3 bg-red-50 border border-red-200 text-red-700 rounded-lg text-sm">
               {error}
@@ -148,7 +148,7 @@ export function EmailModal({ clientId, clientEmail, clientName, onClose, onEmail
           </div>
         </div>
 
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 shrink-0">
           <button
             onClick={onClose}
             disabled={sending}

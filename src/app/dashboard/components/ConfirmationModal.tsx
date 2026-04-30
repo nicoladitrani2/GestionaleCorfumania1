@@ -48,7 +48,7 @@ export function ConfirmationModal({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         <div className="px-6 py-4 border-b border-gray-100 flex justify-between items-center bg-gray-50">
           <h3 className="text-lg font-bold text-gray-800">{title}</h3>
           <button 
@@ -59,16 +59,16 @@ export function ConfirmationModal({
           </button>
         </div>
         
-        <div className="p-6 text-center space-y-4">
+        <div className="p-6 text-center space-y-4 overflow-y-auto flex-1">
           <div className="flex justify-center">
             <div className={`p-3 rounded-full ${variant === 'danger' ? 'bg-red-50' : variant === 'warning' ? 'bg-orange-50' : 'bg-blue-50'}`}>
               {getIcon()}
             </div>
           </div>
-          <p className="text-gray-600 text-lg">{message}</p>
+          <p className="text-gray-600 text-lg whitespace-pre-line break-words">{message}</p>
         </div>
 
-        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3">
+        <div className="px-6 py-4 bg-gray-50 border-t border-gray-100 flex justify-end gap-3 shrink-0">
           <button
             onClick={onClose}
             className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 transition-colors"

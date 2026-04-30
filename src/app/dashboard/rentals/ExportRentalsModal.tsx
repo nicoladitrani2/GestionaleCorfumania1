@@ -77,7 +77,7 @@ export function ExportRentalsModal({
 
   return (
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
         <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-6 py-4 flex justify-between items-center">
           <h3 className="text-xl font-bold text-white flex items-center gap-2">
             <FileDown className="w-6 h-6" />
@@ -91,8 +91,9 @@ export function ExportRentalsModal({
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
-          <div className="flex items-center gap-2 text-sm text-gray-600">
+        <div className="flex flex-col flex-1 overflow-hidden">
+          <div className="p-6 space-y-6 overflow-y-auto flex-1">
+            <div className="flex items-center gap-2 text-sm text-gray-600">
             <Filter className="w-4 h-4 text-blue-500" />
             <span>
               Applica filtri combinati per Agenzia, Fornitore, Tipo Mezzo e Periodo. Se lasci vuoto, non si applica alcun filtro su quel campo.
@@ -246,21 +247,22 @@ export function ExportRentalsModal({
             </div>
           </div>
 
-          <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
-            <button
-              onClick={onClose}
-              className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-sm font-medium"
-            >
-              Annulla
-            </button>
-            <button
-              onClick={handleExport}
-              className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition-colors text-sm font-medium flex items-center gap-2"
-            >
-              <FileDown className="w-4 h-4" />
-              Esporta PDF
-            </button>
           </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
+          <button
+            onClick={onClose}
+            className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors text-sm font-medium"
+          >
+            Annulla
+          </button>
+          <button
+            onClick={handleExport}
+            className="px-4 py-2 bg-blue-600 text-white hover:bg-blue-700 rounded-lg shadow-sm transition-colors text-sm font-medium flex items-center gap-2"
+          >
+            <FileDown className="w-4 h-4" />
+            Esporta PDF
+          </button>
         </div>
       </div>
     </div>

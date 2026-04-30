@@ -848,7 +848,7 @@ export function TransfersManager({
     <>
       {approvalModal.isOpen && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="bg-green-600 px-6 py-4 flex justify-between items-center">
               <h3 className="text-lg font-bold text-white flex items-center gap-2">
                 <CheckCircle className="w-6 h-6" />
@@ -862,7 +862,7 @@ export function TransfersManager({
               </button>
             </div>
             
-            <div className="p-6 space-y-4">
+            <div className="p-6 space-y-4 overflow-y-auto flex-1">
               <p className="text-gray-600 text-sm">
                 Per approvare il trasferimento, imposta i prezzi definitivi per adulti e bambini.
                 I futuri partecipanti useranno automaticamente questi prezzi.
@@ -943,7 +943,7 @@ export function TransfersManager({
 
       {isCreating && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden animate-in zoom-in-95 duration-200 flex flex-col max-h-[90vh]">
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 px-4 sm:px-6 py-4 flex justify-between items-center">
               <h3 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2">
                 {editingTransferId ? <Edit className="w-5 h-5 sm:w-6 sm:h-6" /> : <Plus className="w-5 h-5 sm:w-6 sm:h-6" />}
@@ -957,7 +957,7 @@ export function TransfersManager({
               </button>
             </div>
             
-            <form onSubmit={handleSaveTransfer} className="p-4 sm:p-6 space-y-5">
+            <form onSubmit={handleSaveTransfer} className="p-4 sm:p-6 space-y-5 overflow-y-auto flex-1">
               {error && (
                 <div className="bg-red-50 text-red-600 p-3 rounded-lg text-sm flex items-start gap-2 border border-red-100 whitespace-pre-line break-words">
                    <AlertCircle className="w-4 h-4 shrink-0" />
