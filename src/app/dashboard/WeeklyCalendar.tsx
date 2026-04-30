@@ -66,11 +66,18 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
   const rangeStartDate = useMemo(() => inputValueToDate(rangeStart), [rangeStart])
   const rangeEndDate = useMemo(() => inputValueToDate(rangeEnd), [rangeEnd])
 
+  const normalizedRange = useMemo(() => {
+    if (!rangeStartDate || !rangeEndDate) return null
+    const start = new Date(rangeStartDate)
+    const end = new Date(rangeEndDate)
+    if (start.getTime() <= end.getTime()) return { start, end }
+    return { start: end, end: start }
+  }, [rangeStartDate, rangeEndDate])
+
   const viewStart = useMemo(() => {
     if (view === 'MONTH') return getStartOfWeek(startOfMonth(currentDate))
-    if (view === 'RANGE' && rangeStartDate) return getStartOfWeek(rangeStartDate)
     return startOfWeek
-  }, [view, currentDate, rangeStartDate])
+  }, [view, currentDate, startOfWeek])
 
   const viewEnd = useMemo(() => {
     if (view === 'MONTH') {
@@ -78,14 +85,11 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
       const lastStart = getStartOfWeek(last)
       return addDays(lastStart, 6)
     }
-    if (view === 'RANGE' && rangeEndDate) {
-      const lastStart = getStartOfWeek(rangeEndDate)
-      return addDays(lastStart, 6)
-    }
     return endOfWeek
-  }, [view, currentDate, rangeEndDate, endOfWeek])
+  }, [view, currentDate, endOfWeek])
 
   const days = useMemo(() => {
+    if (view === 'RANGE') return []
     const list: Date[] = []
     const start = new Date(viewStart)
     const end = new Date(viewEnd)
@@ -229,14 +233,70 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
     return map
   }, [rentals])
 
+  const rangeMonthSections = useMemo(() => {
+    if (view !== 'RANGE' || !normalizedRange) return []
+
+    const { start, end } = normalizedRange
+    const sections: Array<{
+      monthLabel: string
+      days: Array<Date | null>
+    }> = []
+
+    const spanDays = Math.round((end.getTime() - start.getTime()) / (24 * 60 * 60 * 1000)) + 1
+    const shouldSplitByMonths =
+      spanDays > 31 || start.getMonth() !== end.getMonth() || start.getFullYear() !== end.getFullYear()
+
+    const firstMonth = new Date(start.getFullYear(), start.getMonth(), 1)
+    const lastMonth = new Date(end.getFullYear(), end.getMonth(), 1)
+    const cursor = new Date(firstMonth)
+
+    while (cursor.getTime() <= lastMonth.getTime()) {
+      const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1)
+      const monthEnd = endOfMonth(monthStart)
+
+      const sectionStart = cursor.getFullYear() === start.getFullYear() && cursor.getMonth() === start.getMonth() ? start : monthStart
+      const sectionEnd = cursor.getFullYear() === end.getFullYear() && cursor.getMonth() === end.getMonth() ? end : monthEnd
+
+      const actualDays: Date[] = []
+      for (let d = new Date(sectionStart); d.getTime() <= sectionEnd.getTime(); d = addDays(d, 1)) {
+        actualDays.push(new Date(d))
+      }
+
+      const mondayIndex = (sectionStart.getDay() + 6) % 7
+      const leading = mondayIndex
+      const total = leading + actualDays.length
+      const trailing = (7 - (total % 7)) % 7
+
+      const daysWithPlaceholders: Array<Date | null> = [
+        ...Array.from({ length: leading }, () => null),
+        ...actualDays,
+        ...Array.from({ length: trailing }, () => null),
+      ]
+
+      sections.push({
+        monthLabel: shouldSplitByMonths ? monthStart.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' }) : '',
+        days: daysWithPlaceholders,
+      })
+
+      cursor.setMonth(cursor.getMonth() + 1)
+    }
+
+    return sections
+  }, [view, normalizedRange])
+
   const headerSubtitle = useMemo(() => {
     if (view === 'MONTH') {
       return currentDate.toLocaleDateString('it-IT', { month: 'long', year: 'numeric' })
     }
+    if (view === 'RANGE' && normalizedRange) {
+      const start = normalizedRange.start
+      const end = normalizedRange.end
+      return `${start.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })} - ${end.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`
+    }
     const start = viewStart
     const end = viewEnd
     return `${start.toLocaleDateString('it-IT', { day: 'numeric', month: 'long' })} - ${end.toLocaleDateString('it-IT', { day: 'numeric', month: 'long', year: 'numeric' })}`
-  }, [view, currentDate, viewStart, viewEnd])
+  }, [view, currentDate, viewStart, viewEnd, normalizedRange])
 
   return (
     <div className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden mb-8 transition-all hover:shadow-lg">
@@ -298,30 +358,45 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
         </div>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-7 divide-y md:divide-y-0 md:divide-x divide-gray-200 min-h-[400px]">
-        {days.map((day) => {
-            const isCurrentDay = isToday(day)
-            const isOutsideRange =
-              view === 'RANGE' && rangeStartDate && rangeEndDate
-                ? !isWithinInclusive(day, rangeStartDate, rangeEndDate)
-                : false
+      {view === 'RANGE' && normalizedRange ? (
+        <div className="p-4 space-y-6">
+          {rangeMonthSections.map((section, idx) => (
+            <div key={idx} className="space-y-3">
+              {section.monthLabel && (
+                <div className="text-sm font-bold text-gray-800 capitalize">{section.monthLabel}</div>
+              )}
+              <div className="grid grid-cols-1 md:grid-cols-7 divide-y md:divide-y-0 md:divide-x divide-gray-200 rounded-lg border border-gray-200 overflow-hidden">
+                {section.days.map((day, i) => {
+                  if (!day) {
+                    return <div key={`empty-${idx}-${i}`} className="hidden md:block bg-gray-50/40" />
+                  }
 
-            const key = dayKey(day)
-            const dayExcursions = isOutsideRange ? [] : (excursionsByDay.get(key) || [])
-            const dayTransfers = isOutsideRange ? [] : (transfersByDay.get(key) || [])
-            const dayRentals = isOutsideRange ? [] : (rentalsByDay.get(key) || [])
+                  const isCurrentDay = isToday(day)
+                  const key = dayKey(day)
+                  const dayExcursions = excursionsByDay.get(key) || []
+                  const dayTransfers = transfersByDay.get(key) || []
+                  const dayRentals = rentalsByDay.get(key) || []
 
-            return (
-                <div key={day.toISOString()} className={`group flex flex-row md:flex-col transition-colors duration-300 ${isOutsideRange ? 'bg-gray-50/60 opacity-60' : isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}>
-                    <div className={`p-3 text-center border-r md:border-r-0 border-b-0 md:border-b border-gray-100 transition-colors shrink-0 w-24 md:w-auto flex flex-col justify-center md:block ${isCurrentDay ? 'bg-blue-100/60' : ''}`}>
-                        <span className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isCurrentDay ? 'text-blue-700' : 'text-gray-500'}`}>
-                            {new Intl.DateTimeFormat('it-IT', { weekday: 'short' }).format(day)}
+                  return (
+                    <div
+                      key={day.toISOString()}
+                      className={`group flex flex-row md:flex-col transition-colors duration-300 ${isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}
+                    >
+                      <div
+                        className={`p-3 text-center border-r md:border-r-0 border-b-0 md:border-b border-gray-100 transition-colors shrink-0 w-24 md:w-auto flex flex-col justify-center md:block ${isCurrentDay ? 'bg-blue-100/60' : ''}`}
+                      >
+                        <span
+                          className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isCurrentDay ? 'text-blue-700' : 'text-gray-500'}`}
+                        >
+                          {new Intl.DateTimeFormat('it-IT', { weekday: 'short' }).format(day)}
                         </span>
-                        <div className={`w-8 h-8 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all ${isCurrentDay ? 'bg-blue-600 text-white shadow-md scale-110' : 'text-gray-900'}`}>
-                            {day.getDate()}
+                        <div
+                          className={`w-8 h-8 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all ${isCurrentDay ? 'bg-blue-600 text-white shadow-md scale-110' : 'text-gray-900'}`}
+                        >
+                          {day.getDate()}
                         </div>
-                    </div>
-                    <div className="flex-1 p-2 space-y-3 min-w-0">
+                      </div>
+                      <div className="flex-1 p-2 space-y-3 min-w-0">
                         {dayExcursions.map(ex => {
                             const duration = getDuration(ex.startDate, ex.endDate)
                             const isDeadlineSoon = ex.confirmationDeadline && new Date(ex.confirmationDeadline) > new Date() && new Date(ex.confirmationDeadline).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000
@@ -468,11 +543,185 @@ export function WeeklyCalendar({ excursions, transfers }: WeeklyCalendarProps) {
                                 <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
                             </div>
                         )}
+                      </div>
                     </div>
-                </div>
-            )
-        })}
-      </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-7 divide-y md:divide-y-0 md:divide-x divide-gray-200 min-h-[400px]">
+          {days.map((day) => {
+              const isCurrentDay = isToday(day)
+              const key = dayKey(day)
+              const dayExcursions = excursionsByDay.get(key) || []
+              const dayTransfers = transfersByDay.get(key) || []
+              const dayRentals = rentalsByDay.get(key) || []
+
+              return (
+                  <div key={day.toISOString()} className={`group flex flex-row md:flex-col transition-colors duration-300 ${isCurrentDay ? 'bg-blue-50/40' : 'hover:bg-gray-50/50'}`}>
+                      <div className={`p-3 text-center border-r md:border-r-0 border-b-0 md:border-b border-gray-100 transition-colors shrink-0 w-24 md:w-auto flex flex-col justify-center md:block ${isCurrentDay ? 'bg-blue-100/60' : ''}`}>
+                          <span className={`block text-xs font-bold uppercase tracking-wider mb-1 ${isCurrentDay ? 'text-blue-700' : 'text-gray-500'}`}>
+                              {new Intl.DateTimeFormat('it-IT', { weekday: 'short' }).format(day)}
+                          </span>
+                          <div className={`w-8 h-8 mx-auto flex items-center justify-center rounded-full text-sm font-bold transition-all ${isCurrentDay ? 'bg-blue-600 text-white shadow-md scale-110' : 'text-gray-900'}`}>
+                              {day.getDate()}
+                          </div>
+                      </div>
+                      <div className="flex-1 p-2 space-y-3 min-w-0">
+                          {dayExcursions.map(ex => {
+                              const duration = getDuration(ex.startDate, ex.endDate)
+                              const isDeadlineSoon = ex.confirmationDeadline && new Date(ex.confirmationDeadline) > new Date() && new Date(ex.confirmationDeadline).getTime() - new Date().getTime() < 24 * 60 * 60 * 1000
+
+                              return (
+                                  <div 
+                                      key={ex.id}
+                                      onClick={() => router.push(`/dashboard/excursions?id=${ex.id}`)}
+                                      className="group relative bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-lg hover:border-blue-400 cursor-pointer transition-all duration-200 overflow-hidden"
+                                  >
+                                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-blue-500 to-indigo-600 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                      
+                                      <div className="p-3">
+                                          <div className="flex items-center justify-between mb-2">
+                                              <div className="flex items-center gap-1.5 text-xs font-semibold text-blue-600 bg-blue-50 px-2 py-1 rounded-md">
+                                                  <Clock className="w-3 h-3" />
+                                                  <span>
+                                                      {new Date(ex.startDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                                                      {ex.endDate && ` - ${new Date(ex.endDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`}
+                                                  </span>
+                                              </div>
+                                              {duration && (
+                                                  <div className="flex items-center gap-1 text-[10px] text-gray-500 font-medium" title="Durata">
+                                                      <Timer className="w-3 h-3" />
+                                                      {duration}
+                                                  </div>
+                                              )}
+                                          </div>
+
+                                          <h4 className="text-sm font-bold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-blue-700 transition-colors">
+                                              {ex.name}
+                                          </h4>
+
+                                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                                              <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded-md group-hover:bg-gray-100 transition-colors">
+                                                  <Users className="w-3.5 h-3.5" />
+                                                  <span className="font-semibold">{ex._count?.participants || 0}</span>
+                                              </div>
+                                              
+                                              {isDeadlineSoon && (
+                                                  <div className="text-amber-500" title="Scadenza vicina">
+                                                      <AlertCircle className="w-4 h-4" />
+                                                  </div>
+                                              )}
+                                          </div>
+                                      </div>
+                                  </div>
+                              )
+                          })}
+                          {dayTransfers.map(tr => {
+                              const duration = getDuration(tr.date, tr.endDate)
+
+                              return (
+                                  <div 
+                                      key={tr.id}
+                                      onClick={() => router.push(`/dashboard/transfers?id=${tr.id}`)}
+                                      className="group relative bg-white rounded-xl border border-orange-200 shadow-sm hover:shadow-lg hover:border-orange-400 cursor-pointer transition-all duration-200 overflow-hidden"
+                                  >
+                                      <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-orange-500 to-amber-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+                                      
+                                      <div className="p-3">
+                                          <div className="flex items-center justify-between mb-2">
+                                              <div className="flex items-center gap-1.5 text-xs font-semibold text-orange-600 bg-orange-50 px-2 py-1 rounded-md">
+                                                  <Clock className="w-3 h-3" />
+                                                  <span>
+                                                      {new Date(tr.date).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}
+                                                      {tr.endDate && ` - ${new Date(tr.endDate).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' })}`}
+                                                  </span>
+                                              </div>
+                                              {duration && (
+                                                  <div className="flex items-center gap-1 text-[10px] text-gray-500 font-medium">
+                                                      <Timer className="w-3 h-3" />
+                                                      {duration}
+                                                  </div>
+                                              )}
+                                          </div>
+
+                                          <h4 className="text-sm font-bold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-orange-700 transition-colors">
+                                              {tr.name}
+                                          </h4>
+
+                                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                                              <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded-md group-hover:bg-gray-100 transition-colors">
+                                                  <Bus className="w-3.5 h-3.5 text-orange-500" />
+                                                  <span className="font-semibold">{tr._count?.participants || 0}</span>
+                                              </div>
+                                          </div>
+                                      </div>
+                                  </div>
+                              )
+                          })}
+                          {dayRentals.map(r => {
+                              const pax = (r.adults || 0) + (r.children || 0) + (r.infants || 0) || 1
+                              const name =
+                                `${r.firstName || ''} ${r.lastName || ''}`.trim() ||
+                                r.name ||
+                                'Noleggio'
+                              const breakdownParts: string[] = []
+                              if (r.adults) breakdownParts.push(`${r.adults}A`)
+                              if (r.children) breakdownParts.push(`${r.children}B`)
+                              if (r.infants) breakdownParts.push(`${r.infants}I`)
+                              const breakdown =
+                                breakdownParts.length > 0
+                                  ? ` (${breakdownParts.join(' ')})`
+                                  : ''
+
+                              return (
+                                <div
+                                  key={r.id}
+                                  onClick={() => router.push('/dashboard/rentals')}
+                                  className="group relative bg-white rounded-xl border border-emerald-200 shadow-sm hover:shadow-lg hover:border-emerald-400 cursor-pointer transition-all duration-200 overflow-hidden"
+                                >
+                                  <div className="absolute left-0 top-0 bottom-0 w-1 bg-gradient-to-b from-emerald-500 to-green-500 opacity-0 group-hover:opacity-100 transition-opacity" />
+
+                                  <div className="p-3">
+                                    <div className="flex items-center justify-between mb-2">
+                                      <div className="flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-md">
+                                        <Car className="w-3 h-3" />
+                                        <span>Noleggio</span>
+                                      </div>
+                                    </div>
+
+                                    <h4 className="text-sm font-bold text-gray-900 leading-snug mb-2 line-clamp-2 group-hover:text-emerald-700 transition-colors">
+                                      {name}
+                                    </h4>
+
+                                    <div className="flex items-center justify-between mt-2 pt-2 border-t border-gray-50">
+                                      <div className="flex items-center gap-1.5 text-xs text-gray-600 bg-gray-50 px-2 py-1 rounded-md group-hover:bg-gray-100 transition-colors">
+                                        <Users className="w-3.5 h-3.5 text-emerald-500" />
+                                        <span className="font-semibold">
+                                          {pax} pax{breakdown}
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              )
+                          })}
+                          {dayExcursions.length === 0 && dayTransfers.length === 0 && dayRentals.length === 0 && (
+                              <div className="h-full flex flex-col items-center justify-center min-h-[60px] opacity-0 group-hover:opacity-100 transition-opacity">
+                                  <div className="w-1 h-1 bg-gray-300 rounded-full mb-1"></div>
+                                  <div className="w-1 h-1 bg-gray-300 rounded-full mb-1"></div>
+                                  <div className="w-1 h-1 bg-gray-300 rounded-full"></div>
+                              </div>
+                          )}
+                      </div>
+                  </div>
+              )
+          })}
+        </div>
+      )}
     </div>
   )
 }
