@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { Plus, Search, FileDown, Award, List } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -26,6 +27,7 @@ export function RentalsManager({
   agencyDefaultCommission,
   agencyCommissionType
 }: RentalsManagerProps) {
+  const searchParams = useSearchParams()
   const [isAdding, setIsAdding] = useState(false)
   const [editingParticipant, setEditingParticipant] = useState<any>(null)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
@@ -188,13 +190,15 @@ export function RentalsManager({
             break
           case 'createdBy':
             base.push(
-              r.createdBy
-                ? `${r.createdBy.code || ''} ${r.createdBy.firstName || ''} ${r.createdBy.lastName || ''}`.trim()
-                : ''
+              (() => {
+                const by = r.createdBy || r.assignedTo
+                if (!by) return ''
+                return `${by.code || ''} ${by.firstName || ''} ${by.lastName || ''}`.trim() || by.email || ''
+              })()
             )
             break
           case 'agency':
-            base.push(r.createdBy?.agency?.name || '')
+            base.push((r.createdBy || r.assignedTo)?.agency?.name || '')
             break
           case 'notes':
             base.push(r.notes || '')
@@ -301,7 +305,7 @@ export function RentalsManager({
                 onChange={(e) => {
                   setSearch(e.target.value)
                 }}
-                placeholder="Cerca nei noleggi per contenuto delle note..."
+                placeholder="Cerca per nome, cognome, email o data prenotazione..."
                 className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
@@ -316,6 +320,7 @@ export function RentalsManager({
           refreshTrigger={refreshTrigger}
           search={search}
           onLoaded={handleRentalsLoaded}
+          initialSelectedParticipantId={searchParams.get('participantId') || undefined}
           onEdit={(p) => setEditingParticipant(p)}
           onUpdate={() => setRefreshTrigger(prev => prev + 1)}
         />

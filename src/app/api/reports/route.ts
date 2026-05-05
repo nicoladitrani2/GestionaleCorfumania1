@@ -4,6 +4,18 @@ import { getSession } from '@/lib/auth'
 
 export const dynamic = 'force-dynamic'
 
+function computeIsSpecialAssistant(user: any, agencyName?: string | null): boolean {
+  if (!user) return false
+  if (user.isSpecialAssistant) return true
+  if (String(user.role || '').toUpperCase() === 'ADMIN') return true
+  const normalizedAgency = String(agencyName || '').toLowerCase().trim()
+  if (normalizedAgency.includes('corfumania') || normalizedAgency.includes('go4sea')) return true
+  const haystack = `${user.firstName || ''} ${user.lastName || ''} ${user.email || ''} ${user.code || ''}`
+    .toLowerCase()
+    .trim()
+  return haystack.includes('speciale')
+}
+
 export async function GET(request: Request) {
   try {
     const session = await getSession()
@@ -58,9 +70,7 @@ export async function GET(request: Request) {
 
     // Agency Filter
     if (agencyIds && agencyIds.length > 0) {
-         whereClause.createdBy = {
-             agencyId: { in: agencyIds }
-         }
+         whereClause.user = { agencyId: { in: agencyIds } }
     }
 
     // Provider/Supplier Filter
@@ -181,16 +191,19 @@ export async function GET(request: Request) {
     let rentalsGo4SeaTotal = 0
     let rentalsGo4SeaNow = 0
     let rentalsGo4SeaFuture = 0
+
+    const corfumaniaName = adminAgency?.name || 'Corfumania'
+    let corfumaniaNetTotal = 0
     
     const byAgency: Record<string, { name: string, revenue: number, commission: number, assistantCommission: number, netAgency: number, count: number, pax: number, tax: number }> = {}
     const bySupplier: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
     const byAssistant: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
-    const byExcursion: Record<string, { name: string, date: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
-    const byTransfer: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number, tax: number }> = {}
+    const byExcursion: Record<string, { name: string, date: string, revenue: number, commission: number, assistantCommission: number, supplierShare: number, netAgency: number, count: number, pax: number, tax: number }> = {}
+    const byTransfer: Record<string, { name: string, revenue: number, commission: number, agencyBreakdown: Record<string, number>, assistantCommission: number, supplierShare: number, netAgency: number, count: number, pax: number, tax: number }> = {}
     const byRental: Record<string, { name: string, revenue: number, gross: number, commissionBase: number, commission: number, agentShare: number, companyShare: number, go4seaShare: number, supplierOut: number, assistantCommission: number, supplierShare: number, netAgency: number, count: number, pax: number, tax: number }> = {}
     const byRentalAgent: Record<string, { id: string, code: string, name: string, count: number, gross: number, commissionBase: number, agentShare: number, companyShare: number, go4seaShare: number }> = {}
     const rentalsPaymentByMethod: Record<string, { name: string, revenue: number, count: number }> = {}
-    const bySpecialService: Record<string, { name: string, revenue: number, commission: number, count: number, pax: number }> = {}
+    const bySpecialService: Record<string, { name: string, revenue: number, commission: number, agencyBreakdown: Record<string, number>, count: number, pax: number }> = {}
 
     participants.forEach(p => {
         if (p.paymentStatus === 'REJECTED' || p.paymentStatus === 'PENDING_APPROVAL') return
@@ -199,6 +212,7 @@ export async function GET(request: Request) {
         let revenue = p.paidAmount || 0 
         let pax = (p.adults + p.children + p.infants) || 1
         const tax = p.tax || 0
+        const commissionableRevenue = Math.max(0, revenue - tax)
         
         // Handle Refunded: Only include if there is a retained deposit (Acconto)
         if (p.paymentType === 'REFUNDED') {
@@ -216,6 +230,8 @@ export async function GET(request: Request) {
         }
 
         let commissionAmount = 0
+        let agentShareForRow = 0
+        let corfumaniaShareForRow = 0
         let isBrokerageProcessed = false
         let isExternalAgencyCommission = false
         
@@ -234,6 +250,8 @@ export async function GET(request: Request) {
              // And Agency Net is 100% of Revenue (No Supplier cost deducted in Commission logic usually, 
              // or Supplier is internal so Commission = Revenue)
              commissionAmount = revenue
+             agentShareForRow = 0
+             corfumaniaShareForRow = revenue
              
              // Populate Special Service Breakdown
              let serviceName = p.specialServiceType
@@ -241,7 +259,7 @@ export async function GET(request: Request) {
              else if (serviceName === 'CITY_TAX') serviceName = 'Tassa di Soggiorno'
 
              if (!bySpecialService[serviceName]) {
-                 bySpecialService[serviceName] = { name: serviceName, revenue: 0, commission: 0, count: 0, pax: 0 }
+                 bySpecialService[serviceName] = { name: serviceName, revenue: 0, commission: 0, agencyBreakdown: {}, count: 0, pax: 0 }
              }
              bySpecialService[serviceName].revenue += revenue
              bySpecialService[serviceName].commission += commissionAmount
@@ -250,12 +268,33 @@ export async function GET(request: Request) {
         }
         
         // --- AGENCY COMMISSION CALCULATION ---
-        let userAgencyId = (p.user as any)?.agencyId
+        const operatorUser = (p.assignedTo || p.user) as any
+        let userAgencyId = operatorUser?.agencyId as string | undefined
         let agency = userAgencyId ? agencyMap[userAgencyId] : null
 
-        if (!agency && (p.user as any)?.role === 'ADMIN') {
-            agency = adminAgency
-            if (agency) userAgencyId = agency.id
+        if (!agency && operatorUser?.role === 'ADMIN') {
+          agency = adminAgency
+          if (agency) userAgencyId = agency.id
+        }
+        const operatorAgencyName = String(agency?.name || (operatorUser?.role === 'ADMIN' ? 'Corfumania' : '')).trim()
+        const operatorAgencyNameLower = operatorAgencyName.toLowerCase()
+        const isCorfumaniaOperator =
+          (!!adminAgency?.id && !!agency?.id && agency.id === adminAgency.id) ||
+          operatorUser?.role === 'ADMIN' ||
+          operatorAgencyNameLower.includes('corfumania')
+        const isGo4SeaOperator = operatorAgencyNameLower.includes('go4sea')
+        const isSpecialOperator = computeIsSpecialAssistant(operatorUser, operatorAgencyName)
+
+        if (p.specialServiceType && commissionAmount > 0) {
+          let serviceName = p.specialServiceType
+          if (serviceName === 'BRACELET') serviceName = 'Braccialetto'
+          else if (serviceName === 'CITY_TAX') serviceName = 'Tassa di Soggiorno'
+
+          const bucket = bySpecialService[serviceName]
+          if (bucket) {
+            const agencyName = operatorAgencyName || 'Nessuna Agenzia'
+            bucket.agencyBreakdown[agencyName] = (bucket.agencyBreakdown[agencyName] || 0) + commissionAmount
+          }
         }
 
         const isRental = !!p.rentalId
@@ -302,10 +341,8 @@ export async function GET(request: Request) {
             const supplement = p.supplementPrice || 0
             const rentalTax = p.tax || 0
             const supplierName = (p.supplier || '').trim().toLowerCase()
-            const operatorAgencyId = ((p.assignedTo as any)?.agencyId || (p.user as any)?.agencyId) as string | undefined
-            const referenceAgencyId = ((p as any).agencyId || operatorAgencyId) as string | undefined
-            const referenceAgencyName = referenceAgencyId ? String(agencyMap[referenceAgencyId]?.name || '').toLowerCase() : ''
-            const isGo4Sea = referenceAgencyName.includes('go4sea')
+            const operatorRoleUpper = String((operatorUser as any)?.role || '').toUpperCase()
+            const isSpecialRental = !!(operatorUser as any)?.isSpecialAssistant
             const excludedCosts =
               effectiveRentalType === 'CAR'
                 ? (Math.max(0, insurance) + Math.max(0, rentalTax) + Math.max(0, supplement))
@@ -322,9 +359,33 @@ export async function GET(request: Request) {
             const totalCommission = includeRental ? (rentalCommissionBase * 0.2) : 0
             if (includeRental) rentalsCommissionBaseTotal += rentalCommissionBase
 
-            rentalAgentShare = rentalCommissionBase * 0.05
-            rentalCompanyShare = rentalCommissionBase * (isGo4Sea ? 0.05 : 0.15)
-            rentalGo4SeaShare = isGo4Sea ? rentalCommissionBase * 0.1 : 0
+            if (isGo4SeaOperator) {
+              if (isSpecialRental) {
+                rentalAgentShare = rentalCommissionBase * 0.1
+                rentalGo4SeaShare = rentalCommissionBase * 0.1
+                rentalCompanyShare = 0
+              } else {
+                rentalAgentShare = rentalCommissionBase * 0.05
+                rentalGo4SeaShare = rentalCommissionBase * 0.1
+                rentalCompanyShare = rentalCommissionBase * 0.05
+              }
+            } else if (isCorfumaniaOperator) {
+              if (isSpecialRental) {
+                rentalAgentShare = rentalCommissionBase * 0.1
+                rentalCompanyShare = rentalCommissionBase * 0.1
+                rentalGo4SeaShare = 0
+              } else {
+                rentalAgentShare = rentalCommissionBase * 0.05
+                rentalCompanyShare = rentalCommissionBase * 0.15
+                rentalGo4SeaShare = 0
+              }
+            } else {
+              rentalAgentShare = rentalCommissionBase * 0.05
+              rentalCompanyShare = rentalCommissionBase * 0.15
+              rentalGo4SeaShare = 0
+            }
+
+            rentalCompanyShare = includeRental ? Math.max(0, totalCommission - rentalAgentShare - rentalGo4SeaShare) : 0
 
             commissionAmount = totalCommission
             rentalSupplierShare = includeRental ? Math.max(0, rentalGross - totalCommission) : 0
@@ -379,112 +440,112 @@ export async function GET(request: Request) {
             }
         }
 
-        if (agency && !isRental && !p.specialServiceType) {
-            let ruleType = (agency as any).commissionType || 'PERCENTAGE'
-            let ruleValue = agency.defaultCommission || 0
+        // --- SPLIT 80/20 (EXCURSION/TRANSFER) ---
+        if (!isRental && !p.specialServiceType) {
+          const pool = commissionableRevenue * 0.2
 
-            // Check for overrides
-            if (p.excursion) {
+          if (isSpecialOperator) {
+            agentShareForRow = Math.min(commissionableRevenue * 0.10, pool)
+            const remainingPool = Math.max(0, pool - agentShareForRow)
+
+            if (!isCorfumaniaOperator && agency && userAgencyId) {
+              commissionAmount = remainingPool
+              corfumaniaShareForRow = 0
+            } else {
+              commissionAmount = 0
+              corfumaniaShareForRow = remainingPool
+            }
+          } else if (isGo4SeaOperator) {
+            agentShareForRow = Math.min(commissionableRevenue * 0.05, pool)
+            let remainingPool = Math.max(0, pool - agentShareForRow)
+            commissionAmount = Math.min(commissionableRevenue * 0.10, remainingPool)
+            remainingPool = Math.max(0, remainingPool - commissionAmount)
+            corfumaniaShareForRow = remainingPool
+          } else if (isCorfumaniaOperator) {
+            agentShareForRow = Math.min(pax * 1, pool)
+            const remainingPool = Math.max(0, pool - agentShareForRow)
+            commissionAmount = 0
+            corfumaniaShareForRow = remainingPool
+          } else {
+            const rawAsstCommType = p.assistantCommissionType || (agency as any)?.commissionType || 'PERCENTAGE'
+            const rawAsstCommVal =
+              p.assistantCommission !== null && p.assistantCommission !== undefined && Number(p.assistantCommission) > 0
+                ? Number(p.assistantCommission)
+                : Number((agency as any)?.defaultCommission || 0)
+            const asstCommType = String(rawAsstCommType || 'PERCENTAGE')
+            const asstCommVal = Number.isFinite(rawAsstCommVal) ? rawAsstCommVal : 0
+
+            if (asstCommVal > 0) {
+              const raw =
+                asstCommType === 'FIXED'
+                  ? Math.max(0, pax * asstCommVal)
+                  : Math.max(0, pool * (asstCommVal / 100))
+              agentShareForRow = Math.min(raw, pool)
+            }
+
+            let remainingPool = Math.max(0, pool - agentShareForRow)
+
+            if (agency && remainingPool > 0) {
+              let ruleType = (agency as any).commissionType || 'PERCENTAGE'
+              let ruleValue = agency.defaultCommission || 0
+
+              if (p.excursion) {
                 const excursionCommissions = commissionsMap[p.excursion.id] || []
                 const commRule = excursionCommissions.find(c => c.agencyId === userAgencyId)
                 if (commRule) {
-                    ruleValue = commRule.commissionPercentage
-                    ruleType = (commRule as any).commissionType || 'PERCENTAGE'
+                  ruleValue = commRule.commissionPercentage
+                  ruleType = (commRule as any).commissionType || 'PERCENTAGE'
                 }
-            } else if (p.transfer) {
+              } else if (p.transfer) {
                 const transferCommissions = transferCommissionsMap[p.transfer.id] || []
                 const commRule = transferCommissions.find(c => c.agencyId === userAgencyId)
                 if (commRule) {
-                    ruleValue = commRule.commissionPercentage
-                    ruleType = (commRule as any).commissionType || 'PERCENTAGE'
+                  ruleValue = commRule.commissionPercentage
+                  ruleType = (commRule as any).commissionType || 'PERCENTAGE'
                 }
-            }
-            // Note: Car Rentals use default agency logic if no override (Rentals don't have override table yet)
+              }
 
-            if (ruleType === 'FIXED') {
-                commissionAmount = pax * ruleValue
+              const rawAgencyShare =
+                ruleType === 'FIXED'
+                  ? Math.max(0, pax * ruleValue)
+                  : Math.max(0, (commissionableRevenue * ruleValue) / 100)
+
+              commissionAmount = Math.min(rawAgencyShare, remainingPool)
+              isExternalAgencyCommission = commissionAmount > 0
+              remainingPool = Math.max(0, remainingPool - commissionAmount)
             } else {
-                commissionAmount = (revenue * ruleValue) / 100
+              commissionAmount = 0
             }
 
-            isExternalAgencyCommission = true
-        }
-
-        // --- ASSISTANT COMMISSION CALCULATION ---
-        let assistantCommissionAmount = 0
-        
-        let asstCommType = p.assistantCommissionType
-        let asstCommVal = p.assistantCommission
-
-        let assistantAgency: any = null
-        if ((p.user as any)?.agencyId && agencyMap[(p.user as any).agencyId]) {
-            assistantAgency = agencyMap[(p.user as any).agencyId]
-        } else if ((p.user as any)?.role === 'ADMIN') {
-            assistantAgency = adminAgency
-        }
-
-        if (!asstCommType && assistantAgency) {
-            asstCommType = (assistantAgency as any).commissionType || 'PERCENTAGE'
-        }
-
-        if (assistantAgency && (asstCommVal === null || asstCommVal === undefined || asstCommVal === 0)) {
-            asstCommVal = assistantAgency.defaultCommission || 0
-            
-            // Check for overrides (Excursion/Transfer specific commissions)
-            if (p.excursion) {
-                const excursionCommissions = commissionsMap[p.excursion.id] || []
-                const commRule = excursionCommissions.find(c => c.agencyId === assistantAgency.id)
-                if (commRule) {
-                    asstCommVal = commRule.commissionPercentage
-                    asstCommType = (commRule as any).commissionType || 'PERCENTAGE'
-                }
-            } else if (p.transfer) {
-                const transferCommissions = transferCommissionsMap[p.transfer.id] || []
-                const commRule = transferCommissions.find(c => c.agencyId === assistantAgency.id)
-                if (commRule) {
-                    asstCommVal = commRule.commissionPercentage
-                    asstCommType = (commRule as any).commissionType || 'PERCENTAGE'
-                }
-            }
-        }
-
-        if (!asstCommType) asstCommType = 'PERCENTAGE'
-        if (asstCommVal === null || asstCommVal === undefined) asstCommVal = 0
-
-        if (isRental) {
-            assistantCommissionAmount = 0
-        } else if (asstCommVal > 0) {
-            if (asstCommType === 'PERCENTAGE') {
-                let baseForAssistant = revenue
-                if (p.specialServiceType) {
-                    baseForAssistant = commissionAmount
-                }
-                assistantCommissionAmount = baseForAssistant * (asstCommVal / 100)
-            } else {
-                assistantCommissionAmount = asstCommVal * pax
-            }
+            corfumaniaShareForRow = remainingPool
+          }
         }
         
         // Aggregates
         totalRevenue += revenue
         totalCommission += commissionAmount
-        totalAssistantCommission += assistantCommissionAmount
+        totalAssistantCommission += agentShareForRow
         totalPax += pax
         totalTax += tax
 
-        // Per-row Netto Agenzia (per agenzia)
+        // Per-row Netto Agenzia (Corfumania)
         let netAgencyForRow = 0
         if (isRental) {
             netAgencyForRow = includeFutureRentals ? rentalCompanyShare : rentalCompanyNowForRow
         } else if (p.specialServiceType) {
-            netAgencyForRow = commissionAmount - assistantCommissionAmount
+            netAgencyForRow = corfumaniaShareForRow
         } else {
-            netAgencyForRow = revenue * 0.2 - assistantCommissionAmount
+            netAgencyForRow = corfumaniaShareForRow
         }
 
         totalNetAgency += netAgencyForRow
+        if (isRental) {
+          corfumaniaNetTotal += netAgencyForRow
+        } else if (!p.specialServiceType) {
+          corfumaniaNetTotal += corfumaniaShareForRow
+        }
 
-        if (isExternalAgencyCommission) {
+        if (!isRental && !p.specialServiceType && commissionAmount > 0 && !isCorfumaniaOperator) {
             totalExternalAgencyCommission += commissionAmount
         }
         
@@ -535,10 +596,9 @@ export async function GET(request: Request) {
             const agencyStat = byAgency[agencyName]
             if (agencyStat) {
                 agencyStat.revenue += revenue
-                // For agency-level views, commission represents the sum of assistant quotas
-                agencyStat.commission += assistantCommissionAmount
-                agencyStat.assistantCommission += assistantCommissionAmount
-                agencyStat.netAgency += netAgencyForRow
+                agencyStat.commission += commissionAmount
+                agencyStat.assistantCommission += agentShareForRow
+                agencyStat.netAgency += 0
                 agencyStat.count += 1
                 agencyStat.pax += pax
                 agencyStat.tax += tax
@@ -557,7 +617,7 @@ export async function GET(request: Request) {
         }
         
         // Calculate Supplier Share (for Rentals this is the 80% payout)
-        let supplierShare = revenue
+        let supplierShare = p.specialServiceType ? 0 : (commissionableRevenue * 0.8)
         if (isRental) {
             supplierShare = rentalSupplierShare
         }
@@ -568,18 +628,21 @@ export async function GET(request: Request) {
         bySupplier[supplierBucketName].pax += pax
         bySupplier[supplierBucketName].tax += isRental ? (includeRental ? tax : 0) : tax
 
-        // By Assistant (exclude RENTALS to avoid mixing "soldi subito" logic with commissions)
-        if (!isRental) {
-            const assistantName = `${p.user.firstName || ''} ${p.user.lastName || ''}`.trim() || p.user.email
-            if (!byAssistant[assistantName]) {
-                byAssistant[assistantName] = { name: assistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+        // By Assistant
+        if (!isRental || includeRental) {
+            const assistantNameRaw = `${operatorUser?.firstName || ''} ${operatorUser?.lastName || ''}`.trim() || operatorUser?.email
+            const assistantAgencyLabel = operatorAgencyName || 'N/D'
+            const assistantName = `${assistantNameRaw} (${assistantAgencyLabel})`
+            const assistantId = operatorUser?.id ? String(operatorUser.id) : assistantNameRaw
+            const assistantKey = `${assistantId}::${assistantAgencyLabel}`
+            if (!byAssistant[assistantKey]) {
+                byAssistant[assistantKey] = { name: assistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
             }
-            byAssistant[assistantName].revenue += revenue
-            // Display Assistant's Commission in the Assistant Table
-            byAssistant[assistantName].commission += assistantCommissionAmount
-            byAssistant[assistantName].count += 1
-            byAssistant[assistantName].pax += pax
-            byAssistant[assistantName].tax += tax
+            byAssistant[assistantKey].revenue += revenue
+            byAssistant[assistantKey].commission += isRental ? rentalAgentShare : agentShareForRow
+            byAssistant[assistantKey].count += 1
+            byAssistant[assistantKey].pax += pax
+            byAssistant[assistantKey].tax += tax
         }
 
         // By Excursion / Rental / Transfer
@@ -594,10 +657,13 @@ export async function GET(request: Request) {
             const excursionKey = `${p.excursion.name}-${formattedDate}`
             
             if (!byExcursion[excursionKey]) {
-                byExcursion[excursionKey] = { name: p.excursion.name || 'Senza nome', date: formattedDate, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+                byExcursion[excursionKey] = { name: p.excursion.name || 'Senza nome', date: formattedDate, revenue: 0, commission: 0, assistantCommission: 0, supplierShare: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
             }
             byExcursion[excursionKey].revenue += revenue
             byExcursion[excursionKey].commission += commissionAmount
+            byExcursion[excursionKey].assistantCommission += agentShareForRow
+            byExcursion[excursionKey].supplierShare += supplierShare
+            byExcursion[excursionKey].netAgency += corfumaniaShareForRow
             byExcursion[excursionKey].count += 1
             byExcursion[excursionKey].pax += pax
             byExcursion[excursionKey].tax += tax
@@ -606,13 +672,25 @@ export async function GET(request: Request) {
             const transferName = `Transfer: ${p.transfer.pickupLocation || '?'} -> ${p.transfer.dropoffLocation || '?'}`
             
             if (!byTransfer[transferName]) {
-                byTransfer[transferName] = { name: transferName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+                byTransfer[transferName] = { name: transferName, revenue: 0, commission: 0, agencyBreakdown: {}, assistantCommission: 0, supplierShare: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
             }
             byTransfer[transferName].revenue += revenue
             byTransfer[transferName].commission += commissionAmount
+            byTransfer[transferName].assistantCommission += agentShareForRow
+            byTransfer[transferName].supplierShare += supplierShare
+            byTransfer[transferName].netAgency += corfumaniaShareForRow
             byTransfer[transferName].count += 1
             byTransfer[transferName].pax += pax
             byTransfer[transferName].tax += tax
+
+            if (commissionAmount > 0) {
+              const agencyName =
+                userAgencyId && agencyMap[userAgencyId]
+                  ? agencyMap[userAgencyId].name
+                  : (operatorAgencyName || 'Nessuna Agenzia')
+              byTransfer[transferName].agencyBreakdown[agencyName] =
+                (byTransfer[transferName].agencyBreakdown[agencyName] || 0) + commissionAmount
+            }
 
         } else if (isRental) {
             const rentalLabelType = effectiveRentalType || p.rental?.type || 'Generico'
@@ -641,6 +719,18 @@ export async function GET(request: Request) {
             byRental[rentalName].tax += includeRental ? tax : 0
         }
     })
+
+    if (!byAgency[corfumaniaName]) {
+      byAgency[corfumaniaName] = { name: corfumaniaName, revenue: 0, commission: 0, assistantCommission: 0, netAgency: 0, count: 0, pax: 0, tax: 0 }
+    }
+    for (const row of Object.values(byAgency)) {
+      if (row.name !== corfumaniaName && row.netAgency) {
+        row.commission += row.netAgency
+        row.netAgency = 0
+      }
+    }
+    byAgency[corfumaniaName].commission = corfumaniaNetTotal
+    byAgency[corfumaniaName].netAgency = 0
 
     // Fetch Tax Bookings (Gestione Separata)
     const taxWhereClause: any = {}
@@ -704,16 +794,24 @@ export async function GET(request: Request) {
 
         // MERGE INTO MAIN REPORT (byAssistant)
         // This ensures the main "Performance per Assistente" table includes these revenues
-        const mainAssistantName = b.assignedTo 
-            ? `${b.assignedTo.firstName || ''} ${b.assignedTo.lastName || ''}`.trim() || b.assignedTo.email
-            : 'Non Assegnato'
+        const assignedTo = b.assignedTo as any
+        const mainAssistantNameRaw = assignedTo
+          ? `${assignedTo.firstName || ''} ${assignedTo.lastName || ''}`.trim() || assignedTo.email
+          : 'Non Assegnato'
+        const assignedAgencyName =
+          assignedTo?.role === 'ADMIN'
+            ? (adminAgency?.name || 'Corfumania')
+            : (assignedTo?.agencyId && agencyMap[assignedTo.agencyId] ? agencyMap[assignedTo.agencyId].name : 'N/D')
+        const mainAssistantName = `${mainAssistantNameRaw} (${assignedAgencyName})`
+        const mainAssistantId = assignedTo?.id ? String(assignedTo.id) : mainAssistantNameRaw
+        const mainAssistantKey = `${mainAssistantId}::${assignedAgencyName}`
         
-        if (!byAssistant[mainAssistantName]) {
-            byAssistant[mainAssistantName] = { name: mainAssistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
+        if (!byAssistant[mainAssistantKey]) {
+            byAssistant[mainAssistantKey] = { name: mainAssistantName, revenue: 0, commission: 0, count: 0, pax: 0, tax: 0 }
         }
         // Initialize taxBookingRevenue if not present (we'll need to add this property to the object definition implicitly)
-        if (!(byAssistant[mainAssistantName] as any).taxBookingRevenue) (byAssistant[mainAssistantName] as any).taxBookingRevenue = 0
-        ;(byAssistant[mainAssistantName] as any).taxBookingRevenue += b.totalAmount
+        if (!(byAssistant[mainAssistantKey] as any).taxBookingRevenue) (byAssistant[mainAssistantKey] as any).taxBookingRevenue = 0
+        ;(byAssistant[mainAssistantKey] as any).taxBookingRevenue += b.totalAmount
 
         // Provenienza
         const prov = (b.provenienza === 'AGENZIA' || b.provenienza === '2') ? 'AGENZIA' : 'PRIVATO'
@@ -724,9 +822,7 @@ export async function GET(request: Request) {
         else taxStats.byProvenienza[prov].unpaidCount += 1
 
         // Assistant
-        const assistantName = b.assignedTo 
-            ? `${b.assignedTo.firstName} ${b.assignedTo.lastName}` 
-            : 'Non Assegnato'
+        const assistantName = mainAssistantName
         
         if (!taxStats.byAssistant[assistantName]) {
             taxStats.byAssistant[assistantName] = { pax: 0, revenue: 0, count: 0, paidCount: 0, unpaidCount: 0 }

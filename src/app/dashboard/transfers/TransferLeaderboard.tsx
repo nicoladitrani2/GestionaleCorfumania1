@@ -75,33 +75,43 @@ export function TransferLeaderboard({ transfer, userRole }: TransferLeaderboardP
       stats.totalSales += amountPaid
       stats.count += 1
 
-      const agency = owner?.agency
-      const agencyId = owner?.agencyId
+      const tax = Number(p.tax || 0)
+      const commissionable = Math.max(0, amountPaid - tax)
+      const pool = commissionable * 0.2
+      const pax = Math.max(1, (p.adults || 0) + (p.children || 0) + (p.infants || 0))
 
-      if (agencyId) {
-        let ruleType = agency?.commissionType || 'PERCENTAGE'
-        let ruleValue = agency?.defaultCommission || 0
+      const ownerRole = String(owner?.role || '')
+      const ownerAgencyNameRaw = owner?.agency?.name || (ownerRole === 'ADMIN' ? 'Corfumania' : null)
+      const ownerAgencyNameLower = String(ownerAgencyNameRaw || '').trim().toLowerCase()
+      const isGo4Sea = ownerAgencyNameLower.includes('go4sea')
+      const isCorfumania = ownerRole === 'ADMIN' || ownerAgencyNameLower.includes('corfumania')
+      const isSpecial = !!owner?.isSpecialAssistant
 
-        if (transfer?.commissions) {
-          const commConfig = transfer.commissions.find(
-            (c: any) => c.agencyId === agencyId
-          )
-          if (commConfig) {
-            ruleValue = commConfig.commissionPercentage
-            ruleType = commConfig.commissionType || ruleType
-          }
-        }
-
-        if (ruleType === 'FIXED') {
-          const adults = p.adults || 0
-          const children = p.children || 0
-          const infants = p.infants || 0
-          const count = adults + children + infants > 0 ? adults + children + infants : 1
-          stats.totalCommission += count * ruleValue
-        } else {
-          stats.totalCommission += amountPaid * (ruleValue / 100)
+      let agentShare = 0
+      if (isSpecial) {
+        agentShare = Math.min(commissionable * 0.10, pool)
+      } else if (isGo4Sea) {
+        agentShare = Math.min(commissionable * 0.05, pool)
+      } else if (isCorfumania) {
+        agentShare = Math.min(pax * 1, pool)
+      } else {
+        const rawAgentType = p.assistantCommissionType || owner?.agency?.commissionType || 'PERCENTAGE'
+        const rawAgentValue =
+          p.assistantCommission !== null && p.assistantCommission !== undefined && Number(p.assistantCommission) > 0
+            ? Number(p.assistantCommission)
+            : Number(owner?.agency?.defaultCommission || 0)
+        const agentType = String(rawAgentType || 'PERCENTAGE')
+        const agentValue = Number.isFinite(rawAgentValue) ? rawAgentValue : 0
+        if (agentValue > 0) {
+          const raw =
+            agentType === 'FIXED'
+              ? Math.max(0, pax * agentValue)
+              : Math.max(0, commissionable * (agentValue / 100))
+          agentShare = Math.min(raw, pool)
         }
       }
+
+      stats.totalCommission += agentShare
     })
 
     return Array.from(statsMap.values()).sort(

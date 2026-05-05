@@ -144,7 +144,10 @@ export function ParticipantForm({
     assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType,
     agencyId: initialData?.agencyId || userAgencyId || ''
   })
+  const [sendEmailToClient, setSendEmailToClient] = useState(true)
   const [countsByTier, setCountsByTier] = useState<Record<string, number>>({})
+  const [paxInputs, setPaxInputs] = useState<{ adults: string; children: string }>({ adults: '1', children: '0' })
+  const [tierInputs, setTierInputs] = useState<Record<string, string>>({})
   const [customNationality, setCustomNationality] = useState('')
   const [error, setError] = useState('')
   const [depositError, setDepositError] = useState('')
@@ -160,6 +163,7 @@ export function ParticipantForm({
     loading: false,
     activePax: null
   })
+  const [explicitIsSpecialAssistant, setExplicitIsSpecialAssistant] = useState<boolean>(false)
 
   const hasTierPricing =
     (type === 'EXCURSION' || type === 'TRANSFER') &&
@@ -189,6 +193,18 @@ export function ParticipantForm({
     return next
   }
 
+  const normalizeTierInputs = (inputs: Record<string, string>) => {
+    const raw: Record<string, number> = {}
+    for (const [k, v] of Object.entries(inputs || {})) {
+      const trimmed = String(v ?? '').trim()
+      if (trimmed === '') continue
+      const n = parseInt(trimmed, 10)
+      if (!Number.isFinite(n)) continue
+      raw[k] = n
+    }
+    return normalizeTierCounts(raw)
+  }
+
   useEffect(() => {
     if (!hasTierPricing) return
     if (!initialData) {
@@ -214,6 +230,48 @@ export function ParticipantForm({
       }
     } catch {}
   }, [hasTierPricing, initialData, priceTiers])
+
+  useEffect(() => {
+    if (hasTierPricing) {
+      const tiers = priceTiers || []
+      setTierInputs(prev => {
+        const next = { ...prev }
+        for (const t of tiers) {
+          if (typeof next[t.id] === 'undefined') {
+            next[t.id] = String(countsByTier[t.id] ?? 0)
+          }
+        }
+        return next
+      })
+      return
+    }
+
+    setPaxInputs({
+      adults: String((initialData?.adults ?? formData.adults) || 1),
+      children: String(initialData?.children ?? formData.children ?? 0),
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasTierPricing, initialData?.id])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadMeta = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) return
+        const data = await res.json()
+        const next = Boolean(
+          data?.explicitIsSpecialAssistant ?? data?.isSpecialAssistant ?? false
+        )
+        if (!cancelled) setExplicitIsSpecialAssistant(next)
+      } catch {
+      }
+    }
+    loadMeta()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean
@@ -367,12 +425,21 @@ export function ParticipantForm({
         pickupTime: initialData.pickupTime || '',
         returnPickupLocation: initialData.returnPickupLocation || '',
         returnDropoffLocation: initialData.returnDropoffLocation || '',
-        returnDate: initialData.returnDate ? new Date(initialData.returnDate).toISOString().split('T')[0] : '',
+        returnDate:
+          initialData.returnDate && !isNaN(new Date(initialData.returnDate).getTime())
+            ? new Date(initialData.returnDate).toISOString().split('T')[0]
+            : '',
         returnTime: initialData.returnTime || '',
         
         rentalType: initialData.rentalType === 'CAR_GROSS' ? 'MOTO' : (initialData.rentalType || 'CAR'),
-        rentalStartDate: initialData.rentalStartDate ? new Date(initialData.rentalStartDate).toISOString().split('T')[0] : '',
-        rentalEndDate: initialData.rentalEndDate ? new Date(initialData.rentalEndDate).toISOString().split('T')[0] : '',
+        rentalStartDate:
+          initialData.rentalStartDate && !isNaN(new Date(initialData.rentalStartDate).getTime())
+            ? new Date(initialData.rentalStartDate).toISOString().split('T')[0]
+            : '',
+        rentalEndDate:
+          initialData.rentalEndDate && !isNaN(new Date(initialData.rentalEndDate).getTime())
+            ? new Date(initialData.rentalEndDate).toISOString().split('T')[0]
+            : '',
         accommodation: initialData.accommodation || '',
         needsTransfer: (initialData as any).needsTransfer || false,
         licenseType: (initialData as any).licenseType || '',
@@ -383,11 +450,14 @@ export function ParticipantForm({
         assistantCommissionType: (initialData as any).assistantCommissionType || 'PERCENTAGE',
         agencyId: (initialData as any).agencyId || userAgencyId || ''
       })
+      setSendEmailToClient(false)
       if (!isStandard) {
         setCustomNationality(initialData.nationality)
       } else {
         setCustomNationality('')
       }
+    } else {
+      setSendEmailToClient(true)
     }
   }, [initialData])
 
@@ -503,6 +573,52 @@ export function ParticipantForm({
     })
   }
 
+  const handleLegacyPaxInputChange = (field: 'adults' | 'children', raw: string) => {
+    if (hasTierPricing) return
+    setPaxInputs(prev => ({ ...prev, [field]: raw }))
+    const trimmed = raw.trim()
+    if (trimmed === '') return
+    const n = parseInt(trimmed, 10)
+    if (!Number.isFinite(n)) return
+    if (field === 'adults') {
+      if (n < 1) return
+    } else {
+      if (n < 0) return
+    }
+    handleCounterChange(field, n)
+  }
+
+  const handleLegacyPaxBlur = (field: 'adults' | 'children') => {
+    if (hasTierPricing) return
+    const raw = (paxInputs as any)[field] as string
+    const trimmed = String(raw ?? '').trim()
+    const min = field === 'adults' ? 1 : 0
+    const n = trimmed === '' ? min : parseInt(trimmed, 10)
+    const qty = Number.isFinite(n) ? Math.max(min, n) : min
+    setPaxInputs(prev => ({ ...prev, [field]: String(qty) }))
+    handleCounterChange(field, qty)
+  }
+
+  const handleTierCountInputChange = (tierId: string, raw: string) => {
+    if (!hasTierPricing) return
+    setTierInputs(prev => ({ ...prev, [tierId]: raw }))
+    const trimmed = raw.trim()
+    if (trimmed === '') return
+    const n = parseInt(trimmed, 10)
+    if (!Number.isFinite(n) || n < 0) return
+    handleTierCountChange(tierId, n)
+  }
+
+  const handleTierCountBlur = (tierId: string) => {
+    if (!hasTierPricing) return
+    const raw = tierInputs[tierId]
+    const trimmed = String(raw ?? '').trim()
+    const n = trimmed === '' ? 0 : parseInt(trimmed, 10)
+    const qty = Number.isFinite(n) ? Math.max(0, n) : 0
+    setTierInputs(prev => ({ ...prev, [tierId]: String(qty) }))
+    handleTierCountChange(tierId, qty)
+  }
+
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     const { name, value, type } = e.target
     const checked = (e.target as HTMLInputElement).checked
@@ -590,7 +706,8 @@ export function ParticipantForm({
             const pax = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
             return sum + (pax > 0 ? pax : 1)
           }, 0)
-          const tierPax = hasTierPricing ? sumTierCounts(countsByTier) : 0
+          const effectiveTierCounts = hasTierPricing ? normalizeTierInputs(tierInputs) : {}
+          const tierPax = hasTierPricing ? sumTierCounts(effectiveTierCounts) : 0
           const legacyPax = (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
           const newPax = tierPax > 0 ? tierPax : legacyPax
           if (activeCount + (newPax || 1) > maxParticipants) {
@@ -628,7 +745,56 @@ export function ParticipantForm({
       return
     }
 
-    const paxFromTiers = hasTierPricing ? sumTierCounts(countsByTier) : 0
+    if (formData.dateOfBirth) {
+      const dob = new Date(formData.dateOfBirth)
+      if (isNaN(dob.getTime())) {
+        setError('Data di nascita non valida. Controlla anno, mese e giorno.')
+        setLoading(false)
+        return
+      }
+    }
+
+    if (formData.returnDate) {
+      const rd = new Date(formData.returnDate)
+      if (isNaN(rd.getTime())) {
+        setError('Data di ritorno non valida. Controlla anno, mese e giorno.')
+        setLoading(false)
+        return
+      }
+    }
+
+    if (type === 'RENTAL') {
+      const rsValue = String((formData as any).rentalStartDate || '').trim()
+      const reValue = String((formData as any).rentalEndDate || '').trim()
+      if (rsValue) {
+        const rs = new Date(rsValue)
+        if (isNaN(rs.getTime())) {
+          setError('Data inizio noleggio non valida. Controlla anno, mese e giorno.')
+          setLoading(false)
+          return
+        }
+        if (reValue) {
+          const re = new Date(reValue)
+          if (isNaN(re.getTime())) {
+            setError('Data fine noleggio non valida. Controlla anno, mese e giorno.')
+            setLoading(false)
+            return
+          }
+          if (re < rs) {
+            setError('La data di fine noleggio non può essere precedente alla data di inizio.')
+            setLoading(false)
+            return
+          }
+        }
+      } else if (reValue) {
+        setError('Inserisci la data di inizio noleggio prima della data di fine.')
+        setLoading(false)
+        return
+      }
+    }
+
+    const effectiveTierCounts = hasTierPricing ? normalizeTierInputs(tierInputs) : {}
+    const paxFromTiers = hasTierPricing ? sumTierCounts(effectiveTierCounts) : 0
     const paxFromLegacy =
       type === 'EXCURSION'
         ? (formData.adults + formData.children)
@@ -684,7 +850,7 @@ export function ParticipantForm({
       })() : 0
       const commissionBase = isCarRental ? Math.max(0, priceVal - excludedCostsForCar) : Math.max(0, priceVal)
       const depositAmount = type === 'RENTAL' ? (commissionBase * 0.2) : (isManaged ? (parseFloat(String(formData.deposit)) || 0) : 0)
-      const normalizedCountsByTier = hasTierPricing ? normalizeTierCounts(countsByTier) : undefined
+      const normalizedCountsByTier = hasTierPricing ? normalizeTierInputs(tierInputs) : undefined
       const payload: any = {
         ...formData,
         nationality: formData.nationality === 'OTHER' ? customNationality : formData.nationality,
@@ -711,10 +877,11 @@ export function ParticipantForm({
         depositPaymentMethod: formData.depositPaymentMethod,
         balancePaymentMethod: formData.balancePaymentMethod,
         countsByTier: normalizedCountsByTier,
+        sendEmailToClient: sendEmailToClient && String(formData.email || '').trim().length > 0,
       }
 
       // Se c'è un'email, genera il PDF (sia per creazione che per modifica)
-      if (formData.email) {
+      if (formData.email && sendEmailToClient) {
         let entityName = excursionName
         let entityDate = excursionDate
 
@@ -945,7 +1112,26 @@ export function ParticipantForm({
   const rentalSupplement = parseFloat(String((formData as any).supplementPrice)) || 0
   const rentalExcludedCosts = isRentalCar ? Math.max(0, rentalTax) + Math.max(0, rentalInsurance) + Math.max(0, rentalSupplement) : 0
   const rentalCommissionBase = isRentalCar ? Math.max(0, rentalGross - rentalExcludedCosts) : Math.max(0, rentalGross)
-  const rentalAgentShare = rentalCommissionBase * 0.05
+  const initialRentalCommissionBase =
+    typeof (initialData as any)?.rentalCommissionBase === 'number'
+      ? Number((initialData as any).rentalCommissionBase || 0)
+      : null
+  const initialRentalAgentShare =
+    typeof (initialData as any)?.rentalAgentShare === 'number'
+      ? Number((initialData as any).rentalAgentShare || 0)
+      : null
+
+  const rentalAgentShare =
+    initialRentalAgentShare !== null
+      ? initialRentalAgentShare
+      : (rentalCommissionBase * (explicitIsSpecialAssistant ? 0.1 : 0.05))
+
+  const pctFallback = explicitIsSpecialAssistant ? 10 : 5
+  const pctBase = (initialRentalCommissionBase !== null ? initialRentalCommissionBase : rentalCommissionBase)
+  const rentalAgentPct =
+    pctBase > 0 && Number.isFinite(rentalAgentShare)
+      ? Math.round((rentalAgentShare / pctBase) * 100)
+      : pctFallback
   const selectedPax = hasTierPricing
     ? sumTierCounts(countsByTier)
     : (formData.adults || 0) + (formData.children || 0) + (formData.infants || 0)
@@ -1188,8 +1374,9 @@ export function ParticipantForm({
                           <div className="relative">
                             <input
                               type="number"
-                              value={countsByTier[tier.id] ?? 0}
-                              onChange={(e) => handleTierCountChange(tier.id, parseInt(e.target.value) || 0)}
+                              value={tierInputs[tier.id] ?? String(countsByTier[tier.id] ?? 0)}
+                              onChange={(e) => handleTierCountInputChange(tier.id, e.target.value)}
+                              onBlur={() => handleTierCountBlur(tier.id)}
                               min="0"
                               className={`${inputClassName} pl-8`}
                             />
@@ -1213,8 +1400,9 @@ export function ParticipantForm({
                         <input
                           type="number"
                           name="adults"
-                          value={formData.adults}
-                          onChange={(e) => handleCounterChange('adults', parseInt(e.target.value) || 0)}
+                          value={paxInputs.adults}
+                          onChange={(e) => handleLegacyPaxInputChange('adults', e.target.value)}
+                          onBlur={() => handleLegacyPaxBlur('adults')}
                           min="1"
                           className={`${inputClassName} pl-8`}
                         />
@@ -1227,8 +1415,9 @@ export function ParticipantForm({
                         <input
                           type="number"
                           name="children"
-                          value={formData.children}
-                          onChange={(e) => handleCounterChange('children', parseInt(e.target.value) || 0)}
+                          value={paxInputs.children}
+                          onChange={(e) => handleLegacyPaxInputChange('children', e.target.value)}
+                          onBlur={() => handleLegacyPaxBlur('children')}
                           min="0"
                           className={`${inputClassName} pl-8`}
                         />
@@ -1394,7 +1583,7 @@ export function ParticipantForm({
                 </div>
                 
                 <div>
-                  <label className={labelClassName}>Email (per invio PDF)</label>
+                  <label className={labelClassName}>Email</label>
                   <input
                     type="email"
                     name="email"
@@ -1403,6 +1592,15 @@ export function ParticipantForm({
                     className={inputClassName}
                     placeholder="email@esempio.com"
                   />
+                  <label className="mt-2 flex items-center gap-2 text-sm text-gray-700 select-none">
+                    <input
+                      type="checkbox"
+                      checked={sendEmailToClient}
+                      onChange={(e) => setSendEmailToClient(e.target.checked)}
+                      className="h-4 w-4 text-blue-600 border-gray-300 rounded"
+                    />
+                    Invia email al cliente
+                  </label>
                 </div>
                 
                 <div>
@@ -1878,7 +2076,7 @@ export function ParticipantForm({
                         </div>
                         <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white text-center">
                           <div className="w-full">
-                            <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Agente (5%)</span>
+                            <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Agente ({rentalAgentPct}%)</span>
                             <span className="text-lg font-mono font-bold text-gray-700">€ {rentalAgentShare.toFixed(2)}</span>
                           </div>
                         </div>
@@ -1915,7 +2113,7 @@ export function ParticipantForm({
                     </div>
                     <div className="flex items-center justify-between p-3 rounded-lg border border-gray-200 bg-white text-center">
                       <div className="w-full">
-                        <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Agente (5%)</span>
+                        <span className="text-xs text-gray-500 uppercase font-bold block mb-1">Agente ({rentalAgentPct}%)</span>
                         <span className="text-lg font-mono font-bold text-gray-700">€ {rentalAgentShare.toFixed(2)}</span>
                       </div>
                     </div>

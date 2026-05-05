@@ -58,6 +58,11 @@ export function UsersList({ users, currentUserId, onEdit, onDelete }: UsersListP
                   }`}>
                     {user.role}
                   </span>
+                  {user.isSpecialAssistant && (
+                    <span className="ml-2 px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-blue-100 text-blue-800">
+                      SPECIALE
+                    </span>
+                  )}
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
                   {user.code}

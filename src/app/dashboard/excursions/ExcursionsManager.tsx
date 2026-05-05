@@ -19,6 +19,7 @@ interface ExcursionsManagerProps {
   userAgencyId?: string
   agencyDefaultCommission?: number
   agencyCommissionType?: string
+  currentUserIsSpecialAssistant?: boolean
 }
 
 export function ExcursionsManager({ 
@@ -27,7 +28,8 @@ export function ExcursionsManager({
   currentUserSupplierName, 
   userAgencyId,
   agencyDefaultCommission,
-  agencyCommissionType
+  agencyCommissionType,
+  currentUserIsSpecialAssistant
 }: ExcursionsManagerProps) {
   const [excursions, setExcursions] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
@@ -64,6 +66,17 @@ export function ExcursionsManager({
   const [recurrenceDays, setRecurrenceDays] = useState<number[]>([])
 
   const [refreshParticipantsTrigger, setRefreshParticipantsTrigger] = useState(0)
+
+  const [globalSearch, setGlobalSearch] = useState('')
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false)
+  const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([])
+
+  const [currentUserMeta, setCurrentUserMeta] = useState<{
+    role: string
+    isSpecialAssistant: boolean
+    agencyDefaultCommission: number | null
+    agencyCommissionType: string | null
+  } | null>(null)
 
   // State for agencies and commissions
   const [agencies, setAgencies] = useState<{ id: string, name: string, defaultCommission: number, commissionType: string }[]>([])
@@ -105,7 +118,60 @@ export function ExcursionsManager({
   useEffect(() => {
     fetchTemplates()
     fetchAgencies()
+    fetchCurrentUserMeta()
   }, [])
+
+  useEffect(() => {
+    const term = globalSearch.trim()
+    if (term.length < 2) {
+      setGlobalSearchResults([])
+      setGlobalSearchLoading(false)
+      return
+    }
+    let cancelled = false
+    setGlobalSearchLoading(true)
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/participants?search=${encodeURIComponent(term)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        const items = Array.isArray(data) ? data : []
+        const filtered = items.filter((p: any) => p?.excursion?.id)
+        setGlobalSearchResults(filtered.slice(0, 25))
+      } catch {
+      } finally {
+        if (!cancelled) setGlobalSearchLoading(false)
+      }
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [globalSearch])
+
+  const fetchCurrentUserMeta = async () => {
+    try {
+      const res = await fetch('/api/auth/me')
+      if (res.ok) {
+        const data = await res.json()
+        if (data && typeof data === 'object') {
+          setCurrentUserMeta({
+            role: String((data as any).role || userRole || ''),
+            isSpecialAssistant: !!(data as any).isSpecialAssistant,
+            agencyDefaultCommission:
+              (data as any).agencyDefaultCommission === null || typeof (data as any).agencyDefaultCommission === 'number'
+                ? (data as any).agencyDefaultCommission
+                : null,
+            agencyCommissionType:
+              (data as any).agencyCommissionType === null || typeof (data as any).agencyCommissionType === 'string'
+                ? (data as any).agencyCommissionType
+                : null,
+          })
+        }
+      }
+    } catch {}
+  }
 
   const fetchAgencies = async () => {
     try {
@@ -464,6 +530,18 @@ export function ExcursionsManager({
     const start = newStartDate ? new Date(newStartDate) : null
     const end = newEndDate ? new Date(newEndDate) : null
     const deadline = newConfirmationDeadline ? new Date(newConfirmationDeadline) : null
+    if (start && isNaN(start.getTime())) {
+      setError('Data/Ora di inizio non valida. Controlla anno, mese e giorno.')
+      return
+    }
+    if (end && isNaN(end.getTime())) {
+      setError('Data/Ora di fine non valida. Controlla anno, mese e giorno.')
+      return
+    }
+    if (deadline && isNaN(deadline.getTime())) {
+      setError('Data limite non valida. Controlla anno, mese e giorno.')
+      return
+    }
 
     if (start && end && end < start) {
       setError('La data di fine non può essere precedente alla data di inizio.')
@@ -1181,14 +1259,22 @@ export function ExcursionsManager({
                     </div>
                   )}
                   {/* Commission Display for Assistants */}
-                  {userRole !== 'ADMIN' && selectedExcursion.commissions && selectedExcursion.commissions.length > 0 && (
+                  {(
+                    (currentUserMeta?.role || userRole) !== 'ADMIN' ||
+                    (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant)
+                  ) && (
                      <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg text-emerald-800 border border-emerald-100">
                       <Euro className="w-4 h-4 text-emerald-600 shrink-0" />
                       <div className="flex flex-col">
                         <span className="text-xs text-emerald-600 font-semibold uppercase tracking-wide">La tua Commissione</span>
                         <span className="font-medium font-mono">
-                          {selectedExcursion.commissions[0].commissionPercentage}
-                          {selectedExcursion.commissions[0].commissionType === 'FIXED' ? '€' : '%'}
+                          {(currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant)
+                            ? '10%'
+                            : (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== undefined &&
+                                (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== null
+                              ? `${currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission}${String(currentUserMeta?.agencyCommissionType ?? agencyCommissionType ?? 'PERCENTAGE') === 'FIXED' ? '€' : '%'}`
+                              : '-'
+                          }
                         </span>
                       </div>
                     </div>
@@ -1304,6 +1390,7 @@ export function ExcursionsManager({
               onUpdate={fetchExcursions}
               currentUserId={currentUserId}
               userRole={userRole}
+              initialSelectedParticipantId={searchParams.get('participantId') || undefined}
             />
           )}
 
@@ -1319,6 +1406,7 @@ export function ExcursionsManager({
               entityId={selectedExcursion.id}
               type="EXCURSION"
               refreshTrigger={refreshParticipantsTrigger}
+              commissionConfigs={selectedExcursion.commissions || []}
             />
           )}
 
@@ -1424,6 +1512,63 @@ export function ExcursionsManager({
                   <Plus className="w-4 h-4" />
                   Nuova Escursione
                 </button>
+              </div>
+            )}
+          </div>
+
+          <div className="relative max-w-xl">
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="Ricerca prenotazione (nome, cognome, email, data)..."
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+              {globalSearchLoading && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                  ricerca...
+                </div>
+              )}
+            </div>
+            {globalSearch.trim().length >= 2 && (
+              <div className="absolute z-20 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                {globalSearchResults.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">Nessun risultato</div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto">
+                    {globalSearchResults.map((p: any) => {
+                      const excursion = p.excursion
+                      const dateLabel = excursion?.startDate ? new Date(excursion.startDate).toLocaleDateString('it-IT') : ''
+                      const name = `${p.firstName || ''} ${p.lastName || ''}`.trim()
+                      const subtitleParts = [
+                        p.email ? String(p.email) : '',
+                        dateLabel ? `Data: ${dateLabel}` : '',
+                      ].filter(Boolean)
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            if (!excursion?.id) return
+                            setGlobalSearch('')
+                            setGlobalSearchResults([])
+                            router.push(`/dashboard/excursions?id=${excursion.id}&participantId=${p.id}`)
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="text-sm font-medium text-gray-900">
+                            {name || 'Cliente'} <span className="text-gray-500 font-normal">→ {excursion?.name || 'Escursione'}</span>
+                          </div>
+                          {subtitleParts.length > 0 && (
+                            <div className="text-xs text-gray-500 mt-0.5">{subtitleParts.join(' · ')}</div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
               </div>
             )}
           </div>

@@ -11,6 +11,15 @@ export function RentalLeaderboard({ userRole }: RentalLeaderboardProps) {
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
+  if (userRole !== 'ADMIN') {
+    return (
+      <div className="p-8 text-center">
+        <h2 className="text-xl font-bold text-red-600">Accesso Negato</h2>
+        <p className="text-gray-600">Non hai i permessi per accedere a questa sezione.</p>
+      </div>
+    )
+  }
+
   const fetchParticipants = async () => {
     try {
       const res = await fetch(`/api/participants?isRental=true`)
@@ -80,15 +89,6 @@ export function RentalLeaderboard({ userRole }: RentalLeaderboardProps) {
       (a: any, b: any) => b.totalCommission - a.totalCommission
     )
   }, [participants])
-
-  if (userRole !== 'ADMIN') {
-    return (
-      <div className="p-8 text-center text-gray-500">
-        <Award className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-        <p>Non hai i permessi per visualizzare questa classifica.</p>
-      </div>
-    )
-  }
 
   if (loading) {
     return <div className="p-8 text-center text-gray-500">Caricamento classifica...</div>

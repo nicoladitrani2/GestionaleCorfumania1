@@ -23,6 +23,9 @@ export async function GET(request: Request) {
             totalPrice: true,
             paidAmount: true,
             paymentType: true,
+            adults: true,
+            children: true,
+            infants: true,
             notes: true,
             excursion: {
               select: {
@@ -63,10 +66,21 @@ export async function GET(request: Request) {
 
       // Derive service types from actual participants
       const serviceTypes = new Set<string>()
+      const servicePaxByType: Record<string, number> = { EXCURSION: 0, TRANSFER: 0, RENTAL: 0 }
       client.participants.forEach(p => {
-        if (p.excursion) serviceTypes.add('EXCURSION')
-        if (p.transfer) serviceTypes.add('TRANSFER')
-        if (p.rental) serviceTypes.add('RENTAL')
+        const pax = Math.max(1, (p.adults || 0) + (p.children || 0) + (p.infants || 0))
+        if (p.excursion) {
+          serviceTypes.add('EXCURSION')
+          servicePaxByType.EXCURSION += pax
+        }
+        if (p.transfer) {
+          serviceTypes.add('TRANSFER')
+          servicePaxByType.TRANSFER += pax
+        }
+        if (p.rental) {
+          serviceTypes.add('RENTAL')
+          servicePaxByType.RENTAL += pax
+        }
       })
 
       // If no participants, fallback to client.serviceType
@@ -77,7 +91,8 @@ export async function GET(request: Request) {
       return {
         ...client,
         associatedNames: uniqueNames,
-        derivedServiceTypes: Array.from(serviceTypes)
+        derivedServiceTypes: Array.from(serviceTypes),
+        servicePaxByType
       }
     })
 

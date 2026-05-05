@@ -15,6 +15,7 @@ export type User = {
   lastName: string | null
   role: string
   code: string
+  isSpecialAssistant?: boolean
   createdAt: string
   agency?: {
     id: string
@@ -27,6 +28,7 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
   const [isFormOpen, setIsFormOpen] = useState(false)
   const [editingUser, setEditingUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [normalizingCodes, setNormalizingCodes] = useState(false)
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean
     title: string
@@ -119,6 +121,39 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
     handleFormClose()
   }
 
+  const handleNormalizeCodes = async () => {
+    setNormalizingCodes(true)
+    try {
+      const res = await fetch('/api/users', { method: 'PUT' })
+      const data = await res.json()
+      if (res.ok && data?.success) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Codici aggiornati',
+          message: `Aggiornati: ${data.updated}`,
+          variant: 'success'
+        })
+        fetchUsers()
+      } else {
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: data?.error || 'Errore durante la normalizzazione dei codici',
+          variant: 'danger'
+        })
+      }
+    } catch (error) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: 'Errore di rete',
+        variant: 'danger'
+      })
+    } finally {
+      setNormalizingCodes(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-2 mb-4">
@@ -137,13 +172,26 @@ export function UsersManager({ currentUserId }: { currentUserId: string }) {
             Gestisci gli account del personale e i loro permessi
           </p>
         </div>
-        <button
-          onClick={() => setIsFormOpen(true)}
-          className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
-        >
-          <Plus className="w-5 h-5" />
-          Nuovo Assistente
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleNormalizeCodes}
+            disabled={normalizingCodes}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg transition-colors shadow-sm border ${
+              normalizingCodes
+                ? 'bg-gray-100 text-gray-400 border-gray-200 cursor-not-allowed'
+                : 'bg-white text-gray-700 border-gray-200 hover:bg-gray-50'
+            }`}
+          >
+            {normalizingCodes ? 'Aggiornamento...' : 'Normalizza codici'}
+          </button>
+          <button
+            onClick={() => setIsFormOpen(true)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+          >
+            <Plus className="w-5 h-5" />
+            Nuovo Assistente
+          </button>
+        </div>
       </div>
 
       {loading ? (

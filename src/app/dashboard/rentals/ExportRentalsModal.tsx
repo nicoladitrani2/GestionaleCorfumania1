@@ -23,6 +23,7 @@ export const RENTAL_EXPORT_FIELDS = [
   { id: 'supplier', label: 'Fornitore' },
   { id: 'rentalStartDate', label: 'Data Inizio' },
   { id: 'rentalEndDate', label: 'Data Fine' },
+  { id: 'createdBy', label: 'Inserito da' },
   { id: 'price', label: 'Prezzo Totale' },
   { id: 'deposit', label: 'Acconto' },
   { id: 'tax', label: 'Tasse' },

@@ -21,7 +21,8 @@ export const EXPORT_FIELDS = [
   { id: 'notes', label: 'Note' },
   { id: 'supplier', label: 'Fornitore' },
   { id: 'returnDetails', label: 'Dettagli Ritorno' },
-  { id: 'createdAt', label: 'Data Inserimento' }
+  { id: 'createdAt', label: 'Data Inserimento' },
+  { id: 'createdBy', label: 'Inserito da' }
 ]
 
 export function ExportParticipantsModal({ onClose, onExport }: ExportParticipantsModalProps) {

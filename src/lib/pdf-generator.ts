@@ -112,6 +112,7 @@ const TRANSLATIONS = {
       doc: 'Documento',
       phone: 'Telefono',
       email: 'Email',
+      insertedBy: 'Inserito da',
       pax: 'Numero Partecipanti',
       notes: 'Note'
     },
@@ -158,6 +159,7 @@ const TRANSLATIONS = {
       doc: 'Document',
       phone: 'Phone',
       email: 'Email',
+      insertedBy: 'Created by',
       pax: 'Participants',
       notes: 'Notes'
     },
@@ -381,6 +383,14 @@ export const generateParticipantPDF = (
     ],
     [t.fields.phone, participant.phoneNumber || '-'],
     [t.fields.email, participant.email || '-'],
+    [
+      t.fields.insertedBy,
+      (() => {
+        const by = participant.createdBy || (participant as any).assignedTo
+        if (!by) return '-'
+        return [by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || by.email || '-'
+      })()
+    ],
     [t.fields.pax, ((participant.adults || 0) + (participant.children || 0) + (participant.infants || 0)).toString()],
     [t.fields.notes, participant.notes || '-']
   ]
@@ -551,7 +561,7 @@ export const generateParticipantsListPDF = (
   doc.text(`Generato il: ${dateStr}`, 270, 28, { align: 'right' })
 
   // --- Table Columns ---
-  const head = [['#', 'Nome e Cognome', 'Tel.', 'Pax']]
+  const head = [['#', 'Nome e Cognome', 'Telefono', 'Partecipanti']]
   const body: AutoTableRow[] = []
 
   const isTransfer = (event as TransferData).type === 'TRANSFER'
@@ -566,6 +576,7 @@ export const generateParticipantsListPDF = (
   if (selectedFields.includes('paymentMethod')) head[0].push('Metodo')
   if (selectedFields.includes('supplier')) head[0].push('Fornitore')
   if (selectedFields.includes('createdAt')) head[0].push('Data Ins.')
+  if (selectedFields.includes('createdBy')) head[0].push('Inserito da')
   if (selectedFields.includes('notes')) head[0].push('Note')
   if (selectedFields.includes('accommodation')) head[0].push('Struttura')
   if (selectedFields.includes('pickupLocation')) head[0].push('Partenza')
@@ -614,6 +625,14 @@ export const generateParticipantsListPDF = (
     if (selectedFields.includes('createdAt')) {
        const d = p.createdAt ? new Date(p.createdAt).toLocaleDateString('it-IT') : '-'
        row.push(d)
+    }
+
+    if (selectedFields.includes('createdBy')) {
+      const by = p.createdBy || (p as any).assignedTo
+      const label = by
+        ? ([by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || '-')
+        : '-'
+      row.push(label)
     }
 
     if (selectedFields.includes('notes')) row.push(p.notes || '-')

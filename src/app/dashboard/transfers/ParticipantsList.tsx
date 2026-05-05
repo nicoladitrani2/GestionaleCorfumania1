@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Edit, Trash2, User, Users, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, Euro, Eye, RotateCcw, Map as MapIcon, X } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -31,7 +31,8 @@ export function ParticipantsList({
   eventType,
   transferName,
   transferDate,
-  transferConfirmationDeadline
+  transferConfirmationDeadline,
+  initialSelectedParticipantId
 }: any) {
   const transferId = eventId
   const [participants, setParticipants] = useState<any[]>([])
@@ -69,8 +70,10 @@ export function ParticipantsList({
     message: '',
     variant: 'info'
   })
+  const [search, setSearch] = useState('')
   const [transferDetails, setTransferDetails] = useState<any | null>(null)
   const [approvingId, setApprovingId] = useState<string | null>(null)
+  const autoOpenedRef = useRef(false)
   const [transferApprovalModal, setTransferApprovalModal] = useState<{
     isOpen: boolean
     participantId: string
@@ -87,7 +90,10 @@ export function ParticipantsList({
 
   const fetchParticipants = async () => {
     try {
-      const res = await fetch(`/api/participants?transferId=${transferId}`)
+      const params = new URLSearchParams()
+      params.set('transferId', transferId)
+      if (search.trim()) params.set('search', search.trim())
+      const res = await fetch(`/api/participants?${params.toString()}`)
       if (res.ok) {
         const data = await res.json()
         setParticipants(data)
@@ -113,17 +119,31 @@ export function ParticipantsList({
 
   // Polling for live updates (every 5 seconds)
   useEffect(() => {
+    if (search.trim()) return
     const interval = setInterval(() => {
       fetchParticipants()
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [transferId])
+  }, [transferId, search])
 
   useEffect(() => {
-    fetchParticipants()
+    const t = setTimeout(() => {
+      fetchParticipants()
+    }, search.trim() ? 300 : 0)
     fetchTransfer()
-  }, [transferId, refreshTrigger])
+    return () => clearTimeout(t)
+  }, [transferId, refreshTrigger, search])
+
+  useEffect(() => {
+    if (!initialSelectedParticipantId) return
+    if (autoOpenedRef.current) return
+    const found = participants.find(p => p?.id === initialSelectedParticipantId)
+    if (!found) return
+    autoOpenedRef.current = true
+    setSelectedParticipant(found)
+    setShowDetails(true)
+  }, [initialSelectedParticipantId, participants])
 
   const validateTransferApprovalData = () => {
     const pa = parseFloat(transferApprovalModal.priceAdult)
@@ -720,6 +740,11 @@ export function ParticipantsList({
               </th>
               <th className={thClassName}>
                 <div className="flex items-center gap-2">
+                  <User className="w-4 h-4" /> Inserito da
+                </div>
+              </th>
+              <th className={thClassName}>
+                <div className="flex items-center gap-2">
                   <CreditCard className="w-4 h-4" /> Prezzo
                 </div>
               </th>
@@ -751,6 +776,14 @@ export function ParticipantsList({
                     <div className="flex flex-col">
                       <span>{p.firstName} {p.lastName}</span>
                       <span className="text-xs text-gray-600">{p.phoneNumber}</span>
+                      <span className="text-xs text-gray-400">
+                        Inserito da:{' '}
+                        {(() => {
+                          const by = p.createdBy || p.assignedTo
+                          if (!by) return '-'
+                          return [by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || by.email || '-'
+                        })()}
+                      </span>
                     </div>
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 font-medium">
@@ -774,6 +807,17 @@ export function ParticipantsList({
                               </span>
                           )}
                       </div>
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                    {(() => {
+                      const by = p.createdBy || p.assignedTo
+                      if (!by) return '-'
+                      return (
+                        <span className="text-gray-700">
+                          {[by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || by.email || '-'}
+                        </span>
+                      )
+                    })()}
                   </td>
                   <td className="px-6 py-4 whitespace-nowrap text-sm font-mono font-bold text-gray-800">
                     <div>
@@ -947,6 +991,23 @@ export function ParticipantsList({
                      <span className="font-medium">{p.dropoffLocation || '-'}</span>
                    </div>
                 </div>
+                <div className="flex items-start gap-2">
+                  <User className="w-4 h-4 text-gray-400 mt-0.5 shrink-0" />
+                  <div className="flex flex-col">
+                    <span className="text-xs text-gray-400">Inserito da</span>
+                    <span className="font-medium">
+                      {(() => {
+                        const by = p.createdBy || p.assignedTo
+                        if (!by) return '-'
+                        return (
+                          [by.code, by.firstName, by.lastName].filter(Boolean).join(' ') ||
+                          by.email ||
+                          '-'
+                        )
+                      })()}
+                    </span>
+                  </div>
+                </div>
               </div>
 
               <div className="flex justify-between items-center pt-2 border-t border-gray-100/50">
@@ -1045,7 +1106,14 @@ export function ParticipantsList({
            </h2>
            <p className="text-gray-500 text-sm mt-1">Gestisci i partecipanti e i pagamenti</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Cerca per nome, cognome, email o data prenotazione (YYYY-MM-DD)"
+            className="w-full sm:w-96 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+          />
           {activeParticipants.length > 0 && (
             <button
               onClick={() => handleExportClick(activeParticipants, 'Lista Partecipanti', 'partecipanti-trasferimento')}

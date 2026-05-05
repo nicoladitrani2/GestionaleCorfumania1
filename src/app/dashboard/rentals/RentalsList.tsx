@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Briefcase, Calendar, Map as MapIcon, History, X, ChevronDown } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
@@ -128,6 +128,11 @@ const RentalsTable = ({
             </th>
             <th className={thClassName}>
               <div className="flex items-center gap-2">
+                <User className="w-4 h-4" /> Inserito da
+              </div>
+            </th>
+            <th className={thClassName}>
+              <div className="flex items-center gap-2">
                 <CreditCard className="w-4 h-4" /> Prezzo
               </div>
             </th>
@@ -145,9 +150,8 @@ const RentalsTable = ({
           {data.map((p) => {
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         const isManaged = p.rentalType === 'CAR'
-        const isOwner = p.createdById === currentUserId
-        const isAssignee = p.assignedToId === currentUserId
-        const canSeeFinancial = userRole === 'ADMIN' || isOwner || isAssignee
+        const canSeeFinancial =
+          userRole === 'ADMIN' || p.createdById === currentUserId || p.assignedToId === currentUserId
         const assistant = p.assignedTo || p.createdBy
         const gross = Number(p.price || 0)
         const insurance = Number(p.insurancePrice || 0)
@@ -162,6 +166,8 @@ const RentalsTable = ({
           typeof p.rentalCommissionBase === 'number' ? p.rentalCommissionBase : fallbackCommissionBase
         const agentShare =
           typeof p.rentalAgentShare === 'number' ? p.rentalAgentShare : commissionBase * 0.05
+        const agentPct =
+          commissionBase > 0 && Number.isFinite(agentShare) ? Math.round((agentShare / commissionBase) * 100) : null
         
         return (
           <tr 
@@ -172,6 +178,14 @@ const RentalsTable = ({
                   <div className="flex flex-col">
                     <span>{p.firstName} {p.lastName}</span>
                     <span className="text-xs text-gray-500 font-normal">{p.phoneNumber}</span>
+                    <span className="text-xs text-gray-400">
+                      Inserito da:{' '}
+                      {(() => {
+                        const by = p.createdBy || p.assignedTo
+                        if (!by) return '-'
+                        return [by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || by.email || '-'
+                      })()}
+                    </span>
                   </div>
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -196,6 +210,13 @@ const RentalsTable = ({
                     <span className="text-xs text-gray-500">{assistant?.firstName} {assistant?.lastName}</span>
                   </div>
                 </td>
+                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                  {(() => {
+                    const by = p.createdBy || p.assignedTo
+                    if (!by) return '-'
+                    return [by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || by.email || '-'
+                  })()}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">
                   {canSeeFinancial ? (
                     <div className="flex flex-col">
@@ -204,7 +225,7 @@ const RentalsTable = ({
                         Incassato (registrato): € {(p.deposit || 0).toFixed(2)}
                       </span>
                       <span className="text-xs text-purple-700">
-                        Quota Agente (5%): € {agentShare.toFixed(2)}
+                        Quota Operatore{agentPct ? ` (${agentPct}%)` : ''}: € {agentShare.toFixed(2)}
                       </span>
                     </div>
                   ) : (
@@ -279,7 +300,7 @@ const RentalsTable = ({
           })}
           {data.length === 0 && (
             <tr>
-              <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
+              <td colSpan={8} className="px-6 py-12 text-center text-sm text-gray-500">
                 <div className="flex flex-col items-center gap-3">
                   <div className="p-3 bg-gray-50 rounded-full">
                     <Briefcase className="w-6 h-6 text-gray-400" />
@@ -304,7 +325,7 @@ const RentalsTable = ({
           <span>Prezzo: € {totalPrice.toFixed(2)}</span>
           <span>Incassato (registrato): € {totalDeposit.toFixed(2)}</span>
           {totalTax > 0 && <span>Tasse: € {totalTax.toFixed(2)}</span>}
-          <span>Agenti (5%): € {totalAgentShare.toFixed(2)}</span>
+          <span>Operatori: € {totalAgentShare.toFixed(2)}</span>
         </div>
       )}
     </div>
@@ -314,8 +335,8 @@ const RentalsTable = ({
       {data.map((p) => {
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         const isManaged = p.rentalType === 'CAR'
-        const isOwner = p.createdById === currentUserId
-        const canSeeFinancial = userRole === 'ADMIN' || isOwner
+        const canSeeFinancial =
+          userRole === 'ADMIN' || p.createdById === currentUserId || p.assignedToId === currentUserId
         
         return (
           <div 
@@ -346,6 +367,16 @@ const RentalsTable = ({
                <div className="flex flex-col">
                  <span className="text-xs text-gray-400">Telefono</span>
                  <span>{p.phoneNumber || '-'}</span>
+              </div>
+              <div className="flex flex-col col-span-2">
+                <span className="text-xs text-gray-400">Inserito da</span>
+                <span>
+                  {(() => {
+                    const by = p.createdBy || p.assignedTo
+                    if (!by) return '-'
+                    return [by.code, by.firstName, by.lastName].filter(Boolean).join(' ') || by.email || '-'
+                  })()}
+                </span>
               </div>
             </div>
 
@@ -450,6 +481,7 @@ interface RentalsListProps {
   userRole: string
   search?: string
   onLoaded?: (participants: any[]) => void
+  initialSelectedParticipantId?: string
 }
 
 export function RentalsList({ 
@@ -460,6 +492,7 @@ export function RentalsList({
   userRole,
   search = '',
   onLoaded,
+  initialSelectedParticipantId,
   }: RentalsListProps) {
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
@@ -473,6 +506,7 @@ export function RentalsList({
   const [participantToRefund, setParticipantToRefund] = useState<any>(null)
   const [showDeleteChoice, setShowDeleteChoice] = useState(false)
   const [participantToDelete, setParticipantToDelete] = useState<any>(null)
+  const autoOpenedRef = useRef(false)
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean
     title: string
@@ -561,18 +595,36 @@ export function RentalsList({
 
   // Polling for live updates (every 5 seconds)
   useEffect(() => {
+    if (search && search.trim()) return
     const interval = setInterval(() => {
       fetchParticipants()
     }, 5000)
 
     return () => clearInterval(interval)
-  }, [])
+  }, [search])
 
   useEffect(() => {
     fetchParticipants()
   }, [refreshTrigger])
 
   const searchTerm = search.trim().toLowerCase()
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (search.trim()) fetchParticipants()
+    }, search.trim() ? 300 : 0)
+    return () => clearTimeout(t)
+  }, [search])
+
+  useEffect(() => {
+    if (!initialSelectedParticipantId) return
+    if (autoOpenedRef.current) return
+    const found = participants.find(p => p?.id === initialSelectedParticipantId)
+    if (!found) return
+    autoOpenedRef.current = true
+    setSelectedParticipant(found)
+    setShowDetails(true)
+  }, [initialSelectedParticipantId, participants])
 
   useEffect(() => {
     if (searchTerm) {
@@ -589,8 +641,24 @@ export function RentalsList({
 
   const matchesSearch = (p: any) => {
     if (!searchTerm) return true
-    const notes = (p.notes || '').toLowerCase()
-    return notes.includes(searchTerm)
+    const fullName = `${p.firstName || ''} ${p.lastName || ''}`.toLowerCase()
+    const email = String(p.email || '').toLowerCase()
+    const notes = String(p.notes || '').toLowerCase()
+    const bookingDate = (() => {
+      const d = p.bookingDate || p.createdAt || p.rentalStartDate
+      if (!d) return ''
+      try {
+        return new Date(d).toLocaleDateString('it-IT')
+      } catch {
+        return ''
+      }
+    })()
+    return (
+      fullName.includes(searchTerm) ||
+      email.includes(searchTerm) ||
+      notes.includes(searchTerm) ||
+      bookingDate.includes(searchTerm)
+    )
   }
 
   const isVisiblePending = (p: any) => {

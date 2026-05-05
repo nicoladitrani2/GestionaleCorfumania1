@@ -18,7 +18,8 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
     lastName: '',
     role: 'USER',
     code: '',
-    agencyId: ''
+    agencyId: '',
+    isSpecialAssistant: false,
   })
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
@@ -45,7 +46,8 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
         lastName: user.lastName || '',
         role: user.role,
         code: user.code,
-        agencyId: user.agency?.id || ''
+        agencyId: user.agency?.id || '',
+        isSpecialAssistant: !!user.isSpecialAssistant,
       })
     } else {
       // Explicitly reset form when user is null (creation mode)
@@ -56,7 +58,8 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
         lastName: '',
         role: 'USER',
         code: '',
-        agencyId: ''
+        agencyId: '',
+        isSpecialAssistant: false,
       })
     }
   }, [user])
@@ -262,6 +265,27 @@ export function UserForm({ user, onClose, onSubmit }: UserFormProps) {
                   />
                 </div>
               </div>
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+              <div className="flex flex-col">
+                <span className="text-sm font-semibold text-gray-800">Assistente speciale</span>
+                <span className="text-xs text-gray-500">Applica la ripartizione speciale prevista per questo operatore</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setFormData(prev => ({ ...prev, isSpecialAssistant: !prev.isSpecialAssistant }))}
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  formData.isSpecialAssistant ? 'bg-blue-600' : 'bg-gray-300'
+                }`}
+                aria-pressed={formData.isSpecialAssistant}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                    formData.isSpecialAssistant ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
             </div>
 
             {error && (

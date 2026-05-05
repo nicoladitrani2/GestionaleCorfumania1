@@ -220,6 +220,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   try {
     const body = await request.json()
 
+    const normalizedFirstName =
+      body.firstName !== undefined ? String(body.firstName || '').trim() : undefined
+    const normalizedLastName =
+      body.lastName !== undefined ? String(body.lastName || '').trim() : undefined
+
+    if (body.firstName !== undefined && !normalizedFirstName) {
+      return NextResponse.json({ error: 'Il nome è obbligatorio.' }, { status: 400 })
+    }
+
     const now = new Date()
     let newIsExpired = false
 
@@ -510,6 +519,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       applyPaymentLogic()
     }
 
+    const effectiveFirstName =
+      normalizedFirstName ??
+      participant.firstName ??
+      participant.client?.firstName ??
+      null
+    const effectiveLastName =
+      normalizedLastName ??
+      participant.lastName ??
+      participant.client?.lastName ??
+      null
+    const computedName = String(body.name !== undefined ? body.name : '')
+      .trim() || [effectiveFirstName, effectiveLastName].filter(Boolean).join(' ').trim()
+
     const ticketNumberValue = encodeDocumentInfo(body.docType, body.docNumber)
 
     const updated = await prisma.participant.update({
@@ -517,6 +539,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       data: {
         approvalStatus: approvalStatus ?? participant.approvalStatus,
         ...(isStatusUpdateOnly ? {} : {
+          name: computedName || participant.name,
+          firstName: normalizedFirstName !== undefined ? normalizedFirstName : participant.firstName,
+          lastName: normalizedLastName !== undefined ? normalizedLastName : participant.lastName,
           nationality: body.nationality,
           adults: paxFromTiers > 0 ? paxTotal : finalAdults,
           children: paxFromTiers > 0 ? 0 : finalChildren,
@@ -643,6 +668,21 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const originalDocument = decodeDocumentInfo(participant.ticketNumber)
 
+    if (normalizedFirstName !== undefined || normalizedLastName !== undefined || body.name !== undefined) {
+      const oldName =
+        `${participant.client?.firstName ?? participant.firstName ?? ''} ${participant.client?.lastName ?? participant.lastName ?? ''}`.trim() ||
+        participant.name ||
+        'N/A'
+      const newName =
+        (computedName || '').trim() ||
+        `${effectiveFirstName ?? ''} ${effectiveLastName ?? ''}`.trim() ||
+        participant.name ||
+        'N/A'
+      if (newName && newName !== oldName) {
+        changes.push(`Nome: ${oldName} -> ${newName}`)
+      }
+    }
+
     if (body.nationality && body.nationality !== participant.nationality) {
       changes.push(`Nazionalità: ${participant.nationality || 'N/A'} -> ${body.nationality}`)
     }
@@ -750,7 +790,7 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const effectiveApprovalStatus = approvalStatus ?? updated.approvalStatus
     const effectivePaymentStatus = updated.paymentStatus
 
-    if (recipientEmail) {
+    if (recipientEmail && (body as any).sendEmailToClient !== false) {
       try {
         let subject = 'Aggiornamento Prenotazione - Corfumania'
         let text = `Gentile ${safeName},\n\nLa tua prenotazione è stata aggiornata.\n\n${details}\n\nCordiali saluti,\nTeam Corfumania`
@@ -806,6 +846,17 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           participant.rentalId
         )
       }
+    } else if (recipientEmail && (body as any).sendEmailToClient === false) {
+      await createAuditLog(
+        session.user.id,
+        'SEND_PARTICIPANT_EMAIL_SKIPPED',
+        'PARTICIPANT',
+        participant.id,
+        'Email non inviata: invio disabilitato dall’operatore',
+        participant.excursionId,
+        participant.transferId,
+        participant.rentalId
+      )
     } else {
       await createAuditLog(
         session.user.id,

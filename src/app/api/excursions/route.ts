@@ -207,6 +207,15 @@ export async function POST(request: Request) {
     const start = startDate ? new Date(startDate) : null
     const end = endDate ? new Date(endDate) : null
     const deadline = confirmationDeadline ? new Date(confirmationDeadline) : null
+    if (start && isNaN(start.getTime())) {
+      return NextResponse.json({ error: 'Data/Ora di inizio non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+    }
+    if (end && isNaN(end.getTime())) {
+      return NextResponse.json({ error: 'Data/Ora di fine non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+    }
+    if (deadline && isNaN(deadline.getTime())) {
+      return NextResponse.json({ error: 'Data limite non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+    }
 
     if (start && end && end < start) {
       return NextResponse.json({ error: 'La data di fine non può essere precedente alla data di inizio.' }, { status: 400 })
@@ -344,6 +353,15 @@ export async function PUT(request: Request) {
   const start = startDate ? new Date(startDate) : undefined
   const end = endDate ? new Date(endDate) : null
   const deadline = confirmationDeadline ? new Date(confirmationDeadline) : null
+  if (start && isNaN(start.getTime())) {
+    return NextResponse.json({ error: 'Data/Ora di inizio non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+  }
+  if (end && isNaN(end.getTime())) {
+    return NextResponse.json({ error: 'Data/Ora di fine non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+  }
+  if (deadline && isNaN(deadline.getTime())) {
+    return NextResponse.json({ error: 'Data limite non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+  }
 
   if (start && end && end < start) {
     return NextResponse.json({ error: 'La data di fine non può essere precedente alla data di inizio.' }, { status: 400 })
@@ -400,7 +418,7 @@ export async function PUT(request: Request) {
     const deadline = confirmationDeadline ? new Date(confirmationDeadline) : excursion.confirmationDeadline
 
     if (!start) {
-        return NextResponse.json({ error: 'Start date is required for recurrence' }, { status: 400 })
+        return NextResponse.json({ error: 'La data di inizio è obbligatoria per creare ricorrenze.' }, { status: 400 })
     }
 
     const duration = end ? end.getTime() - start.getTime() : 0
@@ -447,6 +465,9 @@ export async function PUT(request: Request) {
     }
 
     const recEnd = new Date(recurrence.endDate)
+    if (isNaN(recEnd.getTime())) {
+      return NextResponse.json({ error: 'Data fine ricorrenza non valida. Controlla anno, mese e giorno.' }, { status: 400 })
+    }
     recEnd.setHours(23, 59, 59, 999)
 
     let current = new Date(start)

@@ -14,7 +14,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "5432:5432"
+      - "55432:5432"
 
   app:
     build: .
@@ -22,13 +22,12 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    env_file:
-      - .env
     environment:
       DATABASE_URL: postgresql://corfumania:corfumania@db:5432/corfumania?schema=public
       JWT_SECRET: change-me-in-prod
       SESSION_TTL_SECONDS: 28800
       NEXT_PUBLIC_ENABLE_PWA: "false"
+      APP_ORIGIN: http://localhost:3000
     ports:
       - "3000:3000"
 

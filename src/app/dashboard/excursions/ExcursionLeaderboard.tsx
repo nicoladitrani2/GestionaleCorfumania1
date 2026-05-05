@@ -12,6 +12,15 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
+  if (userRole !== 'ADMIN') {
+    return (
+      <div className="p-8 text-center">
+        <h2 className="text-xl font-bold text-red-600">Accesso Negato</h2>
+        <p className="text-gray-600">Non hai i permessi per accedere a questa sezione.</p>
+      </div>
+    )
+  }
+
   const fetchParticipants = async () => {
     try {
       const res = await fetch(`/api/participants?excursionId=${excursion.id}`)
@@ -51,22 +60,26 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
       if (p.status && p.status !== 'ACTIVE') return
       if (p.paymentType === 'REFUNDED' || p.isExpired) return
 
-      const userId = p.createdById
-      if (!userId) return
+      const owner = p.assignedTo || p.createdBy
+      const ownerId = p.assignedToId || p.createdById
+      if (!ownerId) return
 
-      if (!statsMap.has(userId)) {
-        statsMap.set(userId, {
-          userId,
-          userName: `${p.createdBy?.firstName || ''} ${p.createdBy?.lastName || ''}`.trim() || p.createdBy?.email || 'Sconosciuto',
-          agencyName: p.createdBy?.agency?.name || '-',
-          agencyId: p.createdBy?.agencyId,
+      if (!statsMap.has(ownerId)) {
+        const ownerRole = String(owner?.role || '')
+        const ownerAgencyNameRaw = owner?.agency?.name || (ownerRole === 'ADMIN' ? 'Corfumania' : null)
+        const ownerAgencyName = ownerAgencyNameRaw || '-'
+        statsMap.set(ownerId, {
+          userId: ownerId,
+          userName: `${owner?.firstName || ''} ${owner?.lastName || ''}`.trim() || owner?.email || 'Sconosciuto',
+          agencyName: ownerAgencyName,
+          agencyId: owner?.agencyId,
           totalSales: 0,
           totalCommission: 0,
           count: 0
         })
       }
 
-      const stats = statsMap.get(userId)
+      const stats = statsMap.get(ownerId)
 
       // Calculate commission based on actual payment (deposit)
       // If paymentType is BALANCE, deposit should be equal to price (full payment)
@@ -77,46 +90,47 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
       stats.totalSales += amountPaid
       stats.count += 1
 
-      // Calculate commission logic
-      const agency = p.createdBy?.agency
-      const agencyId = p.createdBy?.agencyId
+      const tax = Number(p.tax || 0)
+      const commissionable = Math.max(0, amountPaid - tax)
+      const pool = commissionable * 0.2
+      const pax = Math.max(1, (p.adults || 0) + (p.children || 0) + (p.infants || 0))
 
-      if (agencyId) {
-          let ruleType = agency?.commissionType || 'PERCENTAGE'
-          let ruleValue = agency?.defaultCommission || 0
+      const ownerRole = String(owner?.role || '')
+      const ownerAgencyNameRaw = owner?.agency?.name || (ownerRole === 'ADMIN' ? 'Corfumania' : null)
+      const ownerAgencyNameLower = String(ownerAgencyNameRaw || '').trim().toLowerCase()
+      const isGo4Sea = ownerAgencyNameLower.includes('go4sea')
+      const isCorfumania = ownerRole === 'ADMIN' || ownerAgencyNameLower.includes('corfumania')
+      const isSpecial = !!owner?.isSpecialAssistant
 
-          // Check override
-          if (excursion?.commissions) {
-             const commConfig = excursion.commissions.find((c: any) => c.agencyId === agencyId)
-             if (commConfig) {
-                 ruleValue = commConfig.commissionPercentage
-                 ruleType = commConfig.commissionType || ruleType
-             }
-          }
-
-          if (ruleType === 'FIXED') {
-              const adults = (p.adults || 0)
-              const children = (p.children || 0)
-              const count = (adults + children + (p.infants || 0)) > 0 ? (adults + children + (p.infants || 0)) : 1
-              stats.totalCommission += count * ruleValue
-          } else {
-              // PERCENTAGE
-              stats.totalCommission += amountPaid * (ruleValue / 100)
-          }
+      let agentShare = 0
+      if (isSpecial) {
+        agentShare = Math.min(commissionable * 0.10, pool)
+      } else if (isGo4Sea) {
+        agentShare = Math.min(commissionable * 0.05, pool)
+      } else if (isCorfumania) {
+        agentShare = Math.min(pax * 1, pool)
+      } else {
+        const rawAgentType = p.assistantCommissionType || owner?.agency?.commissionType || 'PERCENTAGE'
+        const rawAgentValue =
+          p.assistantCommission !== null && p.assistantCommission !== undefined && Number(p.assistantCommission) > 0
+            ? Number(p.assistantCommission)
+            : Number(owner?.agency?.defaultCommission || 0)
+        const agentType = String(rawAgentType || 'PERCENTAGE')
+        const agentValue = Number.isFinite(rawAgentValue) ? rawAgentValue : 0
+        if (agentValue > 0) {
+          const raw =
+            agentType === 'FIXED'
+              ? Math.max(0, pax * agentValue)
+              : Math.max(0, commissionable * (agentValue / 100))
+          agentShare = Math.min(raw, pool)
+        }
       }
+
+      stats.totalCommission += agentShare
     })
 
     return Array.from(statsMap.values()).sort((a: any, b: any) => b.totalCommission - a.totalCommission)
   }, [participants, excursion])
-
-  if (userRole !== 'ADMIN') {
-    return (
-        <div className="p-8 text-center text-gray-500">
-            <Award className="w-12 h-12 mx-auto text-gray-300 mb-3" />
-            <p>Non hai i permessi per visualizzare questa classifica.</p>
-        </div>
-    )
-  }
 
   if (loading) {
       return <div className="p-8 text-center text-gray-500">Caricamento classifica...</div>

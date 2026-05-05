@@ -19,6 +19,7 @@ interface TransfersManagerProps {
   userAgencyId?: string
   agencyDefaultCommission?: number
   agencyCommissionType?: string
+  currentUserIsSpecialAssistant?: boolean
 }
 
 export function TransfersManager({ 
@@ -27,10 +28,11 @@ export function TransfersManager({
   currentUserSupplierName, 
   userAgencyId,
   agencyDefaultCommission,
-  agencyCommissionType
+  agencyCommissionType,
+  currentUserIsSpecialAssistant
 }: TransfersManagerProps) {
   const [transfers, setTransfers] = useState<any[]>([])
-  const [activeTab, setActiveTab] = useState<'ACTIVE' | 'ARCHIVE' | 'PENDING' | 'REJECTED'>('ACTIVE')
+  const [activeTab, setActiveTab] = useState<'ACTIVE' | 'ARCHIVE' | 'PENDING' | 'REJECTED' | 'CAPACITY'>('ACTIVE')
   const [loading, setLoading] = useState(true)
   const [selectedTransfer, setSelectedTransfer] = useState<any>(null)
   
@@ -85,6 +87,8 @@ export function TransfersManager({
     isOpen: boolean
     transferId: string
     priceTiers: Array<{ id: string; label: string; price: string }>
+    maxParticipants: string
+    requesterLabel: string
   }>({
     isOpen: false,
     transferId: '',
@@ -92,6 +96,9 @@ export function TransfersManager({
       { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
       { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
     ]
+    ,
+    maxParticipants: '',
+    requesterLabel: ''
   })
 
   // State for agencies and commissions
@@ -103,14 +110,97 @@ export function TransfersManager({
 
   const [refreshParticipantsTrigger, setRefreshParticipantsTrigger] = useState(0)
 
+  const [globalSearch, setGlobalSearch] = useState('')
+  const [globalSearchLoading, setGlobalSearchLoading] = useState(false)
+  const [globalSearchResults, setGlobalSearchResults] = useState<any[]>([])
+
+  const [currentUserMeta, setCurrentUserMeta] = useState<{
+    role: string
+    isSpecialAssistant: boolean
+    agencyDefaultCommission: number | null
+    agencyCommissionType: string | null
+  } | null>(null)
+
   const searchParams = useSearchParams()
   const router = useRouter()
+
+  useEffect(() => {
+    if (
+      userRole !== 'ADMIN' &&
+      (activeTab === 'PENDING' || activeTab === 'REJECTED' || activeTab === 'CAPACITY')
+    ) {
+      setActiveTab('ACTIVE')
+    }
+  }, [userRole, activeTab])
 
   useEffect(() => {
     fetchTransfers()
     fetchSuppliers()
     fetchAgencies()
   }, [activeTab])
+
+  useEffect(() => {
+    fetchCurrentUserMeta()
+  }, [])
+
+  useEffect(() => {
+    const term = globalSearch.trim()
+    if (term.length < 2) {
+      setGlobalSearchResults([])
+      setGlobalSearchLoading(false)
+      return
+    }
+    let cancelled = false
+    setGlobalSearchLoading(true)
+    const t = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/participants?search=${encodeURIComponent(term)}`)
+        if (!res.ok) return
+        const data = await res.json()
+        if (cancelled) return
+        const items = Array.isArray(data) ? data : []
+        const filtered = items.filter((p: any) => p?.transfer?.id)
+        setGlobalSearchResults(filtered.slice(0, 25))
+      } catch {
+      } finally {
+        if (!cancelled) setGlobalSearchLoading(false)
+      }
+    }, 300)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [globalSearch])
+
+  const fetchCurrentUserMeta = async () => {
+    try {
+      const res = await fetch('/api/auth/me')
+      if (res.ok) {
+        const data = await res.json()
+        if (data && typeof data === 'object') {
+          setCurrentUserMeta({
+            role: String((data as any).role || userRole || ''),
+            isSpecialAssistant: !!(data as any).isSpecialAssistant,
+            agencyDefaultCommission:
+              (data as any).agencyDefaultCommission === null || typeof (data as any).agencyDefaultCommission === 'number'
+                ? (data as any).agencyDefaultCommission
+                : null,
+            agencyCommissionType:
+              (data as any).agencyCommissionType === null || typeof (data as any).agencyCommissionType === 'string'
+                ? (data as any).agencyCommissionType
+                : null,
+          })
+        }
+      }
+    } catch {}
+  }
+
+  useEffect(() => {
+    const tab = searchParams.get('tab')
+    if (userRole === 'ADMIN' && tab === 'capacity') {
+      setActiveTab('CAPACITY')
+    }
+  }, [searchParams, userRole])
 
   const fetchAgencies = async () => {
     try {
@@ -195,6 +285,7 @@ export function TransfersManager({
       if (activeTab === 'ARCHIVE') params.append('archived', 'true')
       if (activeTab === 'PENDING') params.append('pending', 'true')
       if (activeTab === 'REJECTED') params.append('rejected', 'true')
+      if (activeTab === 'CAPACITY') params.append('capacityPending', 'true')
       
       const res = await fetch(`/api/transfers?${params.toString()}`)
       if (res.ok) {
@@ -429,10 +520,30 @@ export function TransfersManager({
         return
     }
 
+    if (!editingTransferId && userRole !== 'ADMIN') {
+      const mp = parseInt(newMaxParticipants || '', 10)
+      if (!Number.isFinite(mp) || mp <= 0) {
+        setError('Inserisci il numero di partecipanti richiesto (necessario per l’approvazione dell’amministratore).')
+        return
+      }
+    }
+
     // Validazione date
     const start = new Date(newDate)
     const end = newEndDate ? new Date(newEndDate) : null
     const deadline = newConfirmationDeadline ? new Date(newConfirmationDeadline) : null
+    if (!newDate || isNaN(start.getTime())) {
+      setError('Data/Ora di partenza non valida. Controlla anno, mese e giorno.')
+      return
+    }
+    if (end && isNaN(end.getTime())) {
+      setError('Data/Ora di arrivo non valida. Controlla anno, mese e giorno.')
+      return
+    }
+    if (deadline && isNaN(deadline.getTime())) {
+      setError('Data limite acconti non valida. Controlla anno, mese e giorno.')
+      return
+    }
     const now = new Date()
     const bufferNow = new Date(now.getTime() - 5 * 60 * 1000)
 
@@ -572,6 +683,7 @@ export function TransfersManager({
       const params = new URLSearchParams()
       if (activeTab === 'ARCHIVE') params.append('archived', 'true')
       if (activeTab === 'PENDING') params.append('pending', 'true')
+      if (activeTab === 'CAPACITY') params.append('capacityPending', 'true')
       const res = await fetch(`/api/transfers?${params.toString()}`)
       if (!res.ok) return ''
       const data = await res.json()
@@ -608,10 +720,19 @@ export function TransfersManager({
               { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: transfer.priceAdult ? transfer.priceAdult.toString() : '' },
               { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: transfer.priceChild ? transfer.priceChild.toString() : '' },
             ]
+      const maxParticipants =
+        typeof transfer?.maxParticipants === 'number' && transfer.maxParticipants > 0
+          ? String(transfer.maxParticipants)
+          : ''
+      const by = transfer?.createdBy
+      const requesterLabel =
+        `${by?.firstName || ''} ${by?.lastName || ''}`.trim() || by?.email || by?.id || 'Utente'
       setApprovalModal({
         isOpen: true,
         transferId: id,
-        priceTiers: tiers
+        priceTiers: tiers,
+        maxParticipants,
+        requesterLabel
       })
       return
     }
@@ -663,6 +784,57 @@ export function TransfersManager({
     }
   }
 
+  const handleCapacityDecision = async (requestId: string, decision: 'APPROVED' | 'REJECTED') => {
+    try {
+      if (!requestId) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: 'ID richiesta mancante.',
+          variant: 'danger'
+        })
+        return
+      }
+
+      const res = await fetch('/api/transfers', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ capacityRequestId: requestId, capacityDecision: decision })
+      })
+
+      const contentType = res.headers.get('content-type')
+      if (contentType && contentType.includes('application/json')) {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) {
+          const msg = typeof data.error === 'string' && data.error.trim() ? data.error.trim() : 'Errore durante la gestione della richiesta'
+          throw new Error(msg)
+        }
+      } else {
+        const text = await res.text()
+        const snippet = String(text || '').slice(0, 800).trim()
+        throw new Error(`Errore del server: ${res.status} ${res.statusText}${snippet ? `\nDettagli:\n${snippet}` : ''}`)
+      }
+
+      await fetchTransfers()
+      if (selectedTransfer?.id) {
+        try {
+          const refreshed = await fetch(`/api/transfers?id=${selectedTransfer.id}`)
+          if (refreshed.ok) {
+            const list = await refreshed.json()
+            if (Array.isArray(list) && list.length > 0) setSelectedTransfer(list[0])
+          }
+        } catch {}
+      }
+    } catch (e: any) {
+      setAlertModal({
+        isOpen: true,
+        title: 'Errore',
+        message: e.message || 'Errore durante la gestione della richiesta',
+        variant: 'danger'
+      })
+    }
+  }
+
   const submitApproval = async () => {
     try {
       const id = typeof approvalModal.transferId === 'string' ? approvalModal.transferId : ''
@@ -708,6 +880,19 @@ export function TransfersManager({
 
       const priceAdult = getTierPriceByLabel(approvalModal.priceTiers, 'Adulti')
       const priceChild = getTierPriceByLabel(approvalModal.priceTiers, 'Bambini')
+      const maxParticipants =
+        approvalModal.maxParticipants && approvalModal.maxParticipants.trim()
+          ? parseInt(approvalModal.maxParticipants.trim(), 10)
+          : null
+      if (!maxParticipants || !Number.isFinite(maxParticipants) || maxParticipants <= 0) {
+        setAlertModal({
+          isOpen: true,
+          title: 'Errore',
+          message: 'Inserire il numero massimo di partecipanti da approvare.',
+          variant: 'danger'
+        })
+        return
+      }
 
       const res = await fetch('/api/transfers', {
         method: 'PUT',
@@ -717,6 +902,7 @@ export function TransfersManager({
           approvalStatus: 'APPROVED',
           priceAdult,
           priceChild,
+          maxParticipants,
           priceTiers: tiersPayload
         })
       })
@@ -755,7 +941,9 @@ export function TransfersManager({
         priceTiers: [
           { id: `${Date.now().toString(36)}_adult`, label: 'Adulti', price: '' },
           { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
-        ]
+        ],
+        maxParticipants: '',
+        requesterLabel: ''
       })
       fetchTransfers()
     } catch (e: any) {
@@ -867,6 +1055,25 @@ export function TransfersManager({
                 Per approvare il trasferimento, imposta i prezzi definitivi per adulti e bambini.
                 I futuri partecipanti useranno automaticamente questi prezzi.
               </p>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between bg-gray-50 border border-gray-200 rounded-lg px-3 py-2">
+                  <span className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Richiesto da</span>
+                  <span className="text-sm font-semibold text-gray-900">{approvalModal.requesterLabel || 'Utente'}</span>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-bold text-gray-900 mb-1">Max partecipanti approvati</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={approvalModal.maxParticipants}
+                    onChange={(e) => setApprovalModal(prev => ({ ...prev, maxParticipants: e.target.value }))}
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all text-sm text-gray-900 placeholder-gray-500"
+                    placeholder="Es. 16"
+                  />
+                </div>
+              </div>
               
               <div className="flex items-center justify-between">
                 <div className="text-sm font-bold text-gray-900">Fasce Prezzo</div>
@@ -1066,25 +1273,33 @@ export function TransfersManager({
                     </div>
                   </div>
                   
-                  <div>
-                    <label className="block text-sm font-bold text-gray-900 mb-1">Max Partecipanti</label>
-                    <div className="relative">
-                      <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                        <Users className="h-5 w-5 text-gray-500" />
-                      </div>
-                      <input
-                        type="number"
-                        min="1"
-                        value={newMaxParticipants}
-                        onChange={(e) => setNewMaxParticipants(e.target.value)}
-                        className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
-                        placeholder="Illimitati"
-                      />
-                    </div>
-                    <p className="text-xs text-gray-500 mt-1">Lasciare vuoto per nessun limite. Blocca le prenotazioni al raggiungimento.</p>
-                  </div>
                 </>
               )}
+
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-1">
+                  Max Partecipanti{!editingTransferId && userRole !== 'ADMIN' ? ' (Richiesto)' : ''}
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Users className="h-5 w-5 text-gray-500" />
+                  </div>
+                  <input
+                    type="number"
+                    min="1"
+                    required={!editingTransferId && userRole !== 'ADMIN'}
+                    value={newMaxParticipants}
+                    onChange={(e) => setNewMaxParticipants(e.target.value)}
+                    className="block w-full border border-gray-300 rounded-lg p-2.5 pl-10 focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-base md:text-sm text-gray-900 placeholder-gray-500"
+                    placeholder={userRole !== 'ADMIN' ? 'Es. 16' : 'Illimitati'}
+                  />
+                </div>
+                <p className="text-xs text-gray-500 mt-1">
+                  {userRole !== 'ADMIN'
+                    ? 'Obbligatorio per inviare la richiesta di approvazione.'
+                    : 'Lasciare vuoto per nessun limite. Blocca le prenotazioni al raggiungimento.'}
+                </p>
+              </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -1261,6 +1476,58 @@ export function TransfersManager({
                     </div>
                   )}
 
+                  {selectedTransfer?.createdBy && (
+                    <div className="flex items-center gap-2 bg-gray-50 px-3 py-2 rounded-lg text-gray-800 border border-gray-200">
+                      <User className="w-4 h-4 text-gray-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-gray-600 font-semibold uppercase tracking-wider">Richiesto da</span>
+                        <span className="font-medium">
+                          {(`${selectedTransfer.createdBy.firstName || ''} ${selectedTransfer.createdBy.lastName || ''}`.trim() || selectedTransfer.createdBy.email || 'Utente')}
+                          {typeof selectedTransfer.maxParticipants === 'number' && selectedTransfer.maxParticipants > 0 ? ` · Posti: ${selectedTransfer.maxParticipants}` : ''}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTransfer.approvalStatus === 'APPROVED' && selectedTransfer?.approvedBy && (
+                    <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg text-emerald-900 border border-emerald-200">
+                      <CheckCircle className="w-4 h-4 text-emerald-700 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-emerald-700 font-semibold uppercase tracking-wider">Approvato da</span>
+                        <span className="font-medium">
+                          {(`${selectedTransfer.approvedBy.firstName || ''} ${selectedTransfer.approvedBy.lastName || ''}`.trim() || selectedTransfer.approvedBy.email || 'Admin')}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTransfer.approvalStatus === 'REJECTED' && selectedTransfer?.rejectedBy && (
+                    <div className="flex items-center gap-2 bg-red-50 px-3 py-2 rounded-lg text-red-900 border border-red-200">
+                      <AlertCircle className="w-4 h-4 text-red-700 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-red-700 font-semibold uppercase tracking-wider">Rifiutato da</span>
+                        <span className="font-medium">
+                          {(`${selectedTransfer.rejectedBy.firstName || ''} ${selectedTransfer.rejectedBy.lastName || ''}`.trim() || selectedTransfer.rejectedBy.email || 'Admin')}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
+                  {selectedTransfer?.pendingCapacityRequest && (
+                    <div className="flex items-center gap-2 bg-purple-50 px-3 py-2 rounded-lg text-purple-800 border border-purple-200">
+                      <Users className="w-4 h-4 text-purple-700 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-purple-700 font-semibold uppercase tracking-wider">Richiesta posti</span>
+                        <span className="font-medium">
+                          {selectedTransfer.pendingCapacityRequest.requestedMaxParticipants} pax ·{' '}
+                          {(`${selectedTransfer.pendingCapacityRequest.requestedBy?.firstName || ''} ${selectedTransfer.pendingCapacityRequest.requestedBy?.lastName || ''}`.trim() ||
+                            selectedTransfer.pendingCapacityRequest.requestedBy?.email ||
+                            'Utente')}
+                        </span>
+                      </div>
+                    </div>
+                  )}
+
                   {(() => {
                     const comm = getTransferCommission(selectedTransfer)
                     if (comm) {
@@ -1278,6 +1545,28 @@ export function TransfersManager({
                     }
                     return null
                   })()}
+
+                  {(
+                    (currentUserMeta?.role || userRole) !== 'ADMIN' ||
+                    (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant)
+                  ) && (
+                    <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg text-emerald-800 border border-emerald-100">
+                      <Euro className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <div className="flex flex-col">
+                        <span className="text-xs text-emerald-600 font-semibold uppercase tracking-wider">
+                          La tua Commissione
+                        </span>
+                        <span className="font-medium font-mono">
+                          {(currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant)
+                            ? '10%'
+                            : (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== undefined &&
+                                (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== null
+                              ? `${currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission}${String(currentUserMeta?.agencyCommissionType ?? agencyCommissionType ?? 'PERCENTAGE') === 'FIXED' ? '€' : '%'}`
+                              : '-'}
+                        </span>
+                      </div>
+                    </div>
+                  )}
 
                   {userRole === 'ADMIN' && typeof selectedTransfer.totalCollected === 'number' && (
                     <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
@@ -1340,24 +1629,47 @@ export function TransfersManager({
                 </button>
                 {userRole === 'ADMIN' && (
                   <div className="flex flex-col gap-2">
-                    <div className="flex gap-2">
-                      <button
-                        type="button"
-                        onClick={() => handleApprovalAction(selectedTransfer, 'APPROVED')}
-                        className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium shadow-sm hover:bg-emerald-700 transition-colors"
-                      >
-                        <Check className="w-4 h-4" />
-                        Approva trasferimento
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleApprovalAction(selectedTransfer, 'REJECTED')}
-                        className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium shadow-sm hover:bg-red-700 transition-colors"
-                      >
-                        <X className="w-4 h-4" />
-                        Rifiuta
-                      </button>
-                    </div>
+                    {selectedTransfer.approvalStatus === 'PENDING' && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleApprovalAction(selectedTransfer, 'APPROVED')}
+                          className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium shadow-sm hover:bg-emerald-700 transition-colors"
+                        >
+                          <Check className="w-4 h-4" />
+                          Approva trasferimento
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleApprovalAction(selectedTransfer, 'REJECTED')}
+                          className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-red-600 text-white text-sm font-medium shadow-sm hover:bg-red-700 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                          Rifiuta
+                        </button>
+                      </div>
+                    )}
+
+                    {selectedTransfer?.pendingCapacityRequest && (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleCapacityDecision(selectedTransfer.pendingCapacityRequest.id, 'APPROVED')}
+                          className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-purple-600 text-white text-sm font-medium shadow-sm hover:bg-purple-700 transition-colors"
+                        >
+                          <Check className="w-4 h-4" />
+                          Approva posti
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleCapacityDecision(selectedTransfer.pendingCapacityRequest.id, 'REJECTED')}
+                          className="inline-flex items-center gap-1 px-4 py-2 rounded-lg bg-gray-900 text-white text-sm font-medium shadow-sm hover:bg-gray-800 transition-colors"
+                        >
+                          <X className="w-4 h-4" />
+                          Rifiuta richiesta
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1431,6 +1743,7 @@ export function TransfersManager({
                transferName={selectedTransfer.name}
                transferDate={selectedTransfer.date}
                transferConfirmationDeadline={selectedTransfer.confirmationDeadline}
+               initialSelectedParticipantId={searchParams.get('participantId') || undefined}
                onEdit={(participant: any) => {
                  setEditingParticipant(participant)
                  setIsAddingParticipant(true)
@@ -1446,6 +1759,7 @@ export function TransfersManager({
                 entityId={selectedTransfer.id}
                 type="TRANSFER"
                 refreshTrigger={refreshParticipantsTrigger}
+                commissionConfigs={selectedTransfer.commissions || []}
               />
             )}
           
@@ -1511,7 +1825,7 @@ export function TransfersManager({
           </div>
 
           <div className="flex space-x-1 bg-gray-100 p-1 rounded-xl w-fit">
-            {(['ACTIVE', 'ARCHIVE', 'PENDING', 'REJECTED'] as const).map((tab) => {
+            {(['ACTIVE', 'ARCHIVE', 'PENDING', 'REJECTED', 'CAPACITY'] as const).map((tab) => {
               const label =
                 tab === 'ACTIVE'
                   ? 'Attivi'
@@ -1519,10 +1833,13 @@ export function TransfersManager({
                     ? 'Archivio'
                     : tab === 'PENDING'
                       ? 'Da approvare'
-                      : 'Rifiutati'
+                      : tab === 'REJECTED'
+                        ? 'Rifiutati'
+                        : 'Richieste posti'
               const isPending = tab === 'PENDING'
               const isRejected = tab === 'REJECTED'
-              if ((isPending || isRejected) && userRole !== 'ADMIN') return null
+              const isCapacity = tab === 'CAPACITY'
+              if ((isPending || isRejected || isCapacity) && userRole !== 'ADMIN') return null
               return (
                 <button
                   key={tab}
@@ -1534,18 +1851,79 @@ export function TransfersManager({
                         ? 'bg-orange-500 text-white shadow-sm'
                         : isRejected
                           ? 'bg-red-500 text-white shadow-sm'
-                          : 'bg-white text-gray-900 shadow-sm' 
+                          : isCapacity
+                            ? 'bg-purple-600 text-white shadow-sm'
+                            : 'bg-white text-gray-900 shadow-sm' 
                       : isPending
                         ? 'text-orange-600 hover:text-orange-700 hover:bg-orange-50'
                         : isRejected
                           ? 'text-red-600 hover:text-red-700 hover:bg-red-50'
-                          : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}
+                          : isCapacity
+                            ? 'text-purple-700 hover:text-purple-800 hover:bg-purple-50'
+                            : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'}
                   `}
                 >
                   {label}
                 </button>
               )
             })}
+          </div>
+
+          <div className="relative max-w-xl">
+            <div className="relative">
+              <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={globalSearch}
+                onChange={(e) => setGlobalSearch(e.target.value)}
+                placeholder="Ricerca prenotazione (nome, cognome, email, data)..."
+                className="w-full pl-9 pr-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+              {globalSearchLoading && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-gray-400">
+                  ricerca...
+                </div>
+              )}
+            </div>
+            {globalSearch.trim().length >= 2 && (
+              <div className="absolute z-20 mt-2 w-full bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                {globalSearchResults.length === 0 ? (
+                  <div className="px-3 py-2 text-sm text-gray-500">Nessun risultato</div>
+                ) : (
+                  <div className="max-h-80 overflow-y-auto">
+                    {globalSearchResults.map((p: any) => {
+                      const transfer = p.transfer
+                      const dateLabel = transfer?.date ? new Date(transfer.date).toLocaleDateString('it-IT') : ''
+                      const name = `${p.firstName || ''} ${p.lastName || ''}`.trim()
+                      const subtitleParts = [
+                        p.email ? String(p.email) : '',
+                        dateLabel ? `Data: ${dateLabel}` : '',
+                      ].filter(Boolean)
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => {
+                            if (!transfer?.id) return
+                            setGlobalSearch('')
+                            setGlobalSearchResults([])
+                            router.push(`/dashboard/transfers?id=${transfer.id}&participantId=${p.id}`)
+                          }}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-50 border-b border-gray-100 last:border-b-0"
+                        >
+                          <div className="text-sm font-medium text-gray-900">
+                            {name || 'Cliente'} <span className="text-gray-500 font-normal">→ {transfer?.name || 'Trasferimento'}</span>
+                          </div>
+                          {subtitleParts.length > 0 && (
+                            <div className="text-xs text-gray-500 mt-0.5">{subtitleParts.join(' · ')}</div>
+                          )}
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {loading ? (
@@ -1625,6 +2003,11 @@ export function TransfersManager({
                           Rifiutato
                         </span>
                       )}
+                      {transfer?.pendingCapacityRequest && (
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-purple-50 text-purple-700 border border-purple-200 font-semibold">
+                          Posti da approvare
+                        </span>
+                      )}
                     </div>
 
                     <div className="space-y-2 mb-4">
@@ -1632,6 +2015,21 @@ export function TransfersManager({
                         <Calendar className="w-4 h-4 mr-2 text-gray-400" />
                         {formatDateDisplay(transfer.date)}
                       </div>
+                      {transfer.approvalStatus === 'PENDING' && transfer?.createdBy && (
+                        <div className="text-xs text-gray-600 font-medium">
+                          Richiesto da:{' '}
+                          {(`${transfer.createdBy.firstName || ''} ${transfer.createdBy.lastName || ''}`.trim() || transfer.createdBy.email || 'Utente')}
+                          {typeof transfer.maxParticipants === 'number' && transfer.maxParticipants > 0 ? ` · Posti: ${transfer.maxParticipants}` : ''}
+                        </div>
+                      )}
+                      {transfer?.pendingCapacityRequest && (
+                        <div className="text-xs text-purple-700 font-semibold">
+                          Richiesta posti: {transfer.pendingCapacityRequest.requestedMaxParticipants} ·{' '}
+                          {(`${transfer.pendingCapacityRequest.requestedBy?.firstName || ''} ${transfer.pendingCapacityRequest.requestedBy?.lastName || ''}`.trim() ||
+                            transfer.pendingCapacityRequest.requestedBy?.email ||
+                            'Utente')}
+                        </div>
+                      )}
                       {(() => {
                         const comm = getTransferCommission(transfer)
                         if (comm) {

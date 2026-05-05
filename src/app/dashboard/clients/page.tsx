@@ -13,6 +13,9 @@ interface ClientParticipant {
   totalPrice: number
   paidAmount: number
   paymentType: string
+  adults?: number
+  children?: number
+  infants?: number
   notes?: string
   excursion?: { id: string; name: string; startDate: string }
   transfer?: { id: string; name: string; date: string }
@@ -37,6 +40,7 @@ interface Client {
   }
   associatedNames: string[]
   derivedServiceTypes: string[]
+  servicePaxByType?: Record<string, number>
   participants: ClientParticipant[]
 }
 
@@ -46,6 +50,7 @@ export default function ClientsPage() {
   const [loading, setLoading] = useState(true)
   const [syncing, setSyncing] = useState(false)
   const [syncResult, setSyncResult] = useState<{ processed: number, remaining: number } | null>(null)
+  const [clientsMode, setClientsMode] = useState<'MARKETING' | 'RUBRICA'>('MARKETING')
   
   // Modal states
   const [historyClient, setHistoryClient] = useState<Client | null>(null)
@@ -177,13 +182,36 @@ export default function ClientsPage() {
           </button>
           {availableYears.length > 0 && (
             <button
+              disabled={clientsMode !== 'MARKETING'}
               onClick={() => setShowResetModal(true)}
-              className="flex items-center gap-2 px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-red-300 text-red-700 rounded-lg shadow-sm hover:bg-red-50 hover:border-red-400 transition-all"
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-all ${
+                clientsMode !== 'MARKETING'
+                  ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                  : 'text-gray-700 bg-white border border-red-300 text-red-700 hover:bg-red-50 hover:border-red-400'
+              }`}
             >
               <RefreshCw className="w-4 h-4" />
               Reset contatti anno {selectedYear}
             </button>
           )}
+          <div className="flex bg-gray-100 p-1 rounded-lg">
+            <button
+              onClick={() => setClientsMode('MARKETING')}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                clientsMode === 'MARKETING' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Clienti
+            </button>
+            <button
+              onClick={() => setClientsMode('RUBRICA')}
+              className={`px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                clientsMode === 'RUBRICA' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-900'
+              }`}
+            >
+              Rubrica
+            </button>
+          </div>
           <div className="relative">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-5 h-5" />
             <input
@@ -312,7 +340,8 @@ export default function ClientsPage() {
                 </tr>
               ) : (
                 filteredClients.map((client) => {
-                  const isContacted = client.isManuallyContacted || !!client.lastEmailSentAt
+                  const isContacted =
+                    clientsMode === 'MARKETING' ? (client.isManuallyContacted || !!client.lastEmailSentAt) : false
                   return (
                     <tr 
                       key={client.id} 
@@ -324,17 +353,21 @@ export default function ClientsPage() {
                     >
                       <td className="px-6 py-4 whitespace-nowrap">
                         <div className="flex flex-col gap-2">
-                          <label className="flex items-center gap-2 cursor-pointer select-none">
-                            <input 
-                              type="checkbox"
-                              checked={client.isManuallyContacted ?? false}
-                              onChange={() => toggleManualContact(client.id, client.isManuallyContacted)}
-                              className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 transition-all cursor-pointer"
-                            />
-                            <span className={`text-sm font-medium ${client.isManuallyContacted ? 'text-emerald-700' : 'text-gray-500'}`}>
-                              {client.isManuallyContacted ? 'Contattato' : 'Da contattare'}
-                            </span>
-                          </label>
+                          {clientsMode === 'MARKETING' ? (
+                            <label className="flex items-center gap-2 cursor-pointer select-none">
+                              <input 
+                                type="checkbox"
+                                checked={client.isManuallyContacted ?? false}
+                                onChange={() => toggleManualContact(client.id, client.isManuallyContacted)}
+                                className="w-4 h-4 text-emerald-600 border-gray-300 rounded focus:ring-emerald-500 transition-all cursor-pointer"
+                              />
+                              <span className={`text-sm font-medium ${client.isManuallyContacted ? 'text-emerald-700' : 'text-gray-500'}`}>
+                                {client.isManuallyContacted ? 'Contattato' : 'Da contattare'}
+                              </span>
+                            </label>
+                          ) : (
+                            <div className="text-sm text-gray-500 font-medium">—</div>
+                          )}
                           {client.lastEmailSentAt && (
                             <div className="flex items-center gap-2 ml-6">
                               <span className="text-xs text-emerald-700 flex items-center gap-1 bg-emerald-100 px-2 py-0.5 rounded-full w-fit border border-emerald-200">
@@ -386,7 +419,20 @@ export default function ClientsPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex flex-wrap gap-2">
-                        {(client.derivedServiceTypes.length > 0 ? client.derivedServiceTypes : [client.serviceType]).filter(Boolean).map((type, idx) => (
+                        {(client.derivedServiceTypes.length > 0 ? client.derivedServiceTypes : [client.serviceType])
+                          .filter(Boolean)
+                          .map((type, idx) => {
+                            const pax = client.servicePaxByType?.[String(type)] ?? null
+                            const label =
+                              type === 'EXCURSION'
+                                ? 'Escursione'
+                                : type === 'TRANSFER'
+                                  ? 'Trasferimento'
+                                  : type === 'RENTAL'
+                                    ? 'Noleggio'
+                                    : String(type)
+                            const suffix = pax && pax > 0 ? ` (${pax})` : ''
+                            return (
                           <button
                             key={idx}
                             onClick={() => {
@@ -398,12 +444,11 @@ export default function ClientsPage() {
                                 type === 'TRANSFER' ? 'bg-blue-100 text-blue-700 hover:bg-blue-200' : 
                                 'bg-orange-100 text-orange-700 hover:bg-orange-200'}`}
                           >
-                            {type === 'EXCURSION' ? 'Escursione' : 
-                             type === 'TRANSFER' ? 'Trasferimento' : 
-                             type === 'RENTAL' ? 'Noleggio' : type}
+                            {label}{suffix}
                              <ChevronRight className="w-3 h-3 opacity-50" />
                           </button>
-                        ))}
+                            )
+                          })}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">

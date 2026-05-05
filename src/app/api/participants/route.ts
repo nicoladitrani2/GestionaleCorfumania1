@@ -142,11 +142,12 @@ function computeRentalBreakdown(p: any) {
   const insurance = Number(p.insurancePrice || 0)
   const supplement = Number(p.supplementPrice || 0)
 
-  const supplierName = String(p.supplier || '').trim().toLowerCase()
   const operator = p.assignedTo || p.user
+  const operatorRole = String(operator?.role || '').toUpperCase()
   const operatorAgencyName = String(operator?.agency?.name || '').trim().toLowerCase()
-  const referenceAgencyName = String(p.agency?.name || operatorAgencyName).trim().toLowerCase()
-  const isGo4Sea = referenceAgencyName.includes('go4sea')
+  const isCorfumania = operatorRole === 'ADMIN' || operatorAgencyName.includes('corfumania')
+  const isGo4Sea = operatorAgencyName.includes('go4sea')
+  const isSpecial = !!operator?.isSpecialAssistant
   const excludedCosts =
     rentalType === 'CAR'
       ? (Math.max(0, insurance) + Math.max(0, tax) + Math.max(0, supplement))
@@ -155,9 +156,35 @@ function computeRentalBreakdown(p: any) {
   const commissionBase = rentalType === 'CAR' ? Math.max(0, gross - excludedCosts) : Math.max(0, gross)
 
   const commissionTotal = commissionBase * 0.2
-  const agentShare = commissionBase * 0.05
-  const companyShare = commissionBase * (isGo4Sea ? 0.05 : 0.15)
-  const go4SeaShare = isGo4Sea ? commissionBase * 0.1 : 0
+  let agentShare = 0
+  let corfumaniaShare = 0
+  let go4SeaShare = 0
+
+  if (isGo4Sea) {
+    if (isSpecial) {
+      agentShare = commissionBase * 0.1
+      go4SeaShare = commissionBase * 0.1
+    } else {
+      agentShare = commissionBase * 0.05
+      go4SeaShare = commissionBase * 0.1
+      corfumaniaShare = commissionBase * 0.05
+    }
+  } else if (isCorfumania) {
+    if (isSpecial) {
+      agentShare = commissionBase * 0.1
+      corfumaniaShare = commissionBase * 0.1
+    } else {
+      agentShare = commissionBase * 0.05
+      corfumaniaShare = commissionBase * 0.15
+    }
+  } else {
+    agentShare = commissionBase * 0.05
+    corfumaniaShare = commissionBase * 0.15
+  }
+
+  corfumaniaShare = Math.max(0, commissionTotal - agentShare - go4SeaShare)
+
+  const companyShare = corfumaniaShare
   const supplierOut = Math.max(0, gross - commissionTotal)
 
   const companyNow = rentalType === 'BOAT' ? companyShare : 0
@@ -179,34 +206,51 @@ function computeRentalBreakdown(p: any) {
   }
 }
 
+function computeIsSpecialAssistant(user: any, agencyName?: string | null): boolean {
+  if (!user) return false
+  if (user.isSpecialAssistant) return true
+  if (String(user.role || '').toUpperCase() === 'ADMIN') return true
+  const normalizedAgency = String(agencyName || '').toLowerCase().trim()
+  if (normalizedAgency.includes('corfumania') || normalizedAgency.includes('go4sea')) return true
+  const haystack = `${user.firstName || ''} ${user.lastName || ''} ${user.email || ''} ${user.code || ''}`
+    .toLowerCase()
+    .trim()
+  return haystack.includes('speciale')
+}
+
 function mapParticipantForClient(p: any) {
   const { user, client, assignedTo, ...rest } = p
   const paymentType = rest.paymentType || 'BALANCE'
 
-  const clientFirstName = client?.firstName || ''
-  const clientLastName = client?.lastName || ''
-  const clientEmail = client?.email || null
-  const clientPhone = client?.phoneNumber || null
-  const clientNationality = client?.nationality || null
+  const rawName = String(rest.name || '').trim()
+  const parts = rawName ? rawName.split(/\s+/).filter(Boolean) : []
+  const nameFirst = parts[0] || ''
+  const nameLast = parts.length > 1 ? parts.slice(1).join(' ') : ''
+
+  const firstName = rest.firstName || client?.firstName || nameFirst || ''
+  const lastName = rest.lastName || client?.lastName || nameLast || ''
+  const email = rest.email || client?.email || null
+  const phoneNumber = rest.phone || client?.phoneNumber || null
+  const nationality = rest.nationality || client?.nationality || null
 
   const documentInfo = decodeDocumentInfo(rest.ticketNumber)
   const rentalBreakdown = computeRentalBreakdown(p)
 
   return {
     ...rest,
-    createdBy: user,
+    createdBy: user ? { ...user, isSpecialAssistant: computeIsSpecialAssistant(user, user?.agency?.name) } : user,
     createdById: rest.userId,
-    assignedTo,
+    assignedTo: assignedTo ? { ...assignedTo, isSpecialAssistant: computeIsSpecialAssistant(assignedTo, assignedTo?.agency?.name) } : assignedTo,
     assignedToId: rest.assignedToId,
     price: rest.totalPrice,
     deposit: rest.paidAmount || 0,
     isOption: paymentType === 'OPTION',
     paymentType,
-    phoneNumber: clientPhone || rest.phone,
-    email: clientEmail || rest.email,
-    firstName: clientFirstName,
-    lastName: clientLastName,
-    nationality: clientNationality || rest.nationality,
+    phoneNumber,
+    email,
+    firstName,
+    lastName,
+    nationality,
     docType: documentInfo.docType || null,
     docNumber: documentInfo.docNumber || null,
     accommodation: rest.roomNumber || null,
@@ -226,18 +270,52 @@ export async function GET(request: Request) {
     const isRental = searchParams.get('isRental') === 'true'
     const search = searchParams.get('search') || undefined
 
-    if (!excursionId && !transferId && !isRental) return NextResponse.json({ error: 'Excursion ID, Transfer ID, or isRental required' }, { status: 400 })
+    if (!excursionId && !transferId && !isRental && !search) {
+      return NextResponse.json({ error: 'Excursion ID, Transfer ID, isRental, or search required' }, { status: 400 })
+    }
 
     const whereClause: any = {}
     if (excursionId) whereClause.excursionId = excursionId
     if (transferId) whereClause.transferId = transferId
     if (isRental) whereClause.rentalId = { not: null }
     if (search) {
-      whereClause.notes = { contains: search, mode: 'insensitive' }
+      const term = String(search || '').trim()
+      if (term.length > 0) {
+        const or: any[] = [
+          { name: { contains: term, mode: 'insensitive' } },
+          { firstName: { contains: term, mode: 'insensitive' } },
+          { lastName: { contains: term, mode: 'insensitive' } },
+          { email: { contains: term, mode: 'insensitive' } },
+          { phone: { contains: term, mode: 'insensitive' } },
+          { notes: { contains: term, mode: 'insensitive' } },
+          { client: { is: { firstName: { contains: term, mode: 'insensitive' } } } },
+          { client: { is: { lastName: { contains: term, mode: 'insensitive' } } } },
+          { client: { is: { email: { contains: term, mode: 'insensitive' } } } },
+        ]
+
+        const isoMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(term)
+        const itMatch = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(term)
+        let parsed: Date | null = null
+        if (isoMatch) {
+          parsed = new Date(`${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}T00:00:00`)
+        } else if (itMatch) {
+          parsed = new Date(`${itMatch[3]}-${itMatch[2]}-${itMatch[1]}T00:00:00`)
+        }
+        if (parsed && !Number.isNaN(parsed.getTime())) {
+          const start = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 0, 0, 0, 0)
+          const end = new Date(parsed.getFullYear(), parsed.getMonth(), parsed.getDate(), 23, 59, 59, 999)
+          or.push({ bookingDate: { gte: start, lte: end } })
+        }
+
+        whereClause.OR = or
+      }
     }
+
+    const isGlobalSearch = !excursionId && !transferId && !isRental && !!search
 
     const participants = await prisma.participant.findMany({
       where: whereClause,
+      take: isGlobalSearch ? 100 : undefined,
       orderBy: { createdAt: 'desc' },
       include: {
         user: {
@@ -247,6 +325,7 @@ export async function GET(request: Request) {
             email: true,
             code: true,
             role: true,
+            isSpecialAssistant: true,
             agencyId: true,
             agency: {
               select: {
@@ -264,6 +343,7 @@ export async function GET(request: Request) {
             email: true,
             code: true,
             role: true,
+            isSpecialAssistant: true,
             agencyId: true,
             agency: {
               select: {
@@ -288,7 +368,14 @@ export async function GET(request: Request) {
             id: true,
             name: true
           }
-        }
+        },
+        ...(isGlobalSearch
+          ? {
+              excursion: { select: { id: true, name: true, startDate: true } },
+              transfer: { select: { id: true, name: true, date: true } },
+              rental: { select: { id: true, name: true, type: true } },
+            }
+          : {})
       }
     })
 
@@ -330,6 +417,7 @@ export async function POST(request: Request) {
       depositPaymentMethod,
       balancePaymentMethod,
       commissionPercentage,
+      sendEmailToClient,
       pickupTime,
       returnPickupLocation,
       returnDropoffLocation,
@@ -386,7 +474,7 @@ export async function POST(request: Request) {
     } else if (transferId) {
       const transfer = await prisma.transfer.findUnique({
         where: { id: transferId },
-        select: { maxParticipants: true }
+        select: { id: true, name: true, date: true, supplier: true, maxParticipants: true }
       })
       if (transfer?.maxParticipants) {
         const currentStats = await prisma.participant.aggregate({
@@ -402,9 +490,138 @@ export async function POST(request: Request) {
         const newTotal = paxTotal
         
         if (currentTotal + newTotal > transfer.maxParticipants) {
-          return NextResponse.json({ error: `Numero massimo di partecipanti raggiunto (${transfer.maxParticipants}).` }, { status: 400 })
+          if (session.user.role === 'ADMIN') {
+            return NextResponse.json(
+              { error: `Numero massimo di partecipanti raggiunto (${transfer.maxParticipants}). Modifica i posti del trasferimento per procedere.` },
+              { status: 400 }
+            )
+          }
+
+          const requestedMaxParticipants = currentTotal + newTotal
+
+          const existingPending = await prisma.transferCapacityRequest.findFirst({
+            where: { transferId, status: 'PENDING' },
+            orderBy: { createdAt: 'desc' }
+          })
+
+          if (existingPending && existingPending.requestedMaxParticipants >= requestedMaxParticipants) {
+            return NextResponse.json(
+              {
+                error: `Limite posti superato (${transfer.maxParticipants}). È già presente una richiesta in attesa per portare i posti a ${existingPending.requestedMaxParticipants}.`,
+                code: 'TRANSFER_CAPACITY_PENDING',
+                transferId,
+                currentMaxParticipants: transfer.maxParticipants,
+                requestedMaxParticipants: existingPending.requestedMaxParticipants
+              },
+              { status: 409 }
+            )
+          }
+
+          const createdRequest = await prisma.transferCapacityRequest.create({
+            data: {
+              transferId,
+              requestedMaxParticipants,
+              requestedById: session.user.id
+            }
+          })
+
+          try {
+            const admins = await prisma.user.findMany({
+              where: { role: 'ADMIN' },
+              select: { email: true },
+            })
+            const adminEmails = admins
+              .map(a => a.email)
+              .filter((e): e is string => typeof e === 'string' && e.trim().length > 0)
+
+            const requester =
+              `${session.user.firstName || ''} ${session.user.lastName || ''}`.trim() || session.user.email || session.user.id
+            const transferDate = transfer.date ? new Date(transfer.date).toLocaleString('it-IT') : ''
+            const text = [
+              'Richiesta aumento posti trasferimento in attesa di approvazione.',
+              `Nome: ${transfer.name}`,
+              transferDate ? `Data: ${transferDate}` : '',
+              `Fornitore: ${transfer.supplier || '-'}`,
+              `Posti attuali: ${transfer.maxParticipants}`,
+              `Posti richiesti (totale): ${requestedMaxParticipants}`,
+              `Richiedente: ${requester}`,
+              `ID Trasferimento: ${transfer.id}`,
+              `ID Richiesta: ${createdRequest.id}`,
+            ].filter(Boolean).join('\n')
+
+            for (const to of adminEmails) {
+              try {
+                await sendMail({
+                  to,
+                  subject: `Richiesta aumento posti: ${transfer.name}`,
+                  text,
+                })
+              } catch {}
+            }
+
+            await createAuditLog(
+              session.user.id,
+              'NOTIFY_ADMINS_TRANSFER_CAPACITY_PENDING',
+              'TRANSFER',
+              transferId,
+              `Notifica admin richiesta aumento posti (richiesti=${requestedMaxParticipants})`,
+              undefined,
+              transferId
+            )
+          } catch {}
+
+          await createAuditLog(
+            session.user.id,
+            'REQUEST_TRANSFER_CAPACITY_INCREASE',
+            'TRANSFER',
+            transferId,
+            `Richiesta aumento posti: attuali=${transfer.maxParticipants}, richiesti=${requestedMaxParticipants}`,
+            undefined,
+            transferId
+          )
+
+          return NextResponse.json(
+            {
+              error: `Limite posti superato (${transfer.maxParticipants}). Richiesta inviata all’amministratore per portare i posti a ${requestedMaxParticipants}.`,
+              code: 'TRANSFER_CAPACITY_APPROVAL_REQUIRED',
+              transferId,
+              currentMaxParticipants: transfer.maxParticipants,
+              requestedMaxParticipants,
+              requestId: createdRequest.id
+            },
+            { status: 409 }
+          )
         }
       }
+    }
+
+    const parsedReturnDate = returnDate ? new Date(returnDate) : null
+    if (returnDate && (!parsedReturnDate || isNaN(parsedReturnDate.getTime()))) {
+      return NextResponse.json(
+        { error: 'Data di ritorno non valida. Controlla anno, mese e giorno.' },
+        { status: 400 }
+      )
+    }
+
+    const parsedRentalStartDate = isRental && rentalStartDate ? new Date(rentalStartDate) : null
+    if (isRental && rentalStartDate && (!parsedRentalStartDate || isNaN(parsedRentalStartDate.getTime()))) {
+      return NextResponse.json(
+        { error: 'Data inizio noleggio non valida. Controlla anno, mese e giorno.' },
+        { status: 400 }
+      )
+    }
+    const parsedRentalEndDate = isRental && rentalEndDate ? new Date(rentalEndDate) : null
+    if (isRental && rentalEndDate && (!parsedRentalEndDate || isNaN(parsedRentalEndDate.getTime()))) {
+      return NextResponse.json(
+        { error: 'Data fine noleggio non valida. Controlla anno, mese e giorno.' },
+        { status: 400 }
+      )
+    }
+    if (isRental && parsedRentalStartDate && parsedRentalEndDate && parsedRentalEndDate < parsedRentalStartDate) {
+      return NextResponse.json(
+        { error: 'La data di fine noleggio non può essere precedente alla data di inizio.' },
+        { status: 400 }
+      )
     }
 
     let clientId: string | null = null
@@ -576,7 +793,7 @@ export async function POST(request: Request) {
         dropoffLocation,
         returnPickupLocation,
         returnDropoffLocation,
-        returnDate: returnDate ? new Date(returnDate) : null,
+        returnDate: parsedReturnDate,
         returnTime,
         isRoundTrip: !!returnDate,
         roomNumber: accommodation || null,
@@ -594,8 +811,8 @@ export async function POST(request: Request) {
 
         // Campi specifici per i noleggi
         rentalType: isRental ? rentalType || null : null,
-        rentalStartDate: isRental && rentalStartDate ? new Date(rentalStartDate) : null,
-        rentalEndDate: isRental && rentalEndDate ? new Date(rentalEndDate) : null,
+        rentalStartDate: parsedRentalStartDate,
+        rentalEndDate: parsedRentalEndDate,
         licenseType: isRental ? licenseType || null : null,
         insurancePrice: isRental ? insurancePrice || 0 : 0,
         supplementPrice: isRental ? supplementPrice || 0 : 0,
@@ -701,7 +918,7 @@ export async function POST(request: Request) {
       // We need to allow email for PENDING_APPROVAL if it's a Transfer (or generally if requested?)
       // User said: "Email Transfer Non Approvati... deve indicare chiaramente che è in attesa"
       
-      const shouldSend = !!email
+      const shouldSend = !!email && sendEmailToClient !== false
       
       if (shouldSend) {
         const attachments: any[] = []
@@ -742,6 +959,20 @@ export async function POST(request: Request) {
             'PARTICIPANT',
             participant.id,
             `Inviata email (${subject}) a ${email}${result.previewUrl ? ` (preview: ${result.previewUrl})` : ''}`,
+            excursionId || null,
+            transferId || null,
+            resolvedRentalId
+          )
+        } catch {}
+      }
+      if (!shouldSend && email) {
+        try {
+          await createAuditLog(
+            session.user.id,
+            'SEND_PARTICIPANT_EMAIL_SKIPPED',
+            'PARTICIPANT',
+            participant.id,
+            'Email non inviata: invio disabilitato dall’operatore',
             excursionId || null,
             transferId || null,
             resolvedRentalId

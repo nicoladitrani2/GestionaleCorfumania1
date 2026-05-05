@@ -59,6 +59,7 @@ export async function GET(request: Request) {
     const archived = searchParams.get('archived') === 'true'
     const pending = searchParams.get('pending') === 'true'
     const rejected = searchParams.get('rejected') === 'true'
+    const capacityPending = searchParams.get('capacityPending') === 'true'
     const now = new Date()
     now.setHours(0, 0, 0, 0)
 
@@ -82,7 +83,11 @@ export async function GET(request: Request) {
     if (id) {
       whereClause.id = id
     } else {
-      if (pending) {
+      if (capacityPending) {
+        whereClause.date = { gte: now }
+        whereClause.approvalStatus = { not: 'REJECTED' }
+        whereClause.capacityRequests = { some: { status: 'PENDING' } }
+      } else if (pending) {
         whereClause.approvalStatus = 'PENDING'
       } else if (rejected) {
         whereClause.approvalStatus = 'REJECTED'
@@ -125,6 +130,32 @@ export async function GET(request: Request) {
             lastName: true,
             email: true,
             role: true
+          }
+        },
+        approvedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true
+          }
+        },
+        rejectedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true
+          }
+        },
+        capacityRequests: {
+          where: { status: 'PENDING' },
+          orderBy: { createdAt: 'desc' },
+          take: 1,
+          include: {
+            requestedBy: {
+              select: { id: true, firstName: true, lastName: true, email: true, role: true }
+            }
           }
         }
       }
@@ -183,7 +214,7 @@ export async function GET(request: Request) {
         }
       })
 
-    const { id: transferId, participants, agencyCommissions, createdBy, ...rest } = transfer
+    const { id: transferId, participants, agencyCommissions, createdBy, capacityRequests, approvedBy, rejectedBy, ...rest } = transfer
     
     const result: any = {
       id: transferId,
@@ -197,7 +228,10 @@ export async function GET(request: Request) {
         refunded: countRefunded,
         option: countOption
       },
-      createdBy
+      createdBy,
+      approvedBy,
+      rejectedBy,
+      pendingCapacityRequest: Array.isArray(capacityRequests) && capacityRequests.length > 0 ? capacityRequests[0] : null
     }
 
     if (session.user.role === 'ADMIN') {
@@ -236,6 +270,12 @@ export async function POST(request: Request) {
     }
 
     const startDate = new Date(date)
+    if (isNaN(startDate.getTime())) {
+      return NextResponse.json(
+        { error: 'Data/Ora di partenza non valida. Controlla anno, mese e giorno.' },
+        { status: 400 }
+      )
+    }
     const now = new Date()
     
     // Per coerenza con le escursioni:
@@ -250,15 +290,44 @@ export async function POST(request: Request) {
       }
     }
 
-    if (endDate && new Date(endDate) < startDate) {
+    if (endDate) {
+      const end = new Date(endDate)
+      if (isNaN(end.getTime())) {
+        return NextResponse.json(
+          { error: 'Data/Ora di arrivo non valida. Controlla anno, mese e giorno.' },
+          { status: 400 }
+        )
+      }
+      if (end < startDate) {
         return NextResponse.json({ error: 'La data di arrivo non può essere precedente alla data di partenza.' }, { status: 400 })
+      }
     }
 
     if (confirmationDeadline) {
       const deadline = new Date(confirmationDeadline)
+      if (isNaN(deadline.getTime())) {
+        return NextResponse.json(
+          { error: 'Data limite acconti non valida. Controlla anno, mese e giorno.' },
+          { status: 400 }
+        )
+      }
       if (deadline > startDate) {
         return NextResponse.json(
           { error: 'La data limite non può essere successiva alla data di partenza.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    const parsedMaxParticipants =
+      maxParticipants !== undefined && maxParticipants !== null && String(maxParticipants).trim() !== ''
+        ? parseInt(String(maxParticipants), 10)
+        : null
+
+    if (session.user.role !== 'ADMIN') {
+      if (!parsedMaxParticipants || !Number.isFinite(parsedMaxParticipants) || parsedMaxParticipants <= 0) {
+        return NextResponse.json(
+          { error: 'Inserisci il numero di partecipanti richiesto per questo trasferimento (necessario per l’approvazione).' },
           { status: 400 }
         )
       }
@@ -292,7 +361,7 @@ export async function POST(request: Request) {
         supplier,
         priceAdult: priceAdult ? parseFloat(priceAdult) : 0,
         priceChild: priceChild ? parseFloat(priceChild) : 0,
-        maxParticipants: maxParticipants ? parseInt(maxParticipants) : null,
+        maxParticipants: parsedMaxParticipants,
         approvalStatus,
         createdById: session.user.id,
         priceTiers: {
@@ -338,6 +407,7 @@ export async function POST(request: Request) {
           `Nome: ${transfer.name}`,
           transferDate ? `Data: ${transferDate}` : '',
           `Fornitore: ${transfer.supplier || '-'}`,
+          typeof transfer.maxParticipants === 'number' ? `Posti richiesti: ${transfer.maxParticipants}` : '',
           `Richiedente: ${requester}`,
           `ID: ${transfer.id}`,
         ].filter(Boolean).join('\n')
@@ -396,7 +466,65 @@ export async function PUT(request: Request) {
 
   try {
     const body = await request.json()
-    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, priceTiers, confirmationDeadline, maxParticipants } = body
+    const { id, name, date, supplier, pickupLocation, dropoffLocation, returnPickupLocation, endDate, commissions, approvalStatus, priceAdult, priceChild, priceTiers, confirmationDeadline, maxParticipants, capacityRequestId, capacityDecision } = body
+
+    if (capacityRequestId) {
+      if (capacityDecision !== 'APPROVED' && capacityDecision !== 'REJECTED') {
+        return NextResponse.json({ error: 'Decisione non valida' }, { status: 400 })
+      }
+
+      const req = await prisma.transferCapacityRequest.findUnique({
+        where: { id: String(capacityRequestId) },
+        include: {
+          transfer: {
+            select: { id: true, name: true, date: true, supplier: true, maxParticipants: true }
+          },
+          requestedBy: { select: { id: true, firstName: true, lastName: true, email: true } }
+        }
+      })
+
+      if (!req) return NextResponse.json({ error: 'Richiesta non trovata' }, { status: 404 })
+      if (req.status !== 'PENDING') {
+        return NextResponse.json({ error: 'Richiesta già gestita' }, { status: 400 })
+      }
+
+      const decidedAt = new Date()
+      const updatedRequest = await prisma.transferCapacityRequest.update({
+        where: { id: req.id },
+        data: {
+          status: capacityDecision,
+          decidedById: session.user.id,
+          decidedAt
+        }
+      })
+
+      if (capacityDecision === 'APPROVED') {
+        await prisma.transfer.update({
+          where: { id: req.transferId },
+          data: {
+            maxParticipants: req.requestedMaxParticipants
+          }
+        })
+      }
+
+      await createAuditLog(
+        session.user.id,
+        capacityDecision === 'APPROVED' ? 'APPROVE_TRANSFER_CAPACITY' : 'REJECT_TRANSFER_CAPACITY',
+        'TRANSFER',
+        req.transferId,
+        `Gestita richiesta posti: ${capacityDecision} (richiesti=${req.requestedMaxParticipants})`,
+        undefined,
+        req.transferId
+      )
+
+      return NextResponse.json({
+        success: true,
+        request: updatedRequest,
+        transferId: req.transferId,
+        requestedMaxParticipants: req.requestedMaxParticipants,
+        decision: capacityDecision
+      })
+    }
 
     if (!id) return NextResponse.json({ error: 'ID mancante' }, { status: 400 })
 
@@ -412,20 +540,47 @@ export async function PUT(request: Request) {
     })
     if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-    if (date && endDate) {
-        const start = new Date(date)
-        const end = new Date(endDate)
-        if (end < start) {
-            return NextResponse.json({ error: 'La data di arrivo non può essere precedente alla data di partenza.' }, { status: 400 })
-        }
-    }
-
-    if (confirmationDeadline && date) {
+    if (date) {
       const start = new Date(date)
-      const deadline = new Date(confirmationDeadline)
-      if (deadline > start) {
+      if (isNaN(start.getTime())) {
         return NextResponse.json(
-          { error: 'La data limite non può essere successiva alla data di partenza.' },
+          { error: 'Data/Ora di partenza non valida. Controlla anno, mese e giorno.' },
+          { status: 400 }
+        )
+      }
+
+      if (endDate) {
+        const end = new Date(endDate)
+        if (isNaN(end.getTime())) {
+          return NextResponse.json(
+            { error: 'Data/Ora di arrivo non valida. Controlla anno, mese e giorno.' },
+            { status: 400 }
+          )
+        }
+        if (end < start) {
+          return NextResponse.json({ error: 'La data di arrivo non può essere precedente alla data di partenza.' }, { status: 400 })
+        }
+      }
+
+      if (confirmationDeadline) {
+        const deadline = new Date(confirmationDeadline)
+        if (isNaN(deadline.getTime())) {
+          return NextResponse.json(
+            { error: 'Data limite acconti non valida. Controlla anno, mese e giorno.' },
+            { status: 400 }
+          )
+        }
+        if (deadline > start) {
+          return NextResponse.json(
+            { error: 'La data limite non può essere successiva alla data di partenza.' },
+            { status: 400 }
+          )
+        }
+      }
+    } else {
+      if (endDate || confirmationDeadline) {
+        return NextResponse.json(
+          { error: 'Inserisci la data/ora di partenza prima di impostare arrivo o data limite.' },
           { status: 400 }
         )
       }
@@ -444,8 +599,15 @@ export async function PUT(request: Request) {
     }
 
     if (typeof approvalStatus === 'string') {
-      if (session.user.role === 'ADMIN') {
-        updateData.approvalStatus = approvalStatus
+      updateData.approvalStatus = approvalStatus
+      if (approvalStatus === 'APPROVED') {
+        updateData.approvedById = session.user.id
+        updateData.approvedAt = new Date()
+        updateData.rejectedById = null
+        updateData.rejectedAt = null
+      } else if (approvalStatus === 'REJECTED') {
+        updateData.rejectedById = session.user.id
+        updateData.rejectedAt = new Date()
       }
     }
 

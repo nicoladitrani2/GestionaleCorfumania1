@@ -39,6 +39,7 @@ interface BreakdownItem {
   date?: string
   revenue: number
   commission: number
+  agencyBreakdown?: Record<string, number>
   assistantCommission?: number
   supplierShare?: number
   netAgency?: number
@@ -599,8 +600,8 @@ export default function ReportsPage() {
                     { header: 'Nome', key: 'name' },
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
-                    { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
-                    { header: 'Netto Agenzia', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' }
+                    { header: 'Agenti', key: 'assistantCommission', align: 'right', format: 'currency', color: 'text-indigo-600' },
+                    { header: 'Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' }
                 ]}
             />
 
@@ -612,13 +613,6 @@ export default function ReportsPage() {
                     { header: 'Nome', key: 'name' },
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Incasso Servizi', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
-                    { 
-                        header: 'Incasso Tasse', 
-                        key: 'taxBookingRevenue', 
-                        align: 'right', 
-                        color: 'text-purple-600',
-                        render: (item: any) => `€ ${(item.taxBookingRevenue || 0).toFixed(2)}`
-                    },
                     { 
                         header: 'Totale Incassato', 
                         key: 'totalRevenue', 
@@ -640,7 +634,7 @@ export default function ReportsPage() {
                     { header: 'Fornitore', key: 'name' },
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Prenotazioni', key: 'count', align: 'right' },
-                    { header: 'Quota / Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' }
+                    { header: 'Quota Fornitore (80%)', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' }
                 ]}
             />
           </div>
@@ -655,8 +649,10 @@ export default function ReportsPage() {
                     { header: 'Data', key: 'date' },
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
-                    { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
-                    { header: 'Netto', key: 'net', align: 'right', format: 'currency', color: 'text-blue-600' }
+                    { header: 'Fornitore (80%)', key: 'supplierShare', align: 'right', format: 'currency', color: 'text-slate-700' },
+                    { header: 'Agenti', key: 'assistantCommission', align: 'right', format: 'currency', color: 'text-indigo-600' },
+                    { header: 'Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
+                    { header: 'Corfumania', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' }
                 ]}
             />
           )}
@@ -670,8 +666,22 @@ export default function ReportsPage() {
                     { header: 'Tratta', key: 'name' },
                     { header: 'Pax', key: 'pax', align: 'right' },
                     { header: 'Incasso', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
-                    { header: 'Comm.', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
-                    { header: 'Netto', key: 'net', align: 'right', format: 'currency', color: 'text-blue-600' }
+                    { header: 'Fornitore (80%)', key: 'supplierShare', align: 'right', format: 'currency', color: 'text-slate-700' },
+                    { header: 'Agenti', key: 'assistantCommission', align: 'right', format: 'currency', color: 'text-indigo-600' },
+                    { header: 'Agenzie (totale)', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
+                    {
+                      header: 'Dettaglio Agenzie',
+                      key: 'agencyBreakdown',
+                      render: (item: any) => {
+                        const entries = Object.entries((item.agencyBreakdown ?? {}) as Record<string, number>)
+                          .map(([name, value]) => [name, Number(value)] as const)
+                          .filter(([, value]) => value > 0)
+                        if (entries.length === 0) return '-'
+                        entries.sort((a, b) => b[1] - a[1])
+                        return entries.map(([name, value]) => `${name}: € ${value.toFixed(2)}`).join(' · ')
+                      }
+                    },
+                    { header: 'Corfumania (totale)', key: 'netAgency', align: 'right', format: 'currency', color: 'text-blue-600' }
                 ]}
             />
           )}
@@ -742,7 +752,7 @@ export default function ReportsPage() {
                       { header: 'Lordo', key: 'gross', align: 'right', format: 'currency', color: 'text-slate-700' },
                       { header: 'Comm. 20%', key: 'commission', align: 'right', format: 'currency', color: 'text-orange-600' },
                       { header: 'Fornitore (80%)', key: 'supplierOut', align: 'right', format: 'currency', color: 'text-slate-700' },
-                      { header: 'Agente (5%)', key: 'agentShare', align: 'right', format: 'currency', color: 'text-purple-600' },
+                      { header: 'Operatore', key: 'agentShare', align: 'right', format: 'currency', color: 'text-purple-600' },
                       { header: 'Quota Corfumania', key: 'companyShare', align: 'right', format: 'currency', color: 'text-blue-600' },
                       { header: 'Quota Go4Sea', key: 'go4seaShare', align: 'right', format: 'currency', color: 'text-cyan-700' },
                   ]}
@@ -757,7 +767,7 @@ export default function ReportsPage() {
                       { header: 'Agente', key: 'name' },
                       { header: 'Noleggi', key: 'count', align: 'right' },
                       { header: 'Lordo', key: 'gross', align: 'right', format: 'currency', color: 'text-slate-700' },
-                      { header: 'Agente (5%)', key: 'agentShare', align: 'right', format: 'currency', color: 'text-purple-600' },
+                      { header: 'Operatore', key: 'agentShare', align: 'right', format: 'currency', color: 'text-purple-600' },
                     ]}
                   />
                 )}
@@ -814,7 +824,19 @@ export default function ReportsPage() {
                         { header: 'Servizio', key: 'name' },
                         { header: 'Pax', key: 'pax', align: 'right' },
                         { header: 'Incasso Totale', key: 'revenue', align: 'right', format: 'currency', color: 'text-green-600' },
-                        { header: 'Netto Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-blue-600' }
+                        { header: 'Netto Agenzia', key: 'commission', align: 'right', format: 'currency', color: 'text-blue-600' },
+                        {
+                          header: 'Dettaglio Agenzie',
+                          key: 'agencyBreakdown',
+                          render: (item: any) => {
+                            const entries = Object.entries((item.agencyBreakdown ?? {}) as Record<string, number>)
+                              .map(([name, value]) => [name, Number(value)] as const)
+                              .filter(([, value]) => value > 0)
+                            if (entries.length === 0) return '-'
+                            entries.sort((a, b) => b[1] - a[1])
+                            return entries.map(([name, value]) => `${name}: € ${value.toFixed(2)}`).join(' · ')
+                          }
+                        }
                     ]}
                 />
               </div>

@@ -28,13 +28,43 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
           lastName: true,
           email: true
         }
+      },
+      approvedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true
+        }
+      },
+      rejectedBy: {
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          email: true
+        }
+      },
+      capacityRequests: {
+        where: { status: 'PENDING' },
+        orderBy: { createdAt: 'desc' },
+        take: 1,
+        include: {
+          requestedBy: {
+            select: { id: true, firstName: true, lastName: true, email: true, role: true }
+          }
+        }
       }
     }
   })
 
   if (!transfer) return NextResponse.json({ error: 'Not found' }, { status: 404 })
 
-  return NextResponse.json(transfer)
+  const { capacityRequests, ...rest } = transfer as any
+  return NextResponse.json({
+    ...rest,
+    pendingCapacityRequest: Array.isArray(capacityRequests) && capacityRequests.length > 0 ? capacityRequests[0] : null
+  })
 }
 
 export async function PUT(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -75,9 +105,44 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     const updateData: any = {}
 
     if (name) updateData.name = name
-    if (date) updateData.date = new Date(date)
-    if (endDate !== undefined) updateData.endDate = endDate ? new Date(endDate) : null
-    if (confirmationDeadline !== undefined) updateData.confirmationDeadline = confirmationDeadline ? new Date(confirmationDeadline) : null
+    if (date) {
+      const start = new Date(date)
+      if (isNaN(start.getTime())) {
+        return NextResponse.json(
+          { error: 'Data/Ora di partenza non valida. Controlla anno, mese e giorno.' },
+          { status: 400 }
+        )
+      }
+      updateData.date = start
+    }
+    if (endDate !== undefined) {
+      if (!endDate) {
+        updateData.endDate = null
+      } else {
+        const end = new Date(endDate)
+        if (isNaN(end.getTime())) {
+          return NextResponse.json(
+            { error: 'Data/Ora di arrivo non valida. Controlla anno, mese e giorno.' },
+            { status: 400 }
+          )
+        }
+        updateData.endDate = end
+      }
+    }
+    if (confirmationDeadline !== undefined) {
+      if (!confirmationDeadline) {
+        updateData.confirmationDeadline = null
+      } else {
+        const deadline = new Date(confirmationDeadline)
+        if (isNaN(deadline.getTime())) {
+          return NextResponse.json(
+            { error: 'Data limite acconti non valida. Controlla anno, mese e giorno.' },
+            { status: 400 }
+          )
+        }
+        updateData.confirmationDeadline = deadline
+      }
+    }
     if (pickupLocation) updateData.pickupLocation = pickupLocation
     if (dropoffLocation) updateData.dropoffLocation = dropoffLocation
     if (supplier) updateData.supplier = supplier
@@ -91,6 +156,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (approvalStatus) {
         if (session.user.role === 'ADMIN') {
             updateData.approvalStatus = approvalStatus
+            if (approvalStatus === 'APPROVED') {
+              updateData.approvedById = session.user.id
+              updateData.approvedAt = new Date()
+              updateData.rejectedById = null
+              updateData.rejectedAt = null
+            } else if (approvalStatus === 'REJECTED') {
+              updateData.rejectedById = session.user.id
+              updateData.rejectedAt = new Date()
+            }
         } else {
             // Assistant cannot change status to APPROVED
             if (approvalStatus === 'APPROVED') {

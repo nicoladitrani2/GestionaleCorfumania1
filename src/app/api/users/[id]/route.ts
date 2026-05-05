@@ -15,7 +15,7 @@ export async function PUT(
   try {
     const { id } = await params
     const body = await request.json()
-    const { email, password, firstName, lastName, role, code, agencyId } = body
+    const { email, password, firstName, lastName, role, code, agencyId, isSpecialAssistant } = body
 
     const dataToUpdate: any = {
       email,
@@ -23,7 +23,10 @@ export async function PUT(
       lastName,
       role,
       code,
-      agencyId: agencyId || null
+      agencyId: agencyId || null,
+    }
+    if (typeof isSpecialAssistant !== 'undefined') {
+      dataToUpdate.isSpecialAssistant = !!isSpecialAssistant
     }
 
     if (password) {

@@ -99,13 +99,13 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
         s.name,
         s.pax || s.count,
         `€ ${s.revenue.toFixed(2)}`,
-        `€ ${s.commission.toFixed(2)}`,
-        `€ ${(s.revenue - s.commission).toFixed(2)}`
+        `€ ${(s.assistantCommission || 0).toFixed(2)}`,
+        `€ ${s.commission.toFixed(2)}`
     ])
 
     autoTable(doc, {
         startY: yPos + 5,
-        head: [['Agenzia', 'Pax', 'Incasso', 'Comm.', 'Netto']],
+        head: [['Agenzia', 'Pax', 'Incasso', 'Agenti', 'Agenzia']],
         body: agencyRows,
         theme: 'striped',
         headStyles: { fillColor: [139, 92, 246] }, // Violet-500
@@ -159,22 +159,20 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
         a.name,
         a.pax || a.count,
         `€ ${a.revenue.toFixed(2)}`,
-        `€ ${(a.taxBookingRevenue || 0).toFixed(2)}`,
         `€ ${(a.revenue + (a.taxBookingRevenue || 0)).toFixed(2)}`,
         `€ ${a.commission.toFixed(2)}`
     ])
 
     autoTable(doc, {
         startY: yPos + 5,
-        head: [['Assistente', 'Pax', 'Inc. Servizi', 'Inc. Tasse', 'Totale', 'Comm.']],
+        head: [['Assistente', 'Pax', 'Inc. Servizi', 'Totale', 'Comm.']],
         body: assistantRows,
         theme: 'striped',
         headStyles: { fillColor: [249, 115, 22] }, // Orange-500
         columnStyles: {
         2: { halign: 'right' },
-        3: { halign: 'right' },
-        4: { halign: 'right', fontStyle: 'bold' },
-        5: { halign: 'right' }
+        3: { halign: 'right', fontStyle: 'bold' },
+        4: { halign: 'right' }
         }
     })
     // @ts-ignore
@@ -198,7 +196,7 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
         e.pax || e.count,
         `€ ${e.revenue.toFixed(2)}`,
         `€ ${e.commission.toFixed(2)}`,
-        `€ ${(e.revenue - e.commission).toFixed(2)}`
+        `€ ${((typeof e.netAgency === 'number' ? e.netAgency : (e.revenue - e.commission)) || 0).toFixed(2)}`
     ])
 
     autoTable(doc, {
@@ -233,7 +231,7 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
         t.pax || t.count,
         `€ ${t.revenue.toFixed(2)}`,
         `€ ${t.commission.toFixed(2)}`,
-        `€ ${(t.revenue - t.commission).toFixed(2)}`
+        `€ ${((typeof t.netAgency === 'number' ? t.netAgency : (t.revenue - t.commission)) || 0).toFixed(2)}`
     ])
 
     autoTable(doc, {
@@ -276,7 +274,7 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
 
     autoTable(doc, {
         startY: yPos + 5,
-        head: [['Tipo Noleggio', 'Pax', 'Lordo', 'Netto', 'Comm. 20%', 'Agente 5% (Futuro)', 'Corfumania', 'Go4Sea']],
+        head: [['Tipo Noleggio', 'Pax', 'Lordo', 'Netto', 'Comm. 20%', 'Operatore', 'Corfumania', 'Go4Sea']],
         body: rentalRows,
         theme: 'striped',
         headStyles: { fillColor: [59, 130, 246] }, // Blue-500

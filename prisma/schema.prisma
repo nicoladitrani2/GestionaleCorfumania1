@@ -30,6 +30,7 @@ model User {
   lastName           String?
   role               String        @default("USER")
   mustChangePassword Boolean       @default(false)
+  isSpecialAssistant Boolean       @default(false)
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   agencyId           String?
@@ -40,6 +41,10 @@ model User {
   taxImportBatchesCreated TaxImportBatch[]
   assignedParticipants Participant[] @relation("AssignedParticipants")
   createdTransfers   Transfer[]    @relation("UserCreatedTransfers")
+  approvedTransfers  Transfer[]    @relation("UserApprovedTransfers")
+  rejectedTransfers  Transfer[]    @relation("UserRejectedTransfers")
+  requestedTransferCapacityRequests TransferCapacityRequest[] @relation("UserRequestedTransferCapacity")
+  decidedTransferCapacityRequests   TransferCapacityRequest[] @relation("UserDecidedTransferCapacity")
 }
 
 model Excursion {
@@ -111,6 +116,32 @@ model Transfer {
   approvalStatus       String        @default("APPROVED") // PENDING, APPROVED, REJECTED
   createdById          String?
   createdBy            User?         @relation("UserCreatedTransfers", fields: [createdById], references: [id])
+  approvedById         String?
+  approvedBy           User?         @relation("UserApprovedTransfers", fields: [approvedById], references: [id])
+  approvedAt           DateTime?
+  rejectedById         String?
+  rejectedBy           User?         @relation("UserRejectedTransfers", fields: [rejectedById], references: [id])
+  rejectedAt           DateTime?
+  capacityRequests     TransferCapacityRequest[]
+}
+
+model TransferCapacityRequest {
+  id                    String   @id @default(cuid())
+  transferId            String
+  requestedMaxParticipants Int
+  status                String   @default("PENDING") // PENDING, APPROVED, REJECTED
+  requestedById         String
+  decidedById           String?
+  requestedAt           DateTime @default(now())
+  decidedAt             DateTime?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  transfer              Transfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  requestedBy           User     @relation("UserRequestedTransferCapacity", fields: [requestedById], references: [id])
+  decidedBy             User?    @relation("UserDecidedTransferCapacity", fields: [decidedById], references: [id])
+
+  @@index([transferId, status])
 }
 
 model TransferPriceTier {

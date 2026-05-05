@@ -72,6 +72,13 @@ export function AuditLogList({ excursionId, transferId, rentalId }: AuditLogList
       case 'CREATE_PARTICIPANT': return 'Aggiunta Partecipante'
       case 'UPDATE_PARTICIPANT': return 'Modifica Partecipante'
       case 'DELETE_PARTICIPANT': return 'Eliminazione Partecipante'
+      case 'SEND_PARTICIPANT_EMAIL': return 'Invio Email al Cliente'
+      case 'SEND_PARTICIPANT_EMAIL_FAILED': return 'Invio Email al Cliente (fallito)'
+      case 'SEND_PARTICIPANT_EMAIL_SKIPPED': return 'Invio Email al Cliente (saltato)'
+      case 'NOTIFY_ADMINS_APPROVAL': return 'Notifica Admin (approvazione richiesta)'
+      case 'NOTIFY_ADMINS_SKIPPED': return 'Notifica Admin (saltata)'
+      case 'REQUEST_TRANSFER_CAPACITY_INCREASE': return 'Richiesta Aumento Posti (Trasferimento)'
+      case 'NOTIFY_ADMINS_TRANSFER_CAPACITY_PENDING': return 'Notifica Admin (aumento posti in attesa)'
       case 'UPDATE_EXCURSION': return 'Modifica Escursione'
       case 'CREATE_EXCURSION': return 'Creazione Escursione'
       case 'CREATE_TRANSFER': return 'Creazione Trasferimento'
@@ -79,6 +86,7 @@ export function AuditLogList({ excursionId, transferId, rentalId }: AuditLogList
       case 'DELETE_TRANSFER': return 'Eliminazione Trasferimento'
       case 'APPROVE_PARTICIPANT': return 'Approvazione Sconto'
       case 'REJECT_PARTICIPANT': return 'Rifiuto Sconto'
+      case 'APPROVE_TRANSFER': return 'Approvazione Trasferimento'
       default: return action
     }
   }
@@ -87,9 +95,13 @@ export function AuditLogList({ excursionId, transferId, rentalId }: AuditLogList
     return details
       .replace(/\bBALANCE\b/g, 'Saldo')
       .replace(/\bDEPOSIT\b/g, 'Acconto')
+      .replace(/\bOPTION\b/g, 'Opzione')
       .replace(/\bCASH\b/g, 'Contanti')
       .replace(/\bTRANSFER\b/g, 'Bonifico')
       .replace(/\bCARD\b/g, 'Carta')
+      .replace(/\bPENDING_APPROVAL\b/g, 'In attesa di approvazione')
+      .replace(/\bAPPROVED\b/g, 'Approvato')
+      .replace(/\bREJECTED\b/g, 'Rifiutato')
       .replace(/\bCREATE_PARTICIPANT\b/g, 'Aggiunta Partecipante') // Fallback
   }
 
