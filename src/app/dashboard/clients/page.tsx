@@ -17,6 +17,7 @@ interface ClientParticipant {
   children?: number
   infants?: number
   notes?: string
+  rentalStartDate?: string
   excursion?: { id: string; name: string; startDate: string }
   transfer?: { id: string; name: string; date: string }
   rental?: { id: string; name: string; type: string }
@@ -41,6 +42,7 @@ interface Client {
   associatedNames: string[]
   derivedServiceTypes: string[]
   servicePaxByType?: Record<string, number>
+  nextEventStartDate?: string | null
   participants: ClientParticipant[]
 }
 
@@ -92,6 +94,7 @@ export default function ClientsPage() {
       let dateStr = p.createdAt
       if (p.excursion?.startDate) dateStr = p.excursion.startDate
       else if (p.transfer?.date) dateStr = p.transfer.date
+      else if (p.rentalStartDate) dateStr = p.rentalStartDate
       else if (p.rental) dateStr = p.createdAt
       
       return new Date(dateStr).getTime()
@@ -138,7 +141,7 @@ export default function ClientsPage() {
     }
   }
 
-  const filteredClients = clients.filter(client => {
+  const filteredClientsRaw = clients.filter(client => {
     const matchesSearch = client.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       client.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (client.email && client.email.toLowerCase().includes(searchTerm.toLowerCase()))
@@ -155,6 +158,13 @@ export default function ClientsPage() {
         : serviceTypes.includes(activeTab)
 
     return matchesSearch && matchesYear && matchesTab
+  })
+
+  const filteredClients = [...filteredClientsRaw].sort((a, b) => {
+    const aTs = a.nextEventStartDate ? new Date(a.nextEventStartDate).getTime() : Number.POSITIVE_INFINITY
+    const bTs = b.nextEventStartDate ? new Date(b.nextEventStartDate).getTime() : Number.POSITIVE_INFINITY
+    if (aTs !== bTs) return aTs - bTs
+    return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   })
 
   return (
@@ -319,13 +329,14 @@ export default function ClientsPage() {
                 <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Nazionalità</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Servizi (Clicca per Dettagli)</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Prenotazioni</th>
+                <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Data Evento</th>
                 <th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase tracking-wider">Data Registrazione</th>
               </tr>
             </thead>
             <tbody className="bg-white divide-y divide-gray-200">
               {loading ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={8} className="px-6 py-12 text-center text-sm text-gray-500">
                     <div className="flex justify-center items-center gap-2">
                       <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-blue-600"></div>
                       Caricamento clienti...
@@ -334,7 +345,7 @@ export default function ClientsPage() {
                 </tr>
               ) : filteredClients.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-6 py-12 text-center text-sm text-gray-500">
+                  <td colSpan={8} className="px-6 py-12 text-center text-sm text-gray-500">
                     Nessun cliente trovato. I clienti verranno salvati automaticamente all&apos;aggiunta di una prenotazione.
                   </td>
                 </tr>
@@ -455,6 +466,12 @@ export default function ClientsPage() {
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
                         {client._count.participants}
                       </span>
+                    </td>
+                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                      <div className="flex items-center gap-2">
+                        <Calendar className="w-4 h-4 text-gray-400" />
+                        {client.nextEventStartDate ? new Date(client.nextEventStartDate).toLocaleDateString('it-IT') : '-'}
+                      </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                       <div className="flex items-center gap-2">

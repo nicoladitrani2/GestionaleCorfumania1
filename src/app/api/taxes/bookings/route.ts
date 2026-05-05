@@ -14,7 +14,13 @@ export async function GET(request: Request) {
     // Filter for non-admins
     const whereClause: any = {}
     if (session.user.role !== 'ADMIN') {
+      const u = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { isSpecialAssistant: true },
+      })
+      if (!u?.isSpecialAssistant) {
         whereClause.assignedToId = session.user.id
+      }
     }
 
     const bookings = await prisma.taxBooking.findMany({
@@ -46,15 +52,25 @@ export async function POST(request: Request) {
     if (!session || !session.user) {
       return new NextResponse('Unauthorized', { status: 401 })
     }
-    if (session.user.role !== 'ADMIN') {
-      return new NextResponse('Forbidden', { status: 403 })
-    }
+    const actor =
+      session.user.role === 'ADMIN'
+        ? { canImport: true, key: `admin:${session.user.id}` }
+        : await (async () => {
+            const u = await prisma.user.findUnique({
+              where: { id: session.user.id },
+              select: { isSpecialAssistant: true },
+            })
+            const can = Boolean(u?.isSpecialAssistant)
+            return { canImport: can, key: `special:${session.user.id}` }
+          })()
+
+    if (!actor.canImport) return new NextResponse('Forbidden', { status: 403 })
 
     const csrf = enforceSameOrigin(request)
     if (csrf) return csrf
 
     const ip = getClientIp(request)
-    const rl = rateLimit(`tax-bookings:post:ip:${ip}:admin:${session.user.id}`, 120, 10 * 60 * 1000)
+    const rl = rateLimit(`tax-bookings:post:ip:${ip}:${actor.key}`, 120, 10 * 60 * 1000)
     if (!rl.allowed) {
       return addRateLimitHeaders(new NextResponse('Too Many Requests', { status: 429 }), rl, 120)
     }
@@ -88,7 +104,7 @@ export async function POST(request: Request) {
             const weekStr = String(b.week)
             const paxInt = parseInt(String(b.pax || 0), 10)
             const serviceCodeInt = parseInt(String(b.serviceCode || 0), 10)
-            const totalAmountFloat = parseFloat(String(b.totalAmount || 0))
+            let totalAmountFloat = parseFloat(String(b.totalAmount || 0))
             const importBatchId = b.importBatchId ? String(b.importBatchId) : null
 
             // 1. Check if exists
@@ -104,10 +120,9 @@ export async function POST(request: Request) {
                 // 2. Check if "locked" (assigned or paid)
                 // User requirement: "dati che sono stati già usati, assegnati e pagati non devono essere sovrasritti"
                 const isLocked =
-                  existing.assignedToId ||
-                  existing.customerPaid ||
-                  existing.adminPaid ||
-                  (existing.serviceCode === 4 && existing.depositStatus !== 'PENDING')
+                  existing.serviceCode === 4
+                    ? (existing.customerPaid || existing.adminPaid || existing.depositStatus !== 'PENDING')
+                    : (!!existing.assignedToId || existing.customerPaid || existing.adminPaid)
                 
                 if (isLocked) {
                     // SKIP update
@@ -123,6 +138,17 @@ export async function POST(request: Request) {
                 } catch {
                     importSource = ''
                 }
+
+                if (importSource === 'EXCEL' && serviceCodeInt === 4) {
+                  totalAmountFloat = Math.max(0, paxInt) * 50
+                }
+
+                const shouldClearAssignedTo =
+                  importSource === 'EXCEL' &&
+                  existing.assignedToId === session.user.id &&
+                  !existing.customerPaid &&
+                  !existing.adminPaid &&
+                  (existing.serviceCode !== 4 || String(existing.depositStatus || 'PENDING').toUpperCase() === 'PENDING')
 
                 if (importSource === 'EXCEL' && importBatchId) {
                     const snapshot = JSON.stringify({
@@ -165,12 +191,22 @@ export async function POST(request: Request) {
                         rawData: String(b.rawData || '{}'),
                         depositStatus: String(b.depositStatus || existing.depositStatus || 'PENDING'),
                         depositProcessedAt: b.depositProcessedAt ? new Date(String(b.depositProcessedAt)) : existing.depositProcessedAt,
-                        importBatchId: importSource === 'EXCEL' ? importBatchId : existing.importBatchId
+                        importBatchId: importSource === 'EXCEL' ? importBatchId : existing.importBatchId,
+                        ...(shouldClearAssignedTo ? { assignedToId: null } : {})
                     }
                 })
                 results.push(updated)
             } else {
                 // 4. Create new
+                const rawForSource = String(b.rawData || '{}')
+                try {
+                  const parsed = JSON.parse(rawForSource || '{}')
+                  const importSource = String(parsed?.importSource || '')
+                  if (importSource === 'EXCEL' && serviceCodeInt === 4) {
+                    totalAmountFloat = Math.max(0, paxInt) * 50
+                  }
+                } catch {
+                }
                 const created = await tx.taxBooking.create({
                     data: {
                         nFile: nFileStr,
@@ -182,7 +218,7 @@ export async function POST(request: Request) {
                         room: b.room ? String(b.room) : null,
                         totalAmount: totalAmountFloat,
                         customerPaid: b.customerPaid === true,
-                        assignedToId: session.user.id, // Assign to creator by default
+                        assignedToId: null,
                         rawData: String(b.rawData || '{}'),
                         depositStatus: String(b.depositStatus || 'PENDING'),
                         depositProcessedAt: b.depositProcessedAt ? new Date(String(b.depositProcessedAt)) : null,
@@ -215,16 +251,31 @@ export async function POST(request: Request) {
                         week: weekStr,
                         serviceCode: 4
                     },
-                    select: { id: true }
+                    select: {
+                        id: true,
+                        pax: true,
+                        totalAmount: true,
+                        assignedToId: true,
+                        customerPaid: true,
+                        adminPaid: true,
+                        depositStatus: true,
+                        rawData: true,
+                        importBatchId: true,
+                    }
                 })
 
+                const depositTotal = Math.max(0, paxInt) * 50
                 if (!existingDeposit) {
                     let depositRaw = '{}'
                     try {
                         const parsed = JSON.parse(raw || '{}')
-                        depositRaw = JSON.stringify({ ...parsed, depositAmount: 50 })
+                        depositRaw = JSON.stringify({
+                            ...parsed,
+                            depositAmountPerPax: 50,
+                            depositAmountTotal: depositTotal,
+                        })
                     } catch {
-                        depositRaw = JSON.stringify({ depositAmount: 50 })
+                        depositRaw = JSON.stringify({ depositAmountPerPax: 50, depositAmountTotal: depositTotal })
                     }
 
                     const existingAssignedToId = existing?.assignedToId || null
@@ -238,14 +289,43 @@ export async function POST(request: Request) {
                             pax: paxInt,
                             leadName: String(b.leadName || ''),
                             room: b.room ? String(b.room) : null,
-                            totalAmount: 50,
-                            assignedToId: existingAssignedToId || session.user.id,
+                            totalAmount: depositTotal,
+                            assignedToId: existingAssignedToId,
                             rawData: depositRaw,
                             depositStatus: 'PENDING',
                             depositProcessedAt: null,
                             importBatchId
                         }
                     })
+                } else {
+                    const isLocked =
+                      existingDeposit.customerPaid ||
+                      existingDeposit.adminPaid ||
+                      (existingDeposit.depositStatus && String(existingDeposit.depositStatus).toUpperCase() !== 'PENDING')
+
+                    if (!isLocked) {
+                        let nextRaw = String(existingDeposit.rawData || '{}')
+                        try {
+                            const parsed = JSON.parse(nextRaw || '{}')
+                            nextRaw = JSON.stringify({
+                                ...parsed,
+                                depositAmountPerPax: 50,
+                                depositAmountTotal: depositTotal,
+                            })
+                        } catch {
+                            nextRaw = JSON.stringify({ depositAmountPerPax: 50, depositAmountTotal: depositTotal })
+                        }
+
+                        await tx.taxBooking.update({
+                            where: { id: existingDeposit.id },
+                            data: {
+                                pax: paxInt,
+                                totalAmount: depositTotal,
+                                rawData: nextRaw,
+                                importBatchId: existingDeposit.importBatchId || importBatchId,
+                            }
+                        })
+                    }
                 }
             }
         }

@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ArrivalsImportModal } from './components/ArrivalsImportModal'
 import { TaxBookingsList } from './components/TaxBookingsList'
 import { FileSpreadsheet, List, Trash2 } from 'lucide-react'
@@ -16,6 +16,26 @@ export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
   const [showBookings, setShowBookings] = useState(true)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [resetModalOpen, setResetModalOpen] = useState(false)
+  const [canImport, setCanImport] = useState<boolean>(userRole === 'ADMIN')
+
+  useEffect(() => {
+    if (userRole === 'ADMIN') return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch('/api/auth/me')
+        if (!res.ok) return
+        const data = await res.json()
+        const explicit = Boolean(data?.explicitIsSpecialAssistant)
+        if (!cancelled) setCanImport(explicit)
+      } catch {
+      }
+    }
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [userRole])
 
   const handleImportSuccess = () => {
     setShowImport(false)
@@ -48,7 +68,7 @@ export function TaxesManager({ currentUserId, userRole }: TaxesManagerProps) {
              {showBookings ? 'Nascondi Arrivi' : 'Lista Arrivi & Assegnazioni'}
            </button>
            
-           {userRole === 'ADMIN' && (
+           {canImport && (
              <button 
                 onClick={() => setShowImport(true)}
                 className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors shadow-sm"

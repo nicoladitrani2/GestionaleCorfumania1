@@ -27,6 +27,7 @@ export async function GET(request: Request) {
             children: true,
             infants: true,
             notes: true,
+            rentalStartDate: true,
             excursion: {
               select: {
                 id: true,
@@ -67,21 +68,43 @@ export async function GET(request: Request) {
       // Derive service types from actual participants
       const serviceTypes = new Set<string>()
       const servicePaxByType: Record<string, number> = { EXCURSION: 0, TRANSFER: 0, RENTAL: 0 }
+      const eventDates: Date[] = []
+      const now = new Date()
+      const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
       client.participants.forEach(p => {
         const pax = Math.max(1, (p.adults || 0) + (p.children || 0) + (p.infants || 0))
         if (p.excursion) {
           serviceTypes.add('EXCURSION')
           servicePaxByType.EXCURSION += pax
+          if (p.excursion.startDate) {
+            const d = new Date(p.excursion.startDate as any)
+            if (!Number.isNaN(d.getTime())) eventDates.push(d)
+          }
         }
         if (p.transfer) {
           serviceTypes.add('TRANSFER')
           servicePaxByType.TRANSFER += pax
+          if ((p.transfer as any).date) {
+            const d = new Date((p.transfer as any).date)
+            if (!Number.isNaN(d.getTime())) eventDates.push(d)
+          }
         }
         if (p.rental) {
           serviceTypes.add('RENTAL')
           servicePaxByType.RENTAL += pax
+          if ((p as any).rentalStartDate) {
+            const d = new Date((p as any).rentalStartDate)
+            if (!Number.isNaN(d.getTime())) eventDates.push(d)
+          }
         }
       })
+
+      const upcomingEventDates = eventDates
+        .map(d => new Date(d))
+        .filter(d => !Number.isNaN(d.getTime()) && d.getTime() >= todayStart.getTime())
+        .sort((a, b) => a.getTime() - b.getTime())
+
+      const nextEventStartDate = upcomingEventDates.length > 0 ? upcomingEventDates[0] : null
 
       // If no participants, fallback to client.serviceType
       if (serviceTypes.size === 0 && client.serviceType) {
@@ -92,7 +115,8 @@ export async function GET(request: Request) {
         ...client,
         associatedNames: uniqueNames,
         derivedServiceTypes: Array.from(serviceTypes),
-        servicePaxByType
+        servicePaxByType,
+        nextEventStartDate: nextEventStartDate ? nextEventStartDate.toISOString() : null
       }
     })
 

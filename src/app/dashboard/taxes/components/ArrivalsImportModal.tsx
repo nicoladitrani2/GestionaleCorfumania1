@@ -197,8 +197,8 @@ export function ArrivalsImportModal({ onClose, onSuccess }: ArrivalsImportModalP
         ...currentBase,
         pax: finalPax,
         serviceCode: 4,
-        totalAmount: 50,
-        rawData: JSON.stringify({ ...currentBase.raw, participants, depositAmount: 50 })
+        totalAmount: 50 * finalPax,
+        rawData: JSON.stringify({ ...currentBase.raw, participants, depositAmountPerPax: 50, depositAmountTotal: 50 * finalPax })
       })
 
       for (const r of records) {
