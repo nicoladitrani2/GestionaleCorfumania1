@@ -15,12 +15,18 @@ export async function POST(
   try {
     const { refundMethod, refundAmount, notes, pdfAttachment, pdfAttachmentIT, pdfAttachmentEN } = await request.json()
 
-    if (!refundMethod || !refundAmount) {
+    const parsedAmount = Number(refundAmount || 0)
+    if (!refundMethod || !Number.isFinite(parsedAmount) || parsedAmount <= 0) {
       return NextResponse.json({ error: 'Dati mancanti' }, { status: 400 })
     }
 
     const participant = await prisma.participant.findUnique({
-      where: { id }
+      where: { id },
+      include: {
+        paymentEvents: {
+          select: { direction: true, method: true, amount: true, createdAt: true }
+        }
+      }
     })
 
     if (!participant) {
@@ -44,8 +50,54 @@ export async function POST(
 
     const methodLabels: Record<string, string> = {
       'CASH': 'Contanti',
-      'TRANSFER': 'Bonifico',
-      'CARD': 'Carta'
+      'TRANSFER': 'Digitale',
+      'CARD': 'Digitale',
+      'DIGITAL': 'Digitale'
+    }
+
+    const bucket = (raw: any): 'CASH' | 'DIGITAL' => {
+      const m = String(raw || '').trim().toUpperCase()
+      return m === 'CASH' ? 'CASH' : 'DIGITAL'
+    }
+
+    const extractRefundsFromNotes = (text: any): number => {
+      const notesText = typeof text === 'string' ? text : ''
+      if (!notesText) return 0
+      let total = 0
+      const re = /Rimborsato\s+€\s*([0-9]+(?:[.,][0-9]+)?)\s*\(([^)]+)\)/gi
+      let match: RegExpExecArray | null = null
+      while ((match = re.exec(notesText)) !== null) {
+        const rawAmount = String(match[1] || '').replace(',', '.')
+        const amount = parseFloat(rawAmount)
+        if (!Number.isFinite(amount) || amount <= 0) continue
+        total += amount
+      }
+      return total
+    }
+
+    const events = Array.isArray((participant as any).paymentEvents) ? ((participant as any).paymentEvents as any[]) : []
+    let inEventsTotal = 0
+    let outEventsTotal = 0
+    for (const e of events) {
+      const dir = String(e?.direction || '').trim().toUpperCase()
+      const amount = Number(e?.amount || 0)
+      if (!Number.isFinite(amount) || amount <= 0) continue
+      if (dir === 'OUT') outEventsTotal += amount
+      else inEventsTotal += amount
+    }
+
+    const legacyIncomingTotal = Math.max(0, Number(participant.paidAmount || 0))
+    const legacyOutgoingTotal = extractRefundsFromNotes(participant.notes)
+
+    const incomingBase = Math.max(inEventsTotal, legacyIncomingTotal)
+    const outgoingBase = Math.max(outEventsTotal, legacyOutgoingTotal)
+    const available = Math.max(0, incomingBase - outgoingBase)
+
+    if (parsedAmount > available + 0.009) {
+      return NextResponse.json(
+        { error: `Importo massimo rimborsabile: € ${available.toFixed(2)}` },
+        { status: 400 }
+      )
     }
 
     // 1. Update the participant to REFUNDED status instead of deleting
@@ -54,14 +106,25 @@ export async function POST(
       data: {
         paymentType: 'REFUNDED',
         notes: participant.notes 
-          ? `${participant.notes}\n[${new Date().toLocaleDateString()}] Rimborsato €${refundAmount} (${methodLabels[refundMethod] || refundMethod}) - ${notes || ''}`
-          : `[${new Date().toLocaleDateString()}] Rimborsato €${refundAmount} (${methodLabels[refundMethod] || refundMethod}) - ${notes || ''}`
+          ? `${participant.notes}\n[${new Date().toLocaleDateString()}] Rimborsato €${parsedAmount} (${methodLabels[refundMethod] || refundMethod}) - ${notes || ''}`
+          : `[${new Date().toLocaleDateString()}] Rimborsato €${parsedAmount} (${methodLabels[refundMethod] || refundMethod}) - ${notes || ''}`
+      }
+    })
+
+    await prisma.participantPaymentEvent.create({
+      data: {
+        participantId: participant.id,
+        direction: 'OUT',
+        method: bucket(refundMethod),
+        kind: 'REFUND',
+        amount: parsedAmount,
+        notes: notes || null,
       }
     })
 
     // 2. Create Audit Log
     const safeName = participant.name || 'Cliente'
-    const details = `RIMBORSO: Partecipante ${safeName} rimborsato di €${refundAmount} tramite ${methodLabels[refundMethod] || refundMethod}. Stato aggiornato a REFUNDED.`
+    const details = `RIMBORSO: Partecipante ${safeName} rimborsato di €${parsedAmount} tramite ${methodLabels[refundMethod] || refundMethod}. Stato aggiornato a REFUNDED.`
 
     await createAuditLog(
       session.user.id,
@@ -99,7 +162,7 @@ export async function POST(
         await sendMail({
           to: participant.email,
           subject: 'Rimborso Effettuato - Corfumania',
-          text: `Gentile ${safeName},\n\nTi informiamo che è stato effettuato un rimborso di €${refundAmount}. In allegato trovi il documento aggiornato (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
+          text: `Gentile ${safeName},\n\nTi informiamo che è stato effettuato un rimborso di €${parsedAmount}. In allegato trovi il documento aggiornato (IT/EN).\n\nCordiali saluti,\nTeam Corfumania`,
           attachments,
         })
       } catch (emailError) {

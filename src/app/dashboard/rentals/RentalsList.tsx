@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Briefcase, Calendar, Map as MapIcon, History, X, ChevronDown } from 'lucide-react'
+import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, BadgeCheck, Euro, Eye, RotateCcw, Briefcase, Calendar, Map as MapIcon, History, X, ChevronDown, Banknote } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { generateParticipantPDF } from '@/lib/pdf-generator'
@@ -99,6 +99,65 @@ const RentalsTable = ({
   const totalTax = data.reduce((sum, p) => sum + (p.tax || 0), 0)
   const totalPax = data.reduce((sum, p) => sum + ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1), 0)
   const totalAgentShare = data.reduce((sum, p) => sum + (p.rentalAgentShare || 0), 0)
+  const paymentsByChannel = data.reduce(
+    (acc, p) => {
+      if (p.paymentsSummary) {
+        const inCash = Number(p.paymentsSummary.incomingCash || 0)
+        const inDigital = Number(p.paymentsSummary.incomingDigital || 0)
+        const outCash = Number(p.paymentsSummary.outgoingCash || 0)
+        const outDigital = Number(p.paymentsSummary.outgoingDigital || 0)
+        if (Number.isFinite(inCash)) acc.cash.incoming += inCash
+        if (Number.isFinite(inDigital)) acc.digital.incoming += inDigital
+        if (Number.isFinite(outCash)) acc.cash.outgoing += outCash
+        if (Number.isFinite(outDigital)) acc.digital.outgoing += outDigital
+        return acc
+      }
+      const normalizeMethod = (raw: any) => String(raw || '').trim().toUpperCase()
+      const totalPaid = Number(p.deposit ?? p.paidAmount ?? 0)
+      const totalPrice = Number(p.price ?? p.totalPrice ?? 0)
+      const rawDepositPaidAmount = Number(p.depositPaidAmount ?? 0)
+      const legacyMethod = normalizeMethod(p.paymentMethod)
+      const rawDepositMethod = normalizeMethod(p.depositPaymentMethod)
+      const rawBalanceMethod = normalizeMethod(p.balancePaymentMethod)
+
+      let depositPaidAmount =
+        Number.isFinite(rawDepositPaidAmount) && rawDepositPaidAmount > 0
+          ? rawDepositPaidAmount
+          : (totalPaid > 0 && (p.paymentType === 'DEPOSIT' || p.paymentType === 'BALANCE' || !!p.rentalId)
+              ? Math.min(totalPaid, totalPrice > 0 ? totalPrice : totalPaid)
+              : 0)
+      depositPaidAmount = Math.min(Math.max(0, depositPaidAmount), Math.max(0, totalPaid))
+      const balancePaidAmount = Math.max(0, totalPaid - depositPaidAmount)
+
+      let depositMethod = rawDepositMethod || legacyMethod || 'CASH'
+      if (depositMethod === 'CASH' && legacyMethod && legacyMethod !== 'CASH') depositMethod = legacyMethod
+      const balanceMethod = rawBalanceMethod || depositMethod
+
+      const addIncoming = (method: string, amount: number) => {
+        const v = Number(amount || 0)
+        if (!Number.isFinite(v) || v <= 0) return
+        if (method === 'CASH') acc.cash.incoming += v
+        else acc.digital.incoming += v
+      }
+      addIncoming(depositMethod, depositPaidAmount)
+      addIncoming(balanceMethod, balancePaidAmount)
+
+      const notes = typeof p.notes === 'string' ? p.notes : ''
+      const re = /Rimborsato\s+€\s*([0-9]+(?:[.,][0-9]+)?)\s*\(([^)]+)\)/gi
+      let match: RegExpExecArray | null = null
+      while ((match = re.exec(notes)) !== null) {
+        const rawAmount = String(match[1] || '').replace(',', '.')
+        const amount = parseFloat(rawAmount)
+        const rawLabel = String(match[2] || '').trim().toLowerCase()
+        if (!Number.isFinite(amount) || amount <= 0) continue
+        if (rawLabel.includes('contant')) acc.cash.outgoing += amount
+        else if (rawLabel.includes('carta') || rawLabel.includes('bonifico') || rawLabel.includes('transfer')) acc.digital.outgoing += amount
+      }
+
+      return acc
+    },
+    { cash: { incoming: 0, outgoing: 0 }, digital: { incoming: 0, outgoing: 0 } }
+  )
 
   return (
   <div className="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
@@ -326,6 +385,8 @@ const RentalsTable = ({
           <span>Incassato (registrato): € {totalDeposit.toFixed(2)}</span>
           {totalTax > 0 && <span>Tasse: € {totalTax.toFixed(2)}</span>}
           <span>Operatori: € {totalAgentShare.toFixed(2)}</span>
+          <span>Contanti (E/U): € {paymentsByChannel.cash.incoming.toFixed(2)} / € {paymentsByChannel.cash.outgoing.toFixed(2)}</span>
+          <span>Pag. digitali (E/U): € {paymentsByChannel.digital.incoming.toFixed(2)} / € {paymentsByChannel.digital.outgoing.toFixed(2)}</span>
         </div>
       )}
     </div>
@@ -394,6 +455,28 @@ const RentalsTable = ({
                          <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
                        </div>
                      )}
+                     <div className="flex flex-col">
+                       <span className="text-xs text-gray-400">Metodi</span>
+                       {(() => {
+                         const methodLabel = (raw: any) => (String(raw || '').trim().toUpperCase() === 'CASH' ? 'Contanti' : 'Digitale')
+                         const depositMethod = methodLabel(p.depositPaymentMethod || p.paymentMethod || 'CASH')
+                         const balanceMethod =
+                           p.paymentType === 'BALANCE' ? methodLabel(p.balancePaymentMethod || p.depositPaymentMethod || p.paymentMethod || 'CASH') : null
+                         const outCash = Number(p.paymentsSummary?.outgoingCash || 0)
+                         const outDigital = Number(p.paymentsSummary?.outgoingDigital || 0)
+                         const refunds =
+                           outCash > 0.009 || outDigital > 0.009
+                             ? `${outCash > 0.009 ? `Rimb. Contanti € ${outCash.toFixed(2)}` : ''}${outCash > 0.009 && outDigital > 0.009 ? ' · ' : ''}${outDigital > 0.009 ? `Rimb. Digitale € ${outDigital.toFixed(2)}` : ''}`
+                             : ''
+                         return (
+                           <span className="text-xs text-gray-700">
+                             Acconto: <span className="font-semibold">{depositMethod}</span>
+                             {balanceMethod ? <> · Saldo: <span className="font-semibold">{balanceMethod}</span></> : null}
+                             {refunds ? <> · <span className="text-red-700">{refunds}</span></> : null}
+                           </span>
+                         )
+                       })()}
+                     </div>
                    </>
                  ) : (
                    <div className="text-xs text-gray-400">
@@ -520,6 +603,16 @@ export function RentalsList({
     onConfirm: () => {},
     variant: 'danger'
   })
+  const [settleBalanceModal, setSettleBalanceModal] = useState<{
+    isOpen: boolean
+    participant: any | null
+    method: 'CASH' | 'DIGITAL'
+  }>({
+    isOpen: false,
+    participant: null,
+    method: 'CASH'
+  })
+  const [settleBalanceLoading, setSettleBalanceLoading] = useState(false)
 
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean
@@ -737,74 +830,11 @@ export function RentalsList({
   }
 
   const handleSettleBalance = (p: any) => {
-    const remainingAmount = (p.price || 0) - (p.deposit || 0)
-    
-    setConfirmModal({
+    const currentDepositMethod = String(p.depositPaymentMethod || p.paymentMethod || 'CASH').trim().toUpperCase()
+    setSettleBalanceModal({
       isOpen: true,
-      title: 'Conferma Saldo',
-      message: `Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`,
-      variant: 'info',
-      onConfirm: async () => {
-        try {
-          // Generate updated PDF
-          const updatedParticipant = {
-            ...p,
-            paymentType: 'BALANCE',
-            deposit: p.price,
-            isOption: false
-          }
-
-          const eventData = {
-            type: 'RENTAL',
-            name: `Noleggio ${p.rentalType}`,
-            date: p.rentalStartDate,
-            pickupLocation: p.pickupLocation,
-            dropoffLocation: p.dropoffLocation
-          }
-
-          const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
-          const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
-
-          const res = await fetch(`/api/participants/${p.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...p,
-              paymentType: 'BALANCE',
-              deposit: p.price, // Set deposit to full price as it's fully paid
-              isOption: false,
-              pdfAttachment: pdfBase64
-            })
-          })
-
-          if (res.ok) {
-            fetchParticipants()
-            if (onUpdate) onUpdate()
-            setAlertModal({
-              isOpen: true,
-              title: 'Successo',
-              message: 'Saldo registrato con successo',
-              variant: 'success'
-            })
-          } else {
-             const data = await res.json()
-             setAlertModal({
-              isOpen: true,
-              title: 'Errore',
-              message: data.error || 'Errore durante la registrazione del saldo',
-              variant: 'danger'
-            })
-          }
-        } catch (error) {
-          console.error('Error settling balance:', error)
-          setAlertModal({
-            isOpen: true,
-            title: 'Errore',
-            message: 'Errore di connessione',
-            variant: 'danger'
-          })
-        }
-      }
+      participant: p,
+      method: currentDepositMethod === 'CASH' ? 'CASH' : 'DIGITAL'
     })
   }
 
@@ -815,8 +845,9 @@ export function RentalsList({
     try {
       const methodLabels: Record<string, string> = {
         CASH: 'Contanti',
-        TRANSFER: 'Bonifico',
-        CARD: 'Carta'
+        TRANSFER: 'Digitale',
+        CARD: 'Digitale',
+        DIGITAL: 'Digitale'
       }
 
       const refundNote = `[${new Date().toLocaleDateString()}] Rimborsato €${amount} (${methodLabels[method] || method}) - ${notes || ''}`
@@ -1095,6 +1126,159 @@ export function RentalsList({
         onConfirm={handleRefund}
         participant={participantToRefund}
       />
+
+      {settleBalanceModal.isOpen && settleBalanceModal.participant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-lg text-gray-900">Saldo</h3>
+              <button
+                onClick={() => setSettleBalanceModal({ isOpen: false, participant: null, method: 'CASH' })}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                disabled={settleBalanceLoading}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              <div className="text-sm text-gray-700">
+                {(() => {
+                  const p = settleBalanceModal.participant
+                  const remainingAmount = (p.price || 0) - (p.deposit || 0)
+                  return (
+                    <span>
+                      Confermi il saldo di <span className="font-semibold">€ {remainingAmount.toFixed(2)}</span> per{' '}
+                      <span className="font-semibold">{p.firstName} {p.lastName}</span>?
+                    </span>
+                  )
+                })()}
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-2">Metodo di pagamento saldo</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSettleBalanceModal(prev => ({ ...prev, method: 'CASH' }))}
+                    className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${settleBalanceModal.method === 'CASH' ? 'bg-green-50 border-green-500 text-green-700 ring-1 ring-green-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
+                    disabled={settleBalanceLoading}
+                  >
+                    <Banknote className="w-5 h-5" />
+                    <span className="text-xs font-bold">Contanti</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettleBalanceModal(prev => ({ ...prev, method: 'DIGITAL' }))}
+                    className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${settleBalanceModal.method === 'DIGITAL' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
+                    disabled={settleBalanceLoading}
+                  >
+                    <CreditCard className="w-5 h-5" />
+                    <span className="text-xs font-bold">Digitale</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => setSettleBalanceModal({ isOpen: false, participant: null, method: 'CASH' })}
+                  disabled={settleBalanceLoading}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  disabled={settleBalanceLoading}
+                  onClick={async () => {
+                    const p = settleBalanceModal.participant
+                    if (!p) return
+                    const remainingAmount = (p.price || 0) - (p.deposit || 0)
+                    setSettleBalanceLoading(true)
+                    try {
+                      const updatedParticipant = {
+                        ...p,
+                        paymentType: 'BALANCE',
+                        deposit: p.price,
+                        isOption: false,
+                        balancePaymentMethod: settleBalanceModal.method
+                      }
+
+                      const eventData = {
+                        type: 'RENTAL',
+                        name: `Noleggio ${(p as any).rentalType || ''}`.trim(),
+                        date: (p as any).rentalStartDate,
+                        pickupLocation: (p as any).pickupLocation,
+                        dropoffLocation: (p as any).dropoffLocation
+                      }
+
+                      const pdfDoc = generateParticipantPDF(updatedParticipant, eventData as any)
+                      const pdfBase64 = pdfDoc.output('datauristring').split(',')[1]
+
+                      const res = await fetch(`/api/participants/${p.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          ...p,
+                          paymentType: 'BALANCE',
+                          deposit: p.price,
+                          isOption: false,
+                          balancePaymentMethod: settleBalanceModal.method,
+                          pdfAttachment: pdfBase64
+                        })
+                      })
+
+                      if (res.ok) {
+                        setSettleBalanceModal({ isOpen: false, participant: null, method: 'CASH' })
+                        fetchParticipants()
+                        if (onUpdate) onUpdate()
+                        setAlertModal({
+                          isOpen: true,
+                          title: 'Successo',
+                          message: 'Saldo registrato con successo',
+                          variant: 'success'
+                        })
+                      } else {
+                        const data = await res.json()
+                        setAlertModal({
+                          isOpen: true,
+                          title: 'Errore',
+                          message: data.error || `Impossibile registrare il saldo di € ${remainingAmount.toFixed(2)}.`,
+                          variant: 'danger'
+                        })
+                      }
+                    } catch (error) {
+                      console.error('Error settling balance:', error)
+                      setAlertModal({
+                        isOpen: true,
+                        title: 'Errore',
+                        message: `Impossibile registrare il saldo di € ${remainingAmount.toFixed(2)}.`,
+                        variant: 'danger'
+                      })
+                    } finally {
+                      setSettleBalanceLoading(false)
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 font-medium shadow-sm"
+                >
+                  {settleBalanceLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Elaborazione...
+                    </>
+                  ) : (
+                    <>
+                      <Euro className="w-4 h-4" />
+                      Conferma
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       <DeleteChoiceModal 
         isOpen={showDeleteChoice}

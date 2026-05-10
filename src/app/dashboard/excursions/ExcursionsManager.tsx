@@ -74,6 +74,7 @@ export function ExcursionsManager({
   const [currentUserMeta, setCurrentUserMeta] = useState<{
     role: string
     isSpecialAssistant: boolean
+    agencyName: string | null
     agencyDefaultCommission: number | null
     agencyCommissionType: string | null
   } | null>(null)
@@ -159,6 +160,7 @@ export function ExcursionsManager({
           setCurrentUserMeta({
             role: String((data as any).role || userRole || ''),
             isSpecialAssistant: !!(data as any).isSpecialAssistant,
+            agencyName: (data as any).agencyName === null || typeof (data as any).agencyName === 'string' ? (data as any).agencyName : null,
             agencyDefaultCommission:
               (data as any).agencyDefaultCommission === null || typeof (data as any).agencyDefaultCommission === 'number'
                 ? (data as any).agencyDefaultCommission
@@ -1259,26 +1261,35 @@ export function ExcursionsManager({
                     </div>
                   )}
                   {/* Commission Display for Assistants */}
-                  {(
-                    (currentUserMeta?.role || userRole) !== 'ADMIN' ||
-                    (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant)
-                  ) && (
+                  {(() => {
+                    const role = String(currentUserMeta?.role || userRole || '').toUpperCase()
+                    const agencyNameLower = String(currentUserMeta?.agencyName || '').toLowerCase().trim()
+                    const isSpecial = (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true
+                    const isGo4Sea = agencyNameLower.includes('go4sea')
+                    const isCorfumania = role === 'ADMIN' || agencyNameLower.includes('corfumania')
+                    const label = isSpecial
+                      ? '10%'
+                      : isGo4Sea
+                        ? '5%'
+                        : isCorfumania
+                          ? '€ 1/pax'
+                          : (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== undefined &&
+                              (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== null
+                            ? `${currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission}${String(currentUserMeta?.agencyCommissionType ?? agencyCommissionType ?? 'PERCENTAGE') === 'FIXED' ? '€' : '%'}`
+                            : '-'
+                    if (!label || label === '-') return null
+                    return (
                      <div className="flex items-center gap-2 bg-emerald-50 px-3 py-2 rounded-lg text-emerald-800 border border-emerald-100">
                       <Euro className="w-4 h-4 text-emerald-600 shrink-0" />
                       <div className="flex flex-col">
                         <span className="text-xs text-emerald-600 font-semibold uppercase tracking-wide">La tua Commissione</span>
                         <span className="font-medium font-mono">
-                          {(currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant)
-                            ? '10%'
-                            : (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== undefined &&
-                                (currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission) !== null
-                              ? `${currentUserMeta?.agencyDefaultCommission ?? agencyDefaultCommission}${String(currentUserMeta?.agencyCommissionType ?? agencyCommissionType ?? 'PERCENTAGE') === 'FIXED' ? '€' : '%'}`
-                              : '-'
-                          }
+                          {label}
                         </span>
                       </div>
                     </div>
-                  )}
+                    )
+                  })()}
                   {userRole === 'ADMIN' && (selectedExcursion.totalCollected !== undefined) && (
                     <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
                       <Euro className="w-4 h-4 text-green-600 shrink-0" />

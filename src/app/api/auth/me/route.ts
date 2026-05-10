@@ -6,14 +6,7 @@ export const dynamic = 'force-dynamic'
 
 function computeIsSpecialAssistant(user: any, agencyName?: string | null): boolean {
   if (!user) return false
-  if (user.isSpecialAssistant) return true
-  if (String(user.role || '').toUpperCase() === 'ADMIN') return true
-  const normalizedAgency = String(agencyName || '').toLowerCase().trim()
-  if (normalizedAgency.includes('corfumania') || normalizedAgency.includes('go4sea')) return true
-  const haystack = `${user.firstName || ''} ${user.lastName || ''} ${user.email || ''} ${user.code || ''}`
-    .toLowerCase()
-    .trim()
-  return haystack.includes('speciale')
+  return user.isSpecialAssistant === true
 }
 
 export async function GET() {
@@ -43,6 +36,7 @@ export async function GET() {
     role: user?.role || session.user.role,
     isSpecialAssistant: computeIsSpecialAssistant(user, user?.agency?.name),
     explicitIsSpecialAssistant: Boolean(user?.isSpecialAssistant),
+    agencyName: user?.agency?.name ?? null,
     agencyDefaultCommission: user?.agency?.defaultCommission ?? null,
     agencyCommissionType: user?.agency?.commissionType ?? null,
   })

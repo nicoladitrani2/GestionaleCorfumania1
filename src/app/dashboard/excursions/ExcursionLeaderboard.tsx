@@ -81,17 +81,13 @@ export function ExcursionLeaderboard({ excursion, userRole }: ExcursionLeaderboa
 
       const stats = statsMap.get(ownerId)
 
-      // Calculate commission based on actual payment (deposit)
-      // If paymentType is BALANCE, deposit should be equal to price (full payment)
-      // If paymentType is DEPOSIT, deposit is the partial amount
-      // If REFUNDED, we skip (0 commission)
-      const amountPaid = p.deposit || 0
+      const amountBase = Number(p.price ?? p.totalPrice ?? 0)
       
-      stats.totalSales += amountPaid
+      stats.totalSales += amountBase
       stats.count += 1
 
       const tax = Number(p.tax || 0)
-      const commissionable = Math.max(0, amountPaid - tax)
+      const commissionable = Math.max(0, amountBase - tax)
       const pool = commissionable * 0.2
       const pax = Math.max(1, (p.adults || 0) + (p.children || 0) + (p.infants || 0))
 

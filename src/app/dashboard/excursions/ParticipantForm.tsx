@@ -208,6 +208,7 @@ export function ParticipantForm({
   useEffect(() => {
     if (!hasTierPricing) return
     if (!initialData) {
+      setTierInputs(prev => (Object.keys(prev).length > 0 ? prev : {}))
       setCountsByTier(prev => {
         if (Object.keys(prev).length > 0) return prev
         const tiers = priceTiers || []
@@ -221,18 +222,43 @@ export function ParticipantForm({
       return
     }
 
+    const tiers = priceTiers || []
     const raw = (initialData as any)?.countsByTier
-    if (!raw) return
-    try {
-      const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setCountsByTier(normalizeTierCounts(parsed as Record<string, number>))
+    const fallbackPreferred =
+      tiers.find(t => String(t.label || '').trim().toLowerCase() === 'adulti') ||
+      tiers.find(t => String(t.label || '').trim().toLowerCase().includes('adult')) ||
+      tiers[0]
+
+    let nextCounts: Record<string, number> | null = null
+    if (raw) {
+      try {
+        const parsed = typeof raw === 'string' ? JSON.parse(raw) : raw
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          nextCounts = normalizeTierCounts(parsed as Record<string, number>)
+        }
+      } catch {}
+    }
+
+    if (!nextCounts || Object.keys(nextCounts).length === 0) {
+      const adultsFallback = Math.max(1, Math.floor(Number((initialData as any)?.adults || 1)))
+      if (fallbackPreferred?.id) {
+        nextCounts = { [fallbackPreferred.id]: adultsFallback }
+      } else {
+        nextCounts = {}
       }
-    } catch {}
+    }
+
+    setCountsByTier(nextCounts)
+    setTierInputs(() => {
+      const next: Record<string, string> = {}
+      for (const t of tiers) next[t.id] = String(nextCounts?.[t.id] ?? 0)
+      return next
+    })
   }, [hasTierPricing, initialData, priceTiers])
 
   useEffect(() => {
     if (hasTierPricing) {
+      if (!initialData && Object.keys(countsByTier).length === 0) return
       const tiers = priceTiers || []
       setTierInputs(prev => {
         const next = { ...prev }
@@ -251,7 +277,7 @@ export function ParticipantForm({
       children: String(initialData?.children ?? formData.children ?? 0),
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasTierPricing, initialData?.id])
+  }, [hasTierPricing, initialData?.id, priceTiers, countsByTier])
 
   useEffect(() => {
     let cancelled = false
@@ -395,6 +421,13 @@ export function ParticipantForm({
   useEffect(() => {
     if (initialData) {
       const isStandard = NATIONALITIES.some(n => n.code === initialData.nationality)
+      const normalizeMethod = (raw: any) => {
+        const m = String(raw || '').trim().toUpperCase()
+        if (!m) return 'CASH'
+        if (m === 'CASH') return 'CASH'
+        if (m === 'DIGITAL' || m === 'CARD' || m === 'TRANSFER') return 'DIGITAL'
+        return 'DIGITAL'
+      }
       setFormData({
         firstName: initialData.firstName || '',
         lastName: initialData.lastName || '',
@@ -410,9 +443,9 @@ export function ParticipantForm({
         supplier: initialData.supplier || 'GO4SEA',
         isOption: initialData.isOption,
         paymentType: initialData.paymentType,
-        paymentMethod: initialData.paymentMethod,
-        depositPaymentMethod: initialData.depositPaymentMethod || initialData.paymentMethod || 'CASH',
-        balancePaymentMethod: initialData.balancePaymentMethod || '',
+        paymentMethod: normalizeMethod(initialData.paymentMethod),
+        depositPaymentMethod: normalizeMethod(initialData.depositPaymentMethod || initialData.paymentMethod || 'CASH'),
+        balancePaymentMethod: initialData.balancePaymentMethod ? normalizeMethod(initialData.balancePaymentMethod) : '',
         adults: initialData.adults ?? 1,
         children: initialData.children || 0,
         infants: initialData.infants || 0,
@@ -646,7 +679,7 @@ export function ParticipantForm({
       if (name === 'isOption') {
         if (checked) {
           newData.deposit = 0
-        } else if (prev.paymentType === 'BALANCE') {
+        } else if (!currentParticipantId && prev.paymentType === 'BALANCE') {
           // Se deseleziono Opzione e sono in Saldo, ripristina prezzo pieno
           newData.deposit = parseFloat(String(prev.price)) || 0
         }
@@ -666,17 +699,12 @@ export function ParticipantForm({
       }
 
       // Selezionato Saldo / Pagamento Completo: acconto = prezzo totale
-      if (name === 'paymentType' && value === 'BALANCE') {
-        newData.deposit = parseFloat(String(newData.price)) || 0
-      }
-
-      // Selezionato Contanti: imposta acconto = prezzo totale (solo se era Saldo)
-      if (name === 'paymentMethod' && value === 'CASH' && prev.paymentType === 'BALANCE') {
+      if (!currentParticipantId && name === 'paymentType' && value === 'BALANCE') {
         newData.deposit = parseFloat(String(newData.price)) || 0
       }
 
       // Se cambia il prezzo e siamo in Saldo, aggiorna acconto
-      if (name === 'price' && prev.paymentType === 'BALANCE' && !prev.isOption) {
+      if (!currentParticipantId && name === 'price' && prev.paymentType === 'BALANCE' && !prev.isOption) {
         newData.deposit = parseFloat(value) || 0
       }
       
@@ -1886,8 +1914,7 @@ export function ParticipantForm({
                                       className={inputClassName}
                                     >
                                       <option value="CASH">Contanti</option>
-                                      <option value="CARD">Carta</option>
-                                      <option value="TRANSFER">Bonifico</option>
+                                      <option value="DIGITAL">Digitale</option>
                                   </select>
                               </div>
 
@@ -1902,8 +1929,7 @@ export function ParticipantForm({
                                       >
                                           <option value="">-- Stesso --</option>
                                           <option value="CASH">Contanti</option>
-                                          <option value="CARD">Carta</option>
-                                          <option value="TRANSFER">Bonifico</option>
+                                          <option value="DIGITAL">Digitale</option>
                                       </select>
                                   </div>
                               )}

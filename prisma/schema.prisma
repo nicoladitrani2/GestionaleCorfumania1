@@ -198,7 +198,10 @@ model Participant {
   countsByTier          Json?
   totalPrice            Float
   paidAmount            Float
+  depositPaidAmount     Float    @default(0)
   paymentMethod         String
+  depositPaymentMethod  String   @default("CASH")
+  balancePaymentMethod  String?
   paymentStatus         String   // PENDING, PAID, PARTIAL
   status                String   // ACTIVE, CANCELLED, REFUNDED
   notes                 String?
@@ -232,6 +235,7 @@ model Participant {
   client                Client?   @relation(fields: [clientId], references: [id])
   assignedToId          String?
   assignedTo            User?    @relation("AssignedParticipants", fields: [assignedToId], references: [id])
+  paymentEvents         ParticipantPaymentEvent[]
 
   // Campi specifici per i noleggi
   rentalType             String?
@@ -254,6 +258,22 @@ model Participant {
   dateOfBirth           DateTime?
   docNumber             String?
   docType               String?
+}
+
+model ParticipantPaymentEvent {
+  id            String   @id @default(cuid())
+  participantId String
+  direction     String   // IN, OUT
+  method        String   // CASH, DIGITAL (legacy: CARD/TRANSFER treated as DIGITAL)
+  kind          String   // DEPOSIT, BALANCE, REFUND
+  amount        Float
+  notes         String?
+  createdAt     DateTime @default(now())
+
+  participant   Participant @relation(fields: [participantId], references: [id], onDelete: Cascade)
+
+  @@index([participantId, createdAt])
+  @@index([direction, method])
 }
 
 model Client {

@@ -192,6 +192,15 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
   const participant = await prisma.participant.findUnique({
     where: { id },
     include: {
+      paymentEvents: {
+        select: {
+          direction: true,
+          method: true,
+          kind: true,
+          amount: true,
+          createdAt: true,
+        }
+      },
       client: {
         select: {
           firstName: true,
@@ -429,12 +438,22 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const finalPaymentType = body.paymentType || participant.paymentType || 'BALANCE'
     const finalTotalPrice = body.price !== undefined ? parseFloat(String(body.price)) : participant.totalPrice
-    const finalDeposit = body.deposit !== undefined ? parseFloat(String(body.deposit)) : participant.paidAmount
+
+    const participantDepositPaidAmountRaw =
+      typeof (participant as any).depositPaidAmount === 'number' ? ((participant as any).depositPaidAmount as number) : 0
+    const participantPaidAmountRaw = typeof participant.paidAmount === 'number' ? participant.paidAmount : 0
+    const baseDepositPaidAmount =
+      participantDepositPaidAmountRaw > 0
+        ? participantDepositPaidAmountRaw
+        : ((participant.paymentType === 'DEPOSIT' || !!participant.rentalId) && participantPaidAmountRaw > 0 ? participantPaidAmountRaw : 0)
+    const bodyDepositRaw = body.deposit !== undefined ? parseFloat(String(body.deposit)) : undefined
+    const bodyDepositPaidAmount = bodyDepositRaw !== undefined && Number.isFinite(bodyDepositRaw) ? bodyDepositRaw : undefined
 
     let approvalStatus = body.approvalStatus || undefined
     let originalPrice: number | null = null
     let paymentStatus = participant.paymentStatus
     let paidAmount = participant.paidAmount
+    let depositPaidAmount = baseDepositPaidAmount
 
     if (approvalStatus === 'REJECTED') {
       paymentStatus = 'REJECTED'
@@ -504,11 +523,23 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       if (finalPaymentType === 'BALANCE') {
         paidAmount = finalTotalPrice
         paymentStatus = 'PAID'
+        const desired =
+          participant.paymentType === 'DEPOSIT' && bodyDepositPaidAmount !== undefined && bodyDepositPaidAmount < finalTotalPrice - 0.01
+            ? bodyDepositPaidAmount
+            : baseDepositPaidAmount > 0
+              ? baseDepositPaidAmount
+              : participantPaidAmountRaw > 0
+                ? participantPaidAmountRaw
+                : finalTotalPrice
+        depositPaidAmount = Math.min(Math.max(0, desired), Math.max(0, finalTotalPrice))
       } else if (finalPaymentType === 'DEPOSIT') {
-        paidAmount = finalDeposit
-        paymentStatus = finalDeposit >= finalTotalPrice - 0.01 ? 'PAID' : 'PARTIAL'
+        const desired = bodyDepositPaidAmount !== undefined ? bodyDepositPaidAmount : baseDepositPaidAmount
+        depositPaidAmount = Math.min(Math.max(0, desired), Math.max(0, finalTotalPrice))
+        paidAmount = depositPaidAmount
+        paymentStatus = depositPaidAmount >= finalTotalPrice - 0.01 ? 'PAID' : 'PARTIAL'
       } else if (finalPaymentType === 'OPTION') {
         paidAmount = 0
+        depositPaidAmount = 0
         paymentStatus = 'PENDING'
       }
     }
@@ -534,6 +565,16 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
 
     const ticketNumberValue = encodeDocumentInfo(body.docType, body.docNumber)
 
+    const nextDepositPaymentMethod = (body.depositPaymentMethod ?? body.paymentMethod ?? participant.depositPaymentMethod ?? participant.paymentMethod ?? 'CASH') as string
+    const rawNextBalancePaymentMethod =
+      finalPaymentType === 'BALANCE'
+        ? (body.balancePaymentMethod !== undefined ? body.balancePaymentMethod : (participant as any).balancePaymentMethod)
+        : null
+    const nextBalancePaymentMethod =
+      rawNextBalancePaymentMethod && String(rawNextBalancePaymentMethod).trim().length > 0
+        ? String(rawNextBalancePaymentMethod).trim()
+        : null
+
     const updated = await prisma.participant.update({
       where: { id },
       data: {
@@ -554,7 +595,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           notes: body.notes ?? participant.notes,
           supplier: body.supplier ?? participant.supplier,
           paymentType: finalPaymentType,
-          paymentMethod: body.paymentMethod ?? participant.paymentMethod,
+          paymentMethod: nextDepositPaymentMethod,
+          depositPaymentMethod: nextDepositPaymentMethod,
+          balancePaymentMethod: nextBalancePaymentMethod,
           pickupLocation: body.pickupLocation ?? participant.pickupLocation,
           pickupTime: body.pickupTime ?? participant.pickupTime,
           dropoffLocation: body.dropoffLocation ?? participant.dropoffLocation,
@@ -580,9 +623,45 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           commissionPercentage: body.commissionPercentage !== undefined ? body.commissionPercentage : participant.commissionPercentage,
         }),
         paidAmount,
+        depositPaidAmount,
         paymentStatus,
       }
     })
+
+    const bucket = (raw: any): 'CASH' | 'DIGITAL' => {
+      const m = String(raw || '').trim().toUpperCase()
+      return m === 'CASH' ? 'CASH' : 'DIGITAL'
+    }
+    const oldDepositPaidAmount = Math.max(0, Number(baseDepositPaidAmount || 0))
+    const oldTotalPaidAmount = Math.max(0, Number(participantPaidAmountRaw || 0))
+    const newDepositPaidAmount = Math.max(0, Number(depositPaidAmount || 0))
+    const newTotalPaidAmount = Math.max(0, Number(paidAmount || 0))
+
+    const depositDelta = newDepositPaidAmount - oldDepositPaidAmount
+    const balanceDelta = newTotalPaidAmount - oldTotalPaidAmount
+
+    const eventsToCreate: Array<{ direction: string; method: string; kind: string; amount: number }> = []
+    if (finalPaymentType === 'DEPOSIT' && depositDelta > 0.009) {
+      eventsToCreate.push({
+        direction: 'IN',
+        method: bucket(nextDepositPaymentMethod),
+        kind: 'DEPOSIT',
+        amount: depositDelta,
+      })
+    }
+    if (finalPaymentType === 'BALANCE' && balanceDelta > 0.009) {
+      eventsToCreate.push({
+        direction: 'IN',
+        method: bucket(nextBalancePaymentMethod || nextDepositPaymentMethod),
+        kind: 'BALANCE',
+        amount: balanceDelta,
+      })
+    }
+    if (eventsToCreate.length > 0) {
+      await prisma.participantPaymentEvent.createMany({
+        data: eventsToCreate.map(e => ({ ...e, participantId: id }))
+      })
+    }
 
     const notifyAdminUserIds = Array.isArray(body.notifyAdminUserIds)
       ? body.notifyAdminUserIds.map((x: any) => String(x)).filter(Boolean)
@@ -706,8 +785,12 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     if (body.price !== undefined && body.price !== participant.totalPrice) {
       changes.push(`Prezzo: €${participant.totalPrice} -> €${body.price}`)
     }
-    if (body.deposit !== undefined && body.deposit !== participant.paidAmount) {
-      changes.push(`Acconto: €${participant.paidAmount} -> €${body.deposit}`)
+    const participantDepositForLog =
+      typeof (participant as any).depositPaidAmount === 'number'
+        ? ((participant as any).depositPaidAmount as number)
+        : participant.paidAmount
+    if (body.deposit !== undefined && body.deposit !== participantDepositForLog) {
+      changes.push(`Acconto: €${participantDepositForLog} -> €${body.deposit}`)
     }
     if (body.supplier !== undefined && body.supplier !== participant.supplier) {
       changes.push(`Fornitore: ${participant.supplier || 'Nessuno'} -> ${body.supplier}`)
@@ -715,8 +798,9 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
     // Helper maps for translation
     const paymentMethodMap: Record<string, string> = {
       'CASH': 'Contanti',
-      'TRANSFER': 'Bonifico',
-      'CARD': 'Carta'
+      'DIGITAL': 'Digitale',
+      'TRANSFER': 'Digitale',
+      'CARD': 'Digitale'
     }
     const paymentTypeMap: Record<string, string> = {
       'DEPOSIT': 'Acconto',
@@ -728,10 +812,19 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
       const newType = body.paymentType ? (paymentTypeMap[body.paymentType] || body.paymentType) : 'N/A'
       changes.push(`Tipo Pagamento: ${oldType} -> ${newType}`)
     }
-    if (body.paymentMethod !== undefined && body.paymentMethod !== participant.paymentMethod) {
-      const oldMethod = participant.paymentMethod ? (paymentMethodMap[participant.paymentMethod] || participant.paymentMethod) : 'N/A'
-      const newMethod = body.paymentMethod ? (paymentMethodMap[body.paymentMethod] || body.paymentMethod) : 'N/A'
-      changes.push(`Metodo: ${oldMethod} -> ${newMethod}`)
+    const participantDepositMethodForLog =
+      (participant as any).depositPaymentMethod ? String((participant as any).depositPaymentMethod) : (participant.paymentMethod || '')
+    if (body.depositPaymentMethod !== undefined && body.depositPaymentMethod !== participantDepositMethodForLog) {
+      const oldMethod = participantDepositMethodForLog ? (paymentMethodMap[participantDepositMethodForLog] || participantDepositMethodForLog) : 'N/A'
+      const newMethod = body.depositPaymentMethod ? (paymentMethodMap[body.depositPaymentMethod] || body.depositPaymentMethod) : 'N/A'
+      changes.push(`Metodo (Acconto/Unico): ${oldMethod} -> ${newMethod}`)
+    }
+    const participantBalanceMethodForLog =
+      (participant as any).balancePaymentMethod ? String((participant as any).balancePaymentMethod) : ''
+    if (body.balancePaymentMethod !== undefined && body.balancePaymentMethod !== participantBalanceMethodForLog) {
+      const oldMethod = participantBalanceMethodForLog ? (paymentMethodMap[participantBalanceMethodForLog] || participantBalanceMethodForLog) : '-- Stesso --'
+      const newMethod = body.balancePaymentMethod ? (paymentMethodMap[body.balancePaymentMethod] || body.balancePaymentMethod) : '-- Stesso --'
+      changes.push(`Metodo (Saldo): ${oldMethod} -> ${newMethod}`)
     }
     if (body.notes !== undefined && body.notes !== participant.notes) {
       changes.push(`Note modificate`)

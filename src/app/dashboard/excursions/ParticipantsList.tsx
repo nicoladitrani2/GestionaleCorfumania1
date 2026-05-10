@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useRef } from 'react'
-import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, Euro, Eye, RotateCcw } from 'lucide-react'
+import { Edit, Trash2, User, Users, Globe, FileText, Phone, CreditCard, CheckCircle, AlertCircle, Clock, FileDown, Euro, Eye, RotateCcw, X, Banknote } from 'lucide-react'
 import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 import { generateParticipantPDF, generateParticipantsListPDF } from '@/lib/pdf-generator'
@@ -141,6 +141,11 @@ interface ParticipantsTableProps {
             </th>
             <th className={thClassName}>
               <div className="flex items-center gap-2">
+                <CreditCard className="w-4 h-4" /> Metodi
+              </div>
+            </th>
+            <th className={thClassName}>
+              <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4" /> Stato
               </div>
             </th>
@@ -201,6 +206,27 @@ interface ParticipantsTableProps {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">€ {p.price?.toFixed(2) || '0.00'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">€ {p.deposit?.toFixed(2) || '0.00'}</td>
+                <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-600">
+                  {(() => {
+                    const methodLabel = (raw: any) => (String(raw || '').trim().toUpperCase() === 'CASH' ? 'Contanti' : 'Digitale')
+                    const depositMethod = methodLabel(p.depositPaymentMethod || p.paymentMethod || 'CASH')
+                    const balanceMethod =
+                      p.paymentType === 'BALANCE' ? methodLabel(p.balancePaymentMethod || p.depositPaymentMethod || p.paymentMethod || 'CASH') : null
+                    const outCash = Number(p.paymentsSummary?.outgoingCash || 0)
+                    const outDigital = Number(p.paymentsSummary?.outgoingDigital || 0)
+                    const refunds =
+                      outCash > 0.009 || outDigital > 0.009
+                        ? `Rimborsi: ${outCash > 0.009 ? `Contanti € ${outCash.toFixed(2)}` : ''}${outCash > 0.009 && outDigital > 0.009 ? ' · ' : ''}${outDigital > 0.009 ? `Digitale € ${outDigital.toFixed(2)}` : ''}`
+                        : ''
+                    return (
+                      <div className="flex flex-col gap-0.5">
+                        <span>Acconto: <span className="font-semibold">{depositMethod}</span></span>
+                        {balanceMethod && <span>Saldo: <span className="font-semibold">{balanceMethod}</span></span>}
+                        {refunds && <span className="text-red-700">{refunds}</span>}
+                      </div>
+                    )
+                  })()}
+                </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <span className={`px-2.5 py-1 inline-flex items-center text-xs font-medium rounded-full border ${getStatusColor(p)}`}>
                     {getStatusIcon(p)}
@@ -265,7 +291,7 @@ interface ParticipantsTableProps {
           })}
           {data.length === 0 && (
             <tr>
-              <td colSpan={10} className="px-6 py-12 text-center text-sm text-gray-500">
+              <td colSpan={11} className="px-6 py-12 text-center text-sm text-gray-500">
                 <div className="flex flex-col items-center gap-3">
                   <div className="p-3 bg-gray-50 rounded-full">
                     <User className="w-6 h-6 text-gray-400" />
@@ -453,6 +479,16 @@ export function ParticipantsList({
     variant: 'info',
     onConfirm: () => {}
   })
+  const [settleBalanceModal, setSettleBalanceModal] = useState<{
+    isOpen: boolean
+    participant: any | null
+    method: 'CASH' | 'DIGITAL'
+  }>({
+    isOpen: false,
+    participant: null,
+    method: 'CASH'
+  })
+  const [settleBalanceLoading, setSettleBalanceLoading] = useState(false)
   const [alertModal, setAlertModal] = useState<{
     isOpen: boolean
     title: string
@@ -531,6 +567,79 @@ export function ParticipantsList({
   const refundedParticipants = participants.filter(p => p.paymentType === 'REFUNDED')
   
   const confirmedParticipants = participants.filter(p => p.paymentType === 'BALANCE')
+
+  const paymentsByChannel = (() => {
+    const acc = { cash: { incoming: 0, outgoing: 0 }, digital: { incoming: 0, outgoing: 0 } }
+    const normalizeMethod = (raw: any) => String(raw || '').trim().toUpperCase()
+    const addIncoming = (method: string, amount: number) => {
+      const v = Number(amount || 0)
+      if (!Number.isFinite(v) || v <= 0) return
+      if (method === 'CASH') acc.cash.incoming += v
+      else acc.digital.incoming += v
+    }
+    const addOutgoing = (method: string, amount: number) => {
+      const v = Number(amount || 0)
+      if (!Number.isFinite(v) || v <= 0) return
+      if (method === 'CASH') acc.cash.outgoing += v
+      else acc.digital.outgoing += v
+    }
+
+    for (const p of participants) {
+      const approval = getApproval(p)
+      if (approval === 'REJECTED' || approval === 'PENDING') continue
+      if (p.paymentType === 'OPTION' || p.isOption) continue
+      if (p.paymentStatus === 'PENDING_APPROVAL' || p.paymentStatus === 'REJECTED') continue
+
+      if (p.paymentsSummary) {
+        const inCash = Number(p.paymentsSummary.incomingCash || 0)
+        const inDigital = Number(p.paymentsSummary.incomingDigital || 0)
+        const outCash = Number(p.paymentsSummary.outgoingCash || 0)
+        const outDigital = Number(p.paymentsSummary.outgoingDigital || 0)
+        if (Number.isFinite(inCash)) acc.cash.incoming += inCash
+        if (Number.isFinite(inDigital)) acc.digital.incoming += inDigital
+        if (Number.isFinite(outCash)) acc.cash.outgoing += outCash
+        if (Number.isFinite(outDigital)) acc.digital.outgoing += outDigital
+        continue
+      }
+
+      const totalPaid = Number(p.deposit ?? p.paidAmount ?? 0)
+      const totalPrice = Number(p.price ?? p.totalPrice ?? 0)
+      const rawDepositPaidAmount = Number(p.depositPaidAmount ?? 0)
+      const legacyMethod = normalizeMethod(p.paymentMethod)
+      const rawDepositMethod = normalizeMethod(p.depositPaymentMethod)
+      const rawBalanceMethod = normalizeMethod(p.balancePaymentMethod)
+
+      let depositPaidAmount =
+        Number.isFinite(rawDepositPaidAmount) && rawDepositPaidAmount > 0
+          ? rawDepositPaidAmount
+          : (totalPaid > 0 && (p.paymentType === 'DEPOSIT' || p.paymentType === 'BALANCE' || !!p.rentalId)
+              ? Math.min(totalPaid, totalPrice > 0 ? totalPrice : totalPaid)
+              : 0)
+      depositPaidAmount = Math.min(Math.max(0, depositPaidAmount), Math.max(0, totalPaid))
+      const balancePaidAmount = Math.max(0, totalPaid - depositPaidAmount)
+
+      let depositMethod = rawDepositMethod || legacyMethod || 'CASH'
+      if (depositMethod === 'CASH' && legacyMethod && legacyMethod !== 'CASH') depositMethod = legacyMethod
+      const balanceMethod = rawBalanceMethod || depositMethod
+
+      addIncoming(depositMethod, depositPaidAmount)
+      addIncoming(balanceMethod, balancePaidAmount)
+
+      const notes = typeof p.notes === 'string' ? p.notes : ''
+      const re = /Rimborsato\s+€\s*([0-9]+(?:[.,][0-9]+)?)\s*\(([^)]+)\)/gi
+      let match: RegExpExecArray | null = null
+      while ((match = re.exec(notes)) !== null) {
+        const rawAmount = String(match[1] || '').replace(',', '.')
+        const amount = parseFloat(rawAmount)
+        const rawLabel = String(match[2] || '').trim().toLowerCase()
+        if (!Number.isFinite(amount) || amount <= 0) continue
+        if (rawLabel.includes('contant')) addOutgoing('CASH', amount)
+        else if (rawLabel.includes('carta') || rawLabel.includes('bonifico') || rawLabel.includes('transfer')) addOutgoing('DIGITAL', amount)
+      }
+    }
+
+    return acc
+  })()
 
   const maxParticipants = typeof excursion?.maxParticipants === 'number' ? excursion.maxParticipants : null
   const occupiedPax =
@@ -623,59 +732,11 @@ export function ParticipantsList({
   }
 
   const handleSettleBalance = async (p: any) => {
-    const remainingAmount = (p.price || 0) - (p.deposit || 0)
-    setConfirmModal({
+    const currentDepositMethod = String(p.depositPaymentMethod || p.paymentMethod || 'CASH').trim().toUpperCase()
+    setSettleBalanceModal({
       isOpen: true,
-      title: 'Conferma Saldo',
-      message: `Confermi il saldo di € ${remainingAmount.toFixed(2)} per ${p.firstName} ${p.lastName}?`,
-      variant: 'info',
-      onConfirm: async () => {
-        try {
-          // Generate updated PDFs
-          const updatedParticipant = {
-            ...p,
-            paymentType: 'BALANCE',
-            deposit: p.price,
-            isOption: false
-          }
-
-          const eventData = {
-            type: 'EXCURSION',
-            name: excursionName,
-            date: excursionDate
-          }
-
-          // Generate Italian PDF
-          const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
-          const pdfBlobIT = docIT.output('blob')
-          const pdfBase64IT = await blobToBase64(pdfBlobIT)
-
-          // Generate English PDF
-          const docEN = generateParticipantPDF(updatedParticipant, eventData as any, 'en')
-          const pdfBlobEN = docEN.output('blob')
-          const pdfBase64EN = await blobToBase64(pdfBlobEN)
-
-          const res = await fetch(`/api/participants/${p.id}`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...p,
-              paymentType: 'BALANCE',
-              deposit: p.price,
-              isOption: false,
-              pdfAttachmentIT: pdfBase64IT,
-              pdfAttachmentEN: pdfBase64EN
-            })
-          })
-
-          if (res.ok) {
-            fetchParticipants()
-            if (onUpdate) onUpdate()
-          }
-        } catch (error) {
-          console.error('Error settling balance:', error)
-        }
-      }
+      participant: p,
+      method: currentDepositMethod === 'CASH' ? 'CASH' : 'DIGITAL'
     })
   }
 
@@ -687,8 +748,9 @@ export function ParticipantsList({
       if (participant) {
         const methodLabels: Record<string, string> = {
           'CASH': 'Contanti',
-          'TRANSFER': 'Bonifico',
-          'CARD': 'Carta'
+          'TRANSFER': 'Digitale',
+          'CARD': 'Digitale',
+          'DIGITAL': 'Digitale'
         }
         
         const refundNote = `[${new Date().toLocaleDateString()}] Rimborsato €${amount} (${methodLabels[method] || method}) - ${notes || ''}`
@@ -816,6 +878,52 @@ export function ParticipantsList({
         <div className="flex items-center gap-1"><Edit className="w-4 h-4 text-indigo-600" /> Modifica</div>
         <div className="flex items-center gap-1"><RotateCcw className="w-4 h-4 text-orange-600" /> Rimborso</div>
         <div className="flex items-center gap-1"><Trash2 className="w-4 h-4 text-red-600" /> Elimina</div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">Contanti</div>
+              <div className="text-xs text-gray-500">Entrate / Uscite</div>
+            </div>
+            <div className="p-2 rounded-lg bg-sky-50">
+              <CreditCard className="w-5 h-5 text-sky-600" />
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-4 font-mono">
+            <div>
+              <div className="text-xs text-gray-500">Entrate</div>
+              <div className="text-base font-bold text-green-700">€ {paymentsByChannel.cash.incoming.toFixed(2)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Uscite</div>
+              <div className="text-base font-bold text-red-700">€ {paymentsByChannel.cash.outgoing.toFixed(2)}</div>
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <div className="text-sm font-semibold text-gray-800">Pagamenti digitali</div>
+              <div className="text-xs text-gray-500">Digitale · Entrate / Uscite</div>
+            </div>
+            <div className="p-2 rounded-lg bg-emerald-50">
+              <Euro className="w-5 h-5 text-emerald-600" />
+            </div>
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-4 font-mono">
+            <div>
+              <div className="text-xs text-gray-500">Entrate</div>
+              <div className="text-base font-bold text-green-700">€ {paymentsByChannel.digital.incoming.toFixed(2)}</div>
+            </div>
+            <div>
+              <div className="text-xs text-gray-500">Uscite</div>
+              <div className="text-base font-bold text-red-700">€ {paymentsByChannel.digital.outgoing.toFixed(2)}</div>
+            </div>
+          </div>
+        </div>
       </div>
 
       {pendingParticipants.length > 0 && (
@@ -1002,6 +1110,156 @@ export function ParticipantsList({
         participant={participantToRefund}
         onConfirm={handleRefund}
       />
+
+      {settleBalanceModal.isOpen && settleBalanceModal.participant && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in duration-200 flex flex-col max-h-[90vh]">
+            <div className="p-6 border-b border-gray-100 flex justify-between items-center shrink-0">
+              <h3 className="font-bold text-lg text-gray-900">Saldo</h3>
+              <button
+                onClick={() => setSettleBalanceModal({ isOpen: false, participant: null, method: 'CASH' })}
+                className="text-gray-400 hover:text-gray-600 transition-colors"
+                disabled={settleBalanceLoading}
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-5 overflow-y-auto">
+              <div className="text-sm text-gray-700">
+                {(() => {
+                  const p = settleBalanceModal.participant
+                  const remainingAmount = (p.price || 0) - (p.deposit || 0)
+                  return (
+                    <span>
+                      Confermi il saldo di <span className="font-semibold">€ {remainingAmount.toFixed(2)}</span> per{' '}
+                      <span className="font-semibold">{p.firstName} {p.lastName}</span>?
+                    </span>
+                  )
+                })()}
+              </div>
+
+              <div>
+                <label className="block text-sm font-bold text-gray-900 mb-2">Metodo di pagamento saldo</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setSettleBalanceModal(prev => ({ ...prev, method: 'CASH' }))}
+                    className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${settleBalanceModal.method === 'CASH' ? 'bg-green-50 border-green-500 text-green-700 ring-1 ring-green-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
+                    disabled={settleBalanceLoading}
+                  >
+                    <Banknote className="w-5 h-5" />
+                    <span className="text-xs font-bold">Contanti</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSettleBalanceModal(prev => ({ ...prev, method: 'DIGITAL' }))}
+                    className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${settleBalanceModal.method === 'DIGITAL' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
+                    disabled={settleBalanceLoading}
+                  >
+                    <CreditCard className="w-5 h-5" />
+                    <span className="text-xs font-bold">Digitale</span>
+                  </button>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-4 border-t">
+                <button
+                  type="button"
+                  onClick={() => setSettleBalanceModal({ isOpen: false, participant: null, method: 'CASH' })}
+                  disabled={settleBalanceLoading}
+                  className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors font-medium"
+                >
+                  Annulla
+                </button>
+                <button
+                  type="button"
+                  disabled={settleBalanceLoading}
+                  onClick={async () => {
+                    const p = settleBalanceModal.participant
+                    if (!p) return
+                    const remainingAmount = (p.price || 0) - (p.deposit || 0)
+                    setSettleBalanceLoading(true)
+                    try {
+                      const updatedParticipant = {
+                        ...p,
+                        paymentType: 'BALANCE',
+                        deposit: p.price,
+                        isOption: false,
+                        balancePaymentMethod: settleBalanceModal.method
+                      }
+
+                      const eventData = {
+                        type: 'EXCURSION',
+                        name: excursionName,
+                        date: excursionDate
+                      }
+
+                      const docIT = generateParticipantPDF(updatedParticipant, eventData as any, 'it')
+                      const pdfBlobIT = docIT.output('blob')
+                      const pdfBase64IT = await blobToBase64(pdfBlobIT)
+
+                      const docEN = generateParticipantPDF(updatedParticipant, eventData as any, 'en')
+                      const pdfBlobEN = docEN.output('blob')
+                      const pdfBase64EN = await blobToBase64(pdfBlobEN)
+
+                      const res = await fetch(`/api/participants/${p.id}`, {
+                        method: 'PUT',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          ...p,
+                          paymentType: 'BALANCE',
+                          deposit: p.price,
+                          isOption: false,
+                          balancePaymentMethod: settleBalanceModal.method,
+                          pdfAttachmentIT: pdfBase64IT,
+                          pdfAttachmentEN: pdfBase64EN
+                        })
+                      })
+
+                      if (res.ok) {
+                        setSettleBalanceModal({ isOpen: false, participant: null, method: 'CASH' })
+                        fetchParticipants()
+                        if (onUpdate) onUpdate()
+                      } else {
+                        setAlertModal({
+                          isOpen: true,
+                          title: 'Errore',
+                          message: `Impossibile registrare il saldo di € ${remainingAmount.toFixed(2)}.`,
+                          variant: 'danger'
+                        })
+                      }
+                    } catch (error) {
+                      console.error('Error settling balance:', error)
+                      setAlertModal({
+                        isOpen: true,
+                        title: 'Errore',
+                        message: `Impossibile registrare il saldo di € ${remainingAmount.toFixed(2)}.`,
+                        variant: 'danger'
+                      })
+                    } finally {
+                      setSettleBalanceLoading(false)
+                    }
+                  }}
+                  className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center gap-2 font-medium shadow-sm"
+                >
+                  {settleBalanceLoading ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                      Elaborazione...
+                    </>
+                  ) : (
+                    <>
+                      <Euro className="w-4 h-4" />
+                      Conferma
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showExportModal && (
         <ExportParticipantsModal

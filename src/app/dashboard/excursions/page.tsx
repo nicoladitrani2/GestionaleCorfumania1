@@ -25,14 +25,9 @@ export default async function ExcursionsPage() {
       }
     }
   })
-  const agencyNameLower = String(user?.agency?.name || '').toLowerCase().trim()
-  const isSpecialAssistant =
-    !!user?.isSpecialAssistant ||
-    session.user.role === 'ADMIN' ||
-    agencyNameLower.includes('corfumania') ||
-    agencyNameLower.includes('go4sea')
-  const effectiveAgencyDefaultCommission = isSpecialAssistant ? 10 : user?.agency?.defaultCommission
-  const effectiveAgencyCommissionType = isSpecialAssistant ? 'PERCENTAGE' : user?.agency?.commissionType
+  const isSpecialAssistant = !!user?.isSpecialAssistant
+  const effectiveAgencyDefaultCommission = user?.agency?.defaultCommission
+  const effectiveAgencyCommissionType = user?.agency?.commissionType
 
   return (
     <div className="p-6">

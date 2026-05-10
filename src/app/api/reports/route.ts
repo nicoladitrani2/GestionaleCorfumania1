@@ -6,14 +6,7 @@ export const dynamic = 'force-dynamic'
 
 function computeIsSpecialAssistant(user: any, agencyName?: string | null): boolean {
   if (!user) return false
-  if (user.isSpecialAssistant) return true
-  if (String(user.role || '').toUpperCase() === 'ADMIN') return true
-  const normalizedAgency = String(agencyName || '').toLowerCase().trim()
-  if (normalizedAgency.includes('corfumania') || normalizedAgency.includes('go4sea')) return true
-  const haystack = `${user.firstName || ''} ${user.lastName || ''} ${user.email || ''} ${user.code || ''}`
-    .toLowerCase()
-    .trim()
-  return haystack.includes('speciale')
+  return user.isSpecialAssistant === true
 }
 
 export async function GET(request: Request) {
@@ -103,6 +96,7 @@ export async function GET(request: Request) {
     const rawParticipants = await prisma.participant.findMany({
       where: whereClause,
       include: {
+        paymentEvents: true,
         user: true,
         assignedTo: true,
         excursion: true,
@@ -175,6 +169,7 @@ export async function GET(request: Request) {
     let totalExternalAgencyCommission = 0
     let totalPax = 0
     let totalTax = 0
+    let includedCount = 0
 
     let rentalsGross = 0
     let rentalsSupplierOut = 0
@@ -205,29 +200,240 @@ export async function GET(request: Request) {
     const rentalsPaymentByMethod: Record<string, { name: string, revenue: number, count: number }> = {}
     const bySpecialService: Record<string, { name: string, revenue: number, commission: number, agencyBreakdown: Record<string, number>, count: number, pax: number }> = {}
 
+    const paymentsByChannel: {
+      cash: { incoming: number; outgoing: number; incomingCount: number; outgoingCount: number }
+      digital: { incoming: number; outgoing: number; incomingCount: number; outgoingCount: number }
+    } = {
+      cash: { incoming: 0, outgoing: 0, incomingCount: 0, outgoingCount: 0 },
+      digital: { incoming: 0, outgoing: 0, incomingCount: 0, outgoingCount: 0 },
+    }
+
+    const normalizeMethod = (raw: any): string => String(raw || '').trim().toUpperCase()
+    const getEffectiveRentalType = (p: any): string | null => {
+      let effectiveRentalType: string | null = (((p as any).rentalType || p.rental?.type || null) as string | null)
+      if (effectiveRentalType) {
+        const normalized = String(effectiveRentalType).toUpperCase()
+        if (normalized === 'SCOOTER' || normalized === 'QUAD') effectiveRentalType = 'MOTO'
+        else if (normalized === 'AUTO') effectiveRentalType = 'CAR'
+        else if (normalized === 'CAR_GROSS') effectiveRentalType = 'MOTO'
+        else if (normalized === 'BARCA' || normalized === 'BOAT') effectiveRentalType = 'BOAT'
+        else if (normalized !== 'CAR' && normalized !== 'MOTO' && normalized !== 'BOAT') effectiveRentalType = normalized
+      }
+
+      if (!effectiveRentalType) {
+        if ((p.insurancePrice || 0) > 0 || (p.supplementPrice || 0) > 0) {
+          effectiveRentalType = 'MOTO'
+        } else if (p.supplier && (p as any).price === 0 && (p.totalPrice || 0) > 0) {
+          effectiveRentalType = 'BOAT'
+        } else {
+          effectiveRentalType = 'CAR'
+        }
+      }
+
+      return effectiveRentalType
+    }
+    const addIncoming = (method: string, amount: number) => {
+      const v = Number(amount || 0)
+      if (!Number.isFinite(v) || v <= 0) return
+      if (method === 'CASH') {
+        paymentsByChannel.cash.incoming += v
+        paymentsByChannel.cash.incomingCount += 1
+      } else {
+        paymentsByChannel.digital.incoming += v
+        paymentsByChannel.digital.incomingCount += 1
+      }
+    }
+    const addOutgoing = (method: string, amount: number) => {
+      const v = Number(amount || 0)
+      if (!Number.isFinite(v) || v <= 0) return
+      if (method === 'CASH') {
+        paymentsByChannel.cash.outgoing += v
+        paymentsByChannel.cash.outgoingCount += 1
+      } else {
+        paymentsByChannel.digital.outgoing += v
+        paymentsByChannel.digital.outgoingCount += 1
+      }
+    }
+    const extractRefundsFromNotes = (notes: any): Array<{ amount: number; method: string }> => {
+      const text = typeof notes === 'string' ? notes : ''
+      if (!text) return []
+      const results: Array<{ amount: number; method: string }> = []
+      const re = /Rimborsato\s+€\s*([0-9]+(?:[.,][0-9]+)?)\s*\(([^)]+)\)/gi
+      let match: RegExpExecArray | null = null
+      while ((match = re.exec(text)) !== null) {
+        const rawAmount = String(match[1] || '').replace(',', '.')
+        const amount = parseFloat(rawAmount)
+        const rawLabel = String(match[2] || '').trim().toLowerCase()
+        if (!Number.isFinite(amount) || amount <= 0) continue
+        let bucket = ''
+        if (rawLabel.includes('contant')) bucket = 'CASH'
+        else if (rawLabel.includes('carta') || rawLabel.includes('bonifico') || rawLabel.includes('transfer')) bucket = 'DIGITAL'
+        if (!bucket) continue
+        results.push({ amount, method: bucket })
+      }
+      return results
+    }
+
     participants.forEach(p => {
         if (p.paymentStatus === 'REJECTED' || p.paymentStatus === 'PENDING_APPROVAL') return
 
-        let isRetained = false
-        let revenue = p.paidAmount || 0 
+        if (p.rentalId) {
+          const effectiveRentalType = getEffectiveRentalType(p)
+          const includeRentalNow = effectiveRentalType === 'BOAT'
+          const includeRentalFuture = includeFutureRentals
+          const includeRental = includeRentalNow || includeRentalFuture
+          if (!includeRental) return
+        }
+
+        const events = Array.isArray((p as any).paymentEvents) ? ((p as any).paymentEvents as any[]) : []
+        if (events.length > 0) {
+        let evInCash = 0
+        let evInDigital = 0
+        let evOutCash = 0
+        let evOutDigital = 0
+        let evInCashCount = 0
+        let evInDigitalCount = 0
+        let evOutCashCount = 0
+        let evOutDigitalCount = 0
+        let hasOutgoingEvents = false
+
+        for (const e of events) {
+          const dir = String(e?.direction || '').trim().toUpperCase()
+          const method = normalizeMethod(e?.method)
+          const amount = Number(e?.amount || 0)
+          if (!Number.isFinite(amount) || amount <= 0) continue
+          if (dir === 'OUT') {
+            hasOutgoingEvents = true
+            if (method === 'CASH') {
+              evOutCash += amount
+              evOutCashCount += 1
+            } else {
+              evOutDigital += amount
+              evOutDigitalCount += 1
+            }
+          } else {
+            if (method === 'CASH') {
+              evInCash += amount
+              evInCashCount += 1
+            } else {
+              evInDigital += amount
+              evInDigitalCount += 1
+            }
+          }
+        }
+
+        paymentsByChannel.cash.incoming += evInCash
+        paymentsByChannel.cash.incomingCount += evInCashCount
+        paymentsByChannel.digital.incoming += evInDigital
+        paymentsByChannel.digital.incomingCount += evInDigitalCount
+        paymentsByChannel.cash.outgoing += evOutCash
+        paymentsByChannel.cash.outgoingCount += evOutCashCount
+        paymentsByChannel.digital.outgoing += evOutDigital
+        paymentsByChannel.digital.outgoingCount += evOutDigitalCount
+
+        const totalPaid = Number(p.paidAmount || 0)
+        const totalPrice = Number(p.totalPrice || 0)
+        const rawDepositPaidAmount = Number((p as any).depositPaidAmount || 0)
+        const legacyMethod = normalizeMethod(p.paymentMethod)
+        const rawDepositMethod = normalizeMethod((p as any).depositPaymentMethod)
+        const rawBalanceMethod = normalizeMethod((p as any).balancePaymentMethod)
+
+        let depositPaidAmount =
+          Number.isFinite(rawDepositPaidAmount) && rawDepositPaidAmount > 0
+            ? rawDepositPaidAmount
+            : (totalPaid > 0 && (p.paymentType === 'DEPOSIT' || p.paymentType === 'BALANCE' || !!p.rentalId)
+                ? Math.min(totalPaid, totalPrice > 0 ? totalPrice : totalPaid)
+                : 0)
+        depositPaidAmount = Math.min(Math.max(0, depositPaidAmount), Math.max(0, totalPaid))
+        const balancePaidAmount = Math.max(0, totalPaid - depositPaidAmount)
+
+        let depositMethod = rawDepositMethod || legacyMethod || 'CASH'
+        if (depositMethod === 'CASH' && legacyMethod && legacyMethod !== 'CASH') depositMethod = legacyMethod
+        const balanceMethod = rawBalanceMethod || depositMethod
+
+        let legacyInCash = 0
+        let legacyInDigital = 0
+        if (p.paymentType !== 'OPTION' && p.paymentStatus !== 'PENDING') {
+          if (depositMethod === 'CASH') legacyInCash += depositPaidAmount
+          else legacyInDigital += depositPaidAmount
+          if (balanceMethod === 'CASH') legacyInCash += balancePaidAmount
+          else legacyInDigital += balancePaidAmount
+        }
+
+        const eps = 0.009
+        const missingInCash = legacyInCash - evInCash
+        const missingInDigital = legacyInDigital - evInDigital
+        if (missingInCash > eps) {
+          paymentsByChannel.cash.incoming += missingInCash
+          paymentsByChannel.cash.incomingCount += 1
+        }
+        if (missingInDigital > eps) {
+          paymentsByChannel.digital.incoming += missingInDigital
+          paymentsByChannel.digital.incomingCount += 1
+        }
+
+        if (!hasOutgoingEvents) {
+          const refunds = extractRefundsFromNotes((p as any).notes)
+          for (const r of refunds) {
+            if (r.method === 'CASH') {
+              paymentsByChannel.cash.outgoing += r.amount
+              paymentsByChannel.cash.outgoingCount += 1
+            } else {
+              paymentsByChannel.digital.outgoing += r.amount
+              paymentsByChannel.digital.outgoingCount += 1
+            }
+          }
+        }
+        } else {
+          const totalPaid = Number(p.paidAmount || 0)
+          const totalPrice = Number(p.totalPrice || 0)
+          const rawDepositPaidAmount = Number((p as any).depositPaidAmount || 0)
+          const legacyMethod = normalizeMethod(p.paymentMethod)
+          const rawDepositMethod = normalizeMethod((p as any).depositPaymentMethod)
+          const rawBalanceMethod = normalizeMethod((p as any).balancePaymentMethod)
+
+          let depositPaidAmount =
+            Number.isFinite(rawDepositPaidAmount) && rawDepositPaidAmount > 0
+              ? rawDepositPaidAmount
+              : (totalPaid > 0 && (p.paymentType === 'DEPOSIT' || p.paymentType === 'BALANCE' || !!p.rentalId)
+                  ? Math.min(totalPaid, totalPrice > 0 ? totalPrice : totalPaid)
+                  : 0)
+          depositPaidAmount = Math.min(Math.max(0, depositPaidAmount), Math.max(0, totalPaid))
+          const balancePaidAmount = Math.max(0, totalPaid - depositPaidAmount)
+
+          let depositMethod = rawDepositMethod || legacyMethod || 'CASH'
+          if (depositMethod === 'CASH' && legacyMethod && legacyMethod !== 'CASH') depositMethod = legacyMethod
+          const balanceMethod = rawBalanceMethod || depositMethod
+
+          if (p.paymentType !== 'OPTION' && p.paymentStatus !== 'PENDING') {
+            addIncoming(depositMethod, depositPaidAmount)
+            addIncoming(balanceMethod, balancePaidAmount)
+          }
+
+          for (const r of extractRefundsFromNotes((p as any).notes)) {
+            addOutgoing(r.method, r.amount)
+          }
+        }
+
+        const eps = 0.009
+        let refundsFromEvents = 0
+        for (const e of events) {
+          const dir = String(e?.direction || '').trim().toUpperCase()
+          if (dir !== 'OUT') continue
+          const amount = Number(e?.amount || 0)
+          if (!Number.isFinite(amount) || amount <= 0) continue
+          refundsFromEvents += amount
+        }
+        let refundsFromNotes = 0
+        for (const r of extractRefundsFromNotes((p as any).notes)) refundsFromNotes += r.amount
+        let refundsTotal = Math.max(refundsFromEvents, refundsFromNotes)
+        const grossRevenue = Number(p.totalPrice || 0) || Number(p.paidAmount || 0) || 0
+        if (p.paymentType === 'REFUNDED' && refundsTotal <= eps) refundsTotal = Math.max(0, grossRevenue)
+        let revenue = Math.max(0, grossRevenue - refundsTotal)
         let pax = (p.adults + p.children + p.infants) || 1
         const tax = p.tax || 0
         const commissionableRevenue = Math.max(0, revenue - tax)
-        
-        // Handle Refunded: Only include if there is a retained deposit (Acconto)
-        if (p.paymentType === 'REFUNDED') {
-             const price = p.totalPrice || 0
-             const deposit = p.paidAmount || 0
-             // Logic: If deposit exists and is less than price (Partial), assume it's retained.
-             // If deposit == price, assume full refund (exclude).
-             if (deposit > 0 && deposit < price) {
-                 isRetained = true
-                 revenue = deposit
-                 pax = (p.adults + p.children + p.infants) // Count pax for fixed commissions
-             } else {
-                 return // Exclude full refund
-             }
-        }
+        if (revenue <= eps) return
 
         let commissionAmount = 0
         let agentShareForRow = 0
@@ -336,7 +542,7 @@ export async function GET(request: Request) {
                 if (!types.includes(currentRentalType)) return
             }
 
-            rentalGross = p.totalPrice || 0
+            rentalGross = Math.max(0, (p.totalPrice || 0) - refundsTotal)
             const insurance = p.insurancePrice || 0
             const supplement = p.supplementPrice || 0
             const rentalTax = p.tax || 0
@@ -522,6 +728,7 @@ export async function GET(request: Request) {
         }
         
         // Aggregates
+        includedCount += 1
         totalRevenue += revenue
         totalCommission += commissionAmount
         totalAssistantCommission += agentShareForRow
@@ -855,7 +1062,7 @@ export async function GET(request: Request) {
         totalPax,
         totalTax,
         totalTaxRevenue: taxStats.totalRevenue,
-        count: participants.length,
+        count: includedCount,
         totalNetAgency,
         totalExternalAgencyCommission,
         rentals: {
@@ -876,6 +1083,7 @@ export async function GET(request: Request) {
           go4seaFuture: rentalsGo4SeaFuture
         }
       },
+      paymentsByChannel,
       taxStats, // New field
       byAgency: Object.values(byAgency).sort((a, b) => b.revenue - a.revenue),
       bySupplier: Object.values(bySupplier),

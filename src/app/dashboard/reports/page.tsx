@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Calendar, Filter, Download, DollarSign, Users, Briefcase, PieChart, CheckSquare, Square, RotateCcw, Loader2, ShoppingBag } from 'lucide-react'
+import { Calendar, Filter, Download, DollarSign, Users, Briefcase, PieChart, CheckSquare, Square, RotateCcw, Loader2, ShoppingBag, CreditCard } from 'lucide-react'
 import { generateAdvancedReportPDF } from '@/lib/report-pdf-generator'
 
 interface SummaryStats {
@@ -63,6 +63,10 @@ interface RentalAgentItem {
 
 interface ReportData {
   summary: SummaryStats
+  paymentsByChannel?: {
+    cash: { incoming: number; outgoing: number; incomingCount: number; outgoingCount: number }
+    digital: { incoming: number; outgoing: number; incomingCount: number; outgoingCount: number }
+  }
   byAgency: BreakdownItem[]
   bySupplier: BreakdownItem[] // Providers
   byAssistant: BreakdownItem[]
@@ -436,18 +440,31 @@ export default function ReportsPage() {
           )}
 
           {/* Stats Cards */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-4">
             {(() => {
-              const baseNow =
-                (reportData?.summary?.totalRevenue ?? 0) +
-                (reportData?.summary?.totalTaxRevenue ?? 0)
-              const withFuture = baseNow
-              const title = includeFutureRentals ? 'Incasso Totale (subito + futuri)' : 'Incasso Totale (solo subito)'
+              const cash = reportData?.paymentsByChannel?.cash
+              const digital = reportData?.paymentsByChannel?.digital
+              const netIncassato =
+                (cash ? cash.incoming - cash.outgoing : 0) +
+                (digital ? digital.incoming - digital.outgoing : 0)
+
+              return (
+                <StatCard
+                  title="Incasso Totale"
+                  value={`€ ${netIncassato.toFixed(2)}`}
+                  icon={<DollarSign className="w-6 h-6 text-emerald-600" />}
+                  bg="bg-emerald-50"
+                />
+              )
+            })()}
+            {(() => {
+              const baseNow = reportData?.summary?.totalRevenue ?? 0
+              const title = includeFutureRentals ? 'Venduto (subito + futuri)' : 'Venduto (solo subito)'
               return (
                 <StatCard
                   title={title}
-                  value={`€ ${withFuture.toFixed(2)}`}
-                  icon={<DollarSign className="w-6 h-6 text-green-600" />}
+                  value={`€ ${baseNow.toFixed(2)}`}
+                  icon={<ShoppingBag className="w-6 h-6 text-green-600" />}
                   bg="bg-green-50"
                 />
               )
@@ -481,6 +498,54 @@ export default function ReportsPage() {
               bg="bg-purple-50"
             />
           </div>
+
+          {reportData?.paymentsByChannel && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Contanti</p>
+                    <p className="text-xs text-gray-500">Entrate / Uscite</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-emerald-50">
+                    <DollarSign className="w-6 h-6 text-emerald-600" />
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-4 font-mono">
+                  <div>
+                    <div className="text-xs text-gray-500">Entrate</div>
+                    <div className="text-lg font-bold text-green-700">€ {reportData.paymentsByChannel.cash.incoming.toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Uscite</div>
+                    <div className="text-lg font-bold text-red-700">€ {reportData.paymentsByChannel.cash.outgoing.toFixed(2)}</div>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-white p-6 rounded-xl shadow-sm border border-gray-100">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-700">Pagamenti digitali</p>
+                    <p className="text-xs text-gray-500">Digitale · Entrate / Uscite</p>
+                  </div>
+                  <div className="p-3 rounded-lg bg-sky-50">
+                    <CreditCard className="w-6 h-6 text-sky-600" />
+                  </div>
+                </div>
+                <div className="mt-4 grid grid-cols-2 gap-4 font-mono">
+                  <div>
+                    <div className="text-xs text-gray-500">Entrate</div>
+                    <div className="text-lg font-bold text-green-700">€ {reportData.paymentsByChannel.digital.incoming.toFixed(2)}</div>
+                  </div>
+                  <div>
+                    <div className="text-xs text-gray-500">Uscite</div>
+                    <div className="text-lg font-bold text-red-700">€ {reportData.paymentsByChannel.digital.outgoing.toFixed(2)}</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* Tables */}
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

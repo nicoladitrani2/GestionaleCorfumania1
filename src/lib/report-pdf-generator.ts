@@ -64,10 +64,17 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
   doc.text('Riepilogo Finanziario', 14, yPos)
   
   yPos += 10
+  const cash = data.paymentsByChannel?.cash
+  const digital = data.paymentsByChannel?.digital
+  const netIncassato =
+    (cash ? (Number(cash.incoming || 0) - Number(cash.outgoing || 0)) : 0) +
+    (digital ? (Number(digital.incoming || 0) - Number(digital.outgoing || 0)) : 0)
+  const vendutoServizi = Number(data.summary.totalRevenue || 0)
+  const vendutoTasse = Number(data.summary.totalTaxRevenue || 0)
   const summaryData = [
-    ['Incasso Totale', `€ ${((data.summary.totalRevenue || 0) + (data.summary.totalTaxRevenue || 0)).toFixed(2)}`],
-    ['Di cui Incasso Servizi', `€ ${data.summary.totalRevenue.toFixed(2)}`],
-    ['Di cui Incasso Tasse / Non Comm.', `€ ${(data.summary.totalTaxRevenue || 0).toFixed(2)}`],
+    ['Incasso Totale (Contanti + Digitale)', `€ ${netIncassato.toFixed(2)}`],
+    ['Venduto Servizi (netto rimborsi)', `€ ${vendutoServizi.toFixed(2)}`],
+    ['Tasse / Braccialetti (gestione separata)', `€ ${vendutoTasse.toFixed(2)}`],
     ['Commissioni Agenzie Esterne', `€ ${(data.summary.totalExternalAgencyCommission || 0).toFixed(2)}`],
     ['Commissioni Assistenti', `€ ${data.summary.totalAssistantCommission.toFixed(2)}`],
     ['Netto Agenzia', `€ ${(data.summary.totalNetAgency || 0).toFixed(2)}`],
@@ -86,6 +93,35 @@ export const generateAdvancedReportPDF = (data: any, filters: any) => {
       1: { halign: 'right' }
     }
   })
+
+  // @ts-ignore
+  yPos = doc.lastAutoTable.finalY + 12
+
+  if (data.paymentsByChannel) {
+    doc.setFontSize(14)
+    doc.setFont('helvetica', 'bold')
+    doc.text('Pagamenti - Contanti / Pagamenti digitali', 14, yPos)
+    yPos += 6
+
+    const rows = [
+      ['Contanti', `€ ${(data.paymentsByChannel.cash?.incoming || 0).toFixed(2)}`, `€ ${(data.paymentsByChannel.cash?.outgoing || 0).toFixed(2)}`],
+      ['Pagamenti digitali', `€ ${(data.paymentsByChannel.digital?.incoming || 0).toFixed(2)}`, `€ ${(data.paymentsByChannel.digital?.outgoing || 0).toFixed(2)}`],
+    ]
+
+    autoTable(doc, {
+      startY: yPos,
+      head: [['Sezione', 'Entrate', 'Uscite']],
+      body: rows,
+      theme: 'grid',
+      headStyles: { fillColor: [14, 165, 233] },
+      columnStyles: {
+        1: { halign: 'right' },
+        2: { halign: 'right' },
+      }
+    })
+    // @ts-ignore
+    yPos = doc.lastAutoTable.finalY + 15
+  }
 
   // --- Agency Breakdown ---
   // @ts-ignore

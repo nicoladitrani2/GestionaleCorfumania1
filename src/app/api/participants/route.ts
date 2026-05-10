@@ -208,18 +208,11 @@ function computeRentalBreakdown(p: any) {
 
 function computeIsSpecialAssistant(user: any, agencyName?: string | null): boolean {
   if (!user) return false
-  if (user.isSpecialAssistant) return true
-  if (String(user.role || '').toUpperCase() === 'ADMIN') return true
-  const normalizedAgency = String(agencyName || '').toLowerCase().trim()
-  if (normalizedAgency.includes('corfumania') || normalizedAgency.includes('go4sea')) return true
-  const haystack = `${user.firstName || ''} ${user.lastName || ''} ${user.email || ''} ${user.code || ''}`
-    .toLowerCase()
-    .trim()
-  return haystack.includes('speciale')
+  return user.isSpecialAssistant === true
 }
 
 function mapParticipantForClient(p: any) {
-  const { user, client, assignedTo, ...rest } = p
+  const { user, client, assignedTo, paymentEvents, ...rest } = p
   const paymentType = rest.paymentType || 'BALANCE'
 
   const rawName = String(rest.name || '').trim()
@@ -236,6 +229,122 @@ function mapParticipantForClient(p: any) {
   const documentInfo = decodeDocumentInfo(rest.ticketNumber)
   const rentalBreakdown = computeRentalBreakdown(p)
 
+  const normalizeBucket = (raw: any): 'CASH' | 'DIGITAL' | null => {
+    const m = String(raw || '').trim().toUpperCase()
+    if (!m) return null
+    if (m === 'CASH') return 'CASH'
+    if (m === 'DIGITAL' || m === 'CARD' || m === 'TRANSFER') return 'DIGITAL'
+    return 'DIGITAL'
+  }
+
+  const paymentsSummary = (() => {
+    const events = Array.isArray(paymentEvents) ? paymentEvents : []
+    let incomingCash = 0
+    let incomingDigital = 0
+    let outgoingCash = 0
+    let outgoingDigital = 0
+
+    const computeLegacy = () => {
+      let legacyIncomingCash = 0
+      let legacyIncomingDigital = 0
+      let legacyOutgoingCash = 0
+      let legacyOutgoingDigital = 0
+
+      const totalPaid = Number(rest.paidAmount || 0)
+      const totalPrice = Number(rest.totalPrice || 0)
+      const depositPaidAmountRaw =
+        typeof rest.depositPaidAmount === 'number' ? (rest.depositPaidAmount as number) : 0
+      const depositPaidAmount =
+        Number.isFinite(depositPaidAmountRaw) && depositPaidAmountRaw > 0
+          ? depositPaidAmountRaw
+          : (totalPaid > 0 ? Math.min(totalPaid, totalPrice > 0 ? totalPrice : totalPaid) : 0)
+      const balancePaidAmount = Math.max(0, totalPaid - depositPaidAmount)
+
+      const depositMethod = normalizeBucket(rest.depositPaymentMethod || rest.paymentMethod) || 'CASH'
+      const balanceMethod = normalizeBucket(rest.balancePaymentMethod) || depositMethod
+
+      if (depositMethod === 'CASH') legacyIncomingCash += depositPaidAmount
+      else legacyIncomingDigital += depositPaidAmount
+
+      if (balanceMethod === 'CASH') legacyIncomingCash += balancePaidAmount
+      else legacyIncomingDigital += balancePaidAmount
+
+      const notes = typeof rest.notes === 'string' ? rest.notes : ''
+      const re = /Rimborsato\s+€\s*([0-9]+(?:[.,][0-9]+)?)\s*\(([^)]+)\)/gi
+      let match: RegExpExecArray | null = null
+      while ((match = re.exec(notes)) !== null) {
+        const rawAmount = String(match[1] || '').replace(',', '.')
+        const amount = parseFloat(rawAmount)
+        const rawLabel = String(match[2] || '').trim().toLowerCase()
+        if (!Number.isFinite(amount) || amount <= 0) continue
+        const isCash = rawLabel.includes('contant')
+        if (isCash) legacyOutgoingCash += amount
+        else legacyOutgoingDigital += amount
+      }
+
+      return {
+        legacyIncomingCash,
+        legacyIncomingDigital,
+        legacyOutgoingCash,
+        legacyOutgoingDigital,
+      }
+    }
+
+    if (events.length > 0) {
+      let hasOutgoingEvents = false
+      for (const e of events) {
+        const dir = String(e?.direction || '').trim().toUpperCase()
+        const bucket = normalizeBucket(e?.method)
+        const amount = Number(e?.amount || 0)
+        if (!bucket || !Number.isFinite(amount) || amount <= 0) continue
+        if (dir === 'OUT') {
+          hasOutgoingEvents = true
+          if (bucket === 'CASH') outgoingCash += amount
+          else outgoingDigital += amount
+        } else {
+          if (bucket === 'CASH') incomingCash += amount
+          else incomingDigital += amount
+        }
+      }
+
+      const {
+        legacyIncomingCash,
+        legacyIncomingDigital,
+        legacyOutgoingCash,
+        legacyOutgoingDigital,
+      } = computeLegacy()
+
+      const eps = 0.009
+      const missingInCash = legacyIncomingCash - incomingCash
+      const missingInDigital = legacyIncomingDigital - incomingDigital
+      if (missingInCash > eps) incomingCash += missingInCash
+      if (missingInDigital > eps) incomingDigital += missingInDigital
+
+      if (!hasOutgoingEvents) {
+        const missingOutCash = legacyOutgoingCash - outgoingCash
+        const missingOutDigital = legacyOutgoingDigital - outgoingDigital
+        if (missingOutCash > eps) outgoingCash += missingOutCash
+        if (missingOutDigital > eps) outgoingDigital += missingOutDigital
+      }
+
+      return { incomingCash, incomingDigital, outgoingCash, outgoingDigital }
+    }
+
+    const {
+      legacyIncomingCash,
+      legacyIncomingDigital,
+      legacyOutgoingCash,
+      legacyOutgoingDigital,
+    } = computeLegacy()
+
+    return {
+      incomingCash: legacyIncomingCash,
+      incomingDigital: legacyIncomingDigital,
+      outgoingCash: legacyOutgoingCash,
+      outgoingDigital: legacyOutgoingDigital,
+    }
+  })()
+
   return {
     ...rest,
     createdBy: user ? { ...user, isSpecialAssistant: computeIsSpecialAssistant(user, user?.agency?.name) } : user,
@@ -243,9 +352,13 @@ function mapParticipantForClient(p: any) {
     assignedTo: assignedTo ? { ...assignedTo, isSpecialAssistant: computeIsSpecialAssistant(assignedTo, assignedTo?.agency?.name) } : assignedTo,
     assignedToId: rest.assignedToId,
     price: rest.totalPrice,
-    deposit: rest.paidAmount || 0,
+    deposit:
+      typeof rest.depositPaidAmount === 'number'
+        ? (rest.depositPaidAmount as number)
+        : (rest.paidAmount || 0),
     isOption: paymentType === 'OPTION',
     paymentType,
+    paymentsSummary,
     phoneNumber,
     email,
     firstName,
@@ -318,6 +431,15 @@ export async function GET(request: Request) {
       take: isGlobalSearch ? 100 : undefined,
       orderBy: { createdAt: 'desc' },
       include: {
+        paymentEvents: {
+          select: {
+            direction: true,
+            method: true,
+            amount: true,
+            kind: true,
+            createdAt: true,
+          }
+        },
         user: {
           select: {
             firstName: true,
@@ -800,8 +922,11 @@ export async function POST(request: Request) {
         ticketNumber: ticketNumberValue,
         totalPrice: finalTotalPrice,
         paidAmount,
+        depositPaidAmount: paidAmount,
         tax: totalTax,
         paymentMethod: paymentMethod || 'CASH',
+        depositPaymentMethod: depositPaymentMethod || paymentMethod || 'CASH',
+        balancePaymentMethod: balancePaymentMethod ? balancePaymentMethod : null,
         paymentStatus: finalPaymentStatus,
         paymentType: rawPaymentType,
         status: 'ACTIVE',
@@ -824,6 +949,28 @@ export async function POST(request: Request) {
         approvalStatus: approvalStatus || 'APPROVED'
       }
     })
+
+    const bucket = (raw: any): 'CASH' | 'DIGITAL' => {
+      const m = String(raw || '').trim().toUpperCase()
+      return m === 'CASH' ? 'CASH' : 'DIGITAL'
+    }
+    const depositBucket = bucket(depositPaymentMethod || paymentMethod || 'CASH')
+    const balanceBucket = bucket(balancePaymentMethod || depositPaymentMethod || paymentMethod || 'CASH')
+    const depositPaid = Math.max(0, Math.min(Number(paidAmount || 0), Number(finalTotalPrice || 0) || Number(paidAmount || 0)))
+    const balancePaid = Math.max(0, Number(paidAmount || 0) - depositPaid)
+
+    const eventsToCreate: Array<{ direction: string; method: string; kind: string; amount: number }> = []
+    if (depositPaid > 0.009) {
+      eventsToCreate.push({ direction: 'IN', method: depositBucket, kind: rawPaymentType === 'DEPOSIT' ? 'DEPOSIT' : 'BALANCE', amount: depositPaid })
+    }
+    if (balancePaid > 0.009) {
+      eventsToCreate.push({ direction: 'IN', method: balanceBucket, kind: 'BALANCE', amount: balancePaid })
+    }
+    if (eventsToCreate.length > 0) {
+      await prisma.participantPaymentEvent.createMany({
+        data: eventsToCreate.map(e => ({ ...e, participantId: participant.id }))
+      })
+    }
 
     await createAuditLog(
       session.user.id,

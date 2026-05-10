@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { Euro, CreditCard, Banknote, Building2, AlertTriangle, X } from 'lucide-react'
+import { Euro, CreditCard, Banknote, AlertTriangle, X } from 'lucide-react'
 
 interface RefundModalProps {
   isOpen: boolean
@@ -10,21 +10,48 @@ interface RefundModalProps {
 
 export function RefundModal({ isOpen, onClose, participant, onConfirm }: RefundModalProps) {
   const [amount, setAmount] = useState(0)
-  const [method, setMethod] = useState<'CASH' | 'TRANSFER' | 'CARD'>('CASH')
+  const [method, setMethod] = useState<'CASH' | 'DIGITAL'>('CASH')
   const [notes, setNotes] = useState('')
   const [loading, setLoading] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const maxRefundable = (() => {
+    if (!participant) return 0
+    const ps = participant.paymentsSummary
+    const incoming =
+      ps && (ps.incomingCash !== undefined || ps.incomingDigital !== undefined)
+        ? Number(ps.incomingCash || 0) + Number(ps.incomingDigital || 0)
+        : Number(participant.paidAmount ?? 0)
+    const outgoing =
+      ps && (ps.outgoingCash !== undefined || ps.outgoingDigital !== undefined)
+        ? Number(ps.outgoingCash || 0) + Number(ps.outgoingDigital || 0)
+        : 0
+    const v = incoming - outgoing
+    return Number.isFinite(v) && v > 0 ? v : 0
+  })()
 
   // Update amount when participant changes
   useEffect(() => {
     if (participant) {
-      setAmount(participant.deposit || 0)
+      setAmount(maxRefundable)
+      setError(null)
     }
-  }, [participant])
+  }, [participant, maxRefundable])
 
   if (!isOpen || !participant) return null
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    setError(null)
+    const v = Number(amount)
+    if (!Number.isFinite(v) || v <= 0) {
+      setError('Inserisci un importo valido.')
+      return
+    }
+    if (v > maxRefundable + 0.009) {
+      setError(`Importo massimo rimborsabile: € ${maxRefundable.toFixed(2)}`)
+      return
+    }
     setLoading(true)
     try {
       await onConfirm(participant.id, amount, method, notes)
@@ -67,18 +94,27 @@ export function RefundModal({ isOpen, onClose, participant, onConfirm }: RefundM
                     type="number"
                     step="0.01"
                     min="0"
+                    max={maxRefundable}
                     value={amount}
-                    onChange={(e) => setAmount(parseFloat(e.target.value))}
+                    onChange={(e) => {
+                      const raw = e.target.value
+                      setAmount(raw === '' ? 0 : parseFloat(raw))
+                      setError(null)
+                    }}
                     className="w-full pl-7 px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-red-500 focus:border-red-500 outline-none transition-all text-gray-900 font-medium"
                     required
                   />
                 </div>
+                <div className="mt-1 text-xs text-gray-500">
+                  Massimo rimborsabile: € {maxRefundable.toFixed(2)}
+                </div>
+                {error ? <div className="mt-2 text-xs font-semibold text-red-700">{error}</div> : null}
              </div>
 
              {/* Method Selection */}
              <div>
                 <label className="block text-sm font-bold text-gray-900 mb-2">Metodo di Rimborso</label>
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                     <button
                         type="button"
                         onClick={() => setMethod('CASH')}
@@ -89,19 +125,11 @@ export function RefundModal({ isOpen, onClose, participant, onConfirm }: RefundM
                     </button>
                     <button
                         type="button"
-                        onClick={() => setMethod('TRANSFER')}
-                        className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${method === 'TRANSFER' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
-                    >
-                        <Building2 className="w-5 h-5" />
-                        <span className="text-xs font-bold">Bonifico</span>
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => setMethod('CARD')}
-                        className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${method === 'CARD' ? 'bg-purple-50 border-purple-500 text-purple-700 ring-1 ring-purple-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
+                        onClick={() => setMethod('DIGITAL')}
+                        className={`p-3 rounded-lg border flex flex-col items-center gap-2 transition-all ${method === 'DIGITAL' ? 'bg-blue-50 border-blue-500 text-blue-700 ring-1 ring-blue-500' : 'border-gray-200 hover:bg-gray-50 text-gray-600'}`}
                     >
                         <CreditCard className="w-5 h-5" />
-                        <span className="text-xs font-bold">Carta</span>
+                        <span className="text-xs font-bold">Digitale</span>
                     </button>
                 </div>
              </div>

@@ -77,8 +77,8 @@ export function RentalLeaderboard({ userRole }: RentalLeaderboardProps) {
 
       const stats = statsMap.get(ownerId)
 
-      const amountPaid = p.deposit || 0
-      stats.totalSales += amountPaid
+      const amountBase = Number(p.price ?? p.totalPrice ?? 0)
+      stats.totalSales += amountBase
       stats.count += 1
 
       const agentShare = typeof p.rentalAgentShare === 'number' ? p.rentalAgentShare : 0

@@ -58,24 +58,13 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0, commissio
   let corfumaniaTotal = 0
 
   validParticipants.forEach(p => {
-    let isRetained = false
     let effectivePrice = (typeof p.deposit === 'number' ? p.deposit : (p.paidAmount ?? p.price)) || 0
     let effectiveCount = (p.adults || 0) + (p.children || 0) + (p.infants || 0)
     let tax = p.tax || 0
     if (!effectiveCount || effectiveCount <= 0) effectiveCount = 1
 
-    if (p.paymentType === 'REFUNDED') {
-            const deposit = p.deposit || 0
-            const price = p.price || 0
-            // Consider as Retained Deposit only if partial payment (deposit < price)
-            if (deposit > 0 && deposit < price) {
-                isRetained = true
-                effectivePrice = deposit
-                effectiveCount = (p.adults || 0) + (p.children || 0) + (p.infants || 0) // Count pax for fixed commissions
-            } else {
-                return // Skip full refund
-            }
-        }
+    if (p.paymentType === 'REFUNDED') return
+    effectivePrice = Number(p.price ?? p.totalPrice ?? effectivePrice ?? 0) || 0
 
         const commissionable = Math.max(0, effectivePrice - tax)
         const pool = commissionable * 0.2
