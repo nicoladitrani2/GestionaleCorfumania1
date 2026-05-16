@@ -64,17 +64,74 @@ export async function POST(request: Request) {
       )
     }
 
-    const user = await prisma.user.findUnique({
-      where: { email }
+    const requestedUserId = typeof body?.userId === 'string' ? body.userId.trim() : ''
+
+    const users = await prisma.user.findMany({
+      where: {
+        email: { equals: email, mode: 'insensitive' },
+        ...(requestedUserId ? { id: requestedUserId } : {}),
+      },
     })
 
-    if (!user) {
+    if (!users.length) {
       return addRateLimitHeaders(
         NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 }),
         rlAccount,
         10
       )
     }
+
+    const matches: any[] = []
+    for (const u of users) {
+      const ok = await bcrypt.compare(password, u.password)
+      if (ok) matches.push(u)
+    }
+
+    if (!matches.length) {
+      return addRateLimitHeaders(
+        NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 }),
+        rlAccount,
+        10
+      )
+    }
+
+    if (!requestedUserId && matches.length > 1) {
+      const accounts = await prisma.user.findMany({
+        where: {
+          email: { equals: email, mode: 'insensitive' },
+          id: { in: matches.map(m => m.id) },
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          role: true,
+          isSpecialAssistant: true,
+          agency: { select: { name: true } },
+        },
+        orderBy: [{ role: 'asc' }, { firstName: 'asc' }, { lastName: 'asc' }],
+      })
+      return addRateLimitHeaders(
+        NextResponse.json({
+          error: 'Sono disponibili più account per questa email.',
+          code: 'MULTIPLE_ACCOUNTS',
+          accounts: accounts.map(a => ({
+            id: a.id,
+            firstName: a.firstName,
+            lastName: a.lastName,
+            code: a.code,
+            role: a.role,
+            isSpecialAssistant: a.isSpecialAssistant,
+            agencyName: a.agency?.name ?? null,
+          })),
+        }, { status: 409 }),
+        rlAccount,
+        10
+      )
+    }
+
+    const user = matches[0]
 
     // Fetch agency separately to avoid Prisma Client mismatch issues
     let agencyName = undefined
@@ -83,16 +140,6 @@ export async function POST(request: Request) {
         where: { id: user.agencyId }
       })
       agencyName = agency?.name
-    }
-
-    const isValid = await bcrypt.compare(password, user.password)
-
-    if (!isValid) {
-      return addRateLimitHeaders(
-        NextResponse.json({ error: 'Credenziali non valide' }, { status: 401 }),
-        rlAccount,
-        10
-      )
     }
 
     const session = await encrypt({

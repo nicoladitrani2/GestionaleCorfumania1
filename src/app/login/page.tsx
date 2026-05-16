@@ -2,7 +2,7 @@
 
 import { useState, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { Eye, EyeOff, Lock, Mail, AlertCircle } from 'lucide-react'
+import { Eye, EyeOff, Lock, Mail, AlertCircle, User } from 'lucide-react'
 
 function LoginForm() {
   const [email, setEmail] = useState('')
@@ -10,6 +10,7 @@ function LoginForm() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
+  const [accounts, setAccounts] = useState<any[]>([])
   const router = useRouter()
   const searchParams = useSearchParams()
 
@@ -22,6 +23,7 @@ function LoginForm() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError('')
+    setAccounts([])
     setLoading(true)
 
     try {
@@ -36,9 +38,39 @@ function LoginForm() {
         router.refresh()
       } else {
         const data = await res.json()
-        setError(data.error || 'Login fallito')
+        if (data?.code === 'MULTIPLE_ACCOUNTS' && Array.isArray(data?.accounts) && data.accounts.length) {
+          setAccounts(data.accounts)
+          setError('')
+        } else {
+          setError(data.error || 'Login fallito')
+        }
       }
     } catch (err) {
+      setError('Errore di connessione')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleChooseAccount = async (userId: string) => {
+    const id = String(userId || '').trim()
+    if (!id) return
+    setError('')
+    setLoading(true)
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password, userId: id }),
+      })
+      if (res.ok) {
+        router.push('/dashboard')
+        router.refresh()
+      } else {
+        const data = await res.json()
+        setError(data?.error || 'Login fallito')
+      }
+    } catch {
       setError('Errore di connessione')
     } finally {
       setLoading(false)
@@ -130,6 +162,44 @@ function LoginForm() {
               </button>
             </div>
           </form>
+
+          {accounts.length > 0 && (
+            <div className="mt-6 border-t border-gray-100 pt-4">
+              <div className="text-sm font-semibold text-gray-900 mb-2">
+                Seleziona un account
+              </div>
+              <div className="space-y-2">
+                {accounts.map((a: any) => {
+                  const label = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.code || 'Account'
+                  const role = String(a.role || '').toUpperCase()
+                  const roleLabel =
+                    role === 'ADMIN'
+                      ? 'Admin'
+                      : a.isSpecialAssistant
+                      ? 'Speciale'
+                      : 'Standard'
+                  const agency = a.agencyName ? ` · ${a.agencyName}` : ''
+                  return (
+                    <button
+                      key={a.id}
+                      type="button"
+                      onClick={() => handleChooseAccount(a.id)}
+                      disabled={loading}
+                      className="w-full flex items-center justify-between gap-3 px-3 py-2 rounded-lg border border-gray-200 hover:bg-gray-50 transition-colors text-left disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-gray-900 truncate">{label}</div>
+                        <div className="text-xs text-gray-500 truncate">
+                          {a.code ? `${a.code} · ` : ''}{roleLabel}{agency}
+                        </div>
+                      </div>
+                      <User className="w-4 h-4 text-gray-400 shrink-0" />
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>

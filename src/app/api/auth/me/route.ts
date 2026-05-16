@@ -16,6 +16,7 @@ export async function GET() {
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: {
+      id: true,
       firstName: true,
       lastName: true,
       email: true,
@@ -32,6 +33,25 @@ export async function GET() {
     },
   })
 
+  const accounts = user?.email
+    ? await prisma.user.findMany({
+        where: {
+          email: { equals: user.email, mode: 'insensitive' },
+          id: { not: user.id },
+        },
+        select: {
+          id: true,
+          firstName: true,
+          lastName: true,
+          code: true,
+          role: true,
+          isSpecialAssistant: true,
+          agency: { select: { name: true } },
+        },
+        orderBy: [{ role: 'asc' }, { firstName: 'asc' }, { lastName: 'asc' }],
+      })
+    : []
+
   return NextResponse.json({
     role: user?.role || session.user.role,
     isSpecialAssistant: computeIsSpecialAssistant(user, user?.agency?.name),
@@ -39,5 +59,14 @@ export async function GET() {
     agencyName: user?.agency?.name ?? null,
     agencyDefaultCommission: user?.agency?.defaultCommission ?? null,
     agencyCommissionType: user?.agency?.commissionType ?? null,
+    accounts: accounts.map(a => ({
+      id: a.id,
+      firstName: a.firstName,
+      lastName: a.lastName,
+      code: a.code,
+      role: a.role,
+      isSpecialAssistant: a.isSpecialAssistant,
+      agencyName: a.agency?.name ?? null,
+    })),
   })
 }

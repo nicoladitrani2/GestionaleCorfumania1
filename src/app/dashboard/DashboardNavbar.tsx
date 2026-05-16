@@ -1,9 +1,9 @@
 'use client'
 
 import Link from 'next/link'
-import { LogOut, Home, User, Menu, X } from 'lucide-react'
+import { LogOut, Home, User, Menu, X, ChevronDown, Check } from 'lucide-react'
 import { useRouter, usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 interface DashboardNavbarProps {
   user: {
@@ -18,10 +18,46 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
   const router = useRouter()
   const pathname = usePathname()
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false)
+  const [accounts, setAccounts] = useState<any[]>([])
+  const [accountsOpen, setAccountsOpen] = useState(false)
+  const [switchingId, setSwitchingId] = useState<string | null>(null)
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
     router.push('/login')
+  }
+
+  useEffect(() => {
+    const run = async () => {
+      try {
+        const res = await fetch('/api/auth/me', { cache: 'no-store' })
+        if (!res.ok) return
+        const data = await res.json()
+        const list = Array.isArray(data?.accounts) ? data.accounts : []
+        setAccounts(list)
+      } catch {}
+    }
+    run()
+  }, [])
+
+  const handleSwitchAccount = async (userId: string) => {
+    const id = String(userId || '').trim()
+    if (!id) return
+    setSwitchingId(id)
+    try {
+      const res = await fetch('/api/auth/switch-account', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: id }),
+      })
+      if (res.ok) {
+        setAccountsOpen(false)
+        router.refresh()
+        return
+      }
+    } finally {
+      setSwitchingId(null)
+    }
   }
 
   const isDashboardRoot = pathname === '/dashboard'
@@ -88,19 +124,69 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
           </div>
           
           <div className="flex items-center gap-2 md:gap-6">
-            <div className="flex flex-col items-end">
-              <span className="text-sm font-bold text-gray-900 flex items-center gap-2">
-                <User className="w-4 h-4 text-blue-600" />
-                <span className="hidden md:inline">
-                  {user.firstName || user.lastName ? `${user.firstName || ''} ${user.lastName || ''}` : 'Utente'}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => accounts.length ? setAccountsOpen(v => !v) : undefined}
+                className={`flex flex-col items-end ${accounts.length ? 'cursor-pointer' : 'cursor-default'}`}
+              >
+                <span className="text-sm font-bold text-gray-900 flex items-center gap-2">
+                  <User className="w-4 h-4 text-blue-600" />
+                  <span className="hidden md:inline">
+                    {user.firstName || user.lastName ? `${user.firstName || ''} ${user.lastName || ''}` : 'Utente'}
+                  </span>
+                  <span className="md:hidden">
+                     {user.firstName || 'Utente'}
+                  </span>
+                  {accounts.length > 0 && (
+                    <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform ${accountsOpen ? 'rotate-180' : ''}`} />
+                  )}
                 </span>
-                <span className="md:hidden">
-                   {user.firstName || 'Utente'}
+                <span className="text-xs font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full" title="Codice Utente">
+                  {user.code}
                 </span>
-              </span>
-              <span className="text-xs font-mono text-gray-500 bg-gray-100 px-2 py-0.5 rounded-full" title="Codice Utente">
-                {user.code}
-              </span>
+              </button>
+
+              {accountsOpen && accounts.length > 0 && (
+                <div className="absolute right-0 mt-2 w-72 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden z-50">
+                  <div className="px-3 py-2 text-xs font-semibold text-gray-500 bg-gray-50">
+                    Cambia account
+                  </div>
+                  <div className="py-1">
+                    {accounts.map((a: any) => {
+                      const label = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.code || 'Account'
+                      const role = String(a.role || '').toUpperCase()
+                      const roleLabel =
+                        role === 'ADMIN'
+                          ? 'Admin'
+                          : a.isSpecialAssistant
+                          ? 'Speciale'
+                          : 'Standard'
+                      const agency = a.agencyName ? ` · ${a.agencyName}` : ''
+                      const disabled = switchingId === String(a.id)
+                      return (
+                        <button
+                          key={a.id}
+                          type="button"
+                          disabled={disabled}
+                          onClick={() => handleSwitchAccount(a.id)}
+                          className={`w-full text-left px-3 py-2 flex items-center justify-between gap-3 hover:bg-gray-50 ${
+                            disabled ? 'opacity-60 cursor-not-allowed' : ''
+                          }`}
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-gray-900 truncate">{label}</div>
+                            <div className="text-xs text-gray-500 truncate">
+                              {a.code ? `${a.code} · ` : ''}{roleLabel}{agency}
+                            </div>
+                          </div>
+                          <Check className="w-4 h-4 text-transparent" />
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             <div className="h-8 w-px bg-gray-200 mx-1 md:mx-2 block"></div>
