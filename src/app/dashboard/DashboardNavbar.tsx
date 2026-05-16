@@ -45,6 +45,10 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
     run()
   }, [])
 
+  useEffect(() => {
+    if (user?.id) setCurrentAccountId(String(user.id))
+  }, [user?.id])
+
   const handleSwitchAccount = async (userId: string) => {
     const id = String(userId || '').trim()
     if (!id) return
@@ -59,6 +63,7 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
       })
       if (res.ok) {
         setAccountsOpen(false)
+        setCurrentAccountId(id)
         router.refresh()
         return
       }
