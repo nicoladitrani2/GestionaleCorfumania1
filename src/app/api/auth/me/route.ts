@@ -33,11 +33,10 @@ export async function GET() {
     },
   })
 
-  const accounts = user?.email
+  const allAccounts = user?.email
     ? await prisma.user.findMany({
         where: {
           email: { equals: user.email, mode: 'insensitive' },
-          id: { not: user.id },
         },
         select: {
           id: true,
@@ -53,13 +52,14 @@ export async function GET() {
     : []
 
   return NextResponse.json({
+    userId: user?.id ?? session.user.id,
     role: user?.role || session.user.role,
     isSpecialAssistant: computeIsSpecialAssistant(user, user?.agency?.name),
     explicitIsSpecialAssistant: Boolean(user?.isSpecialAssistant),
     agencyName: user?.agency?.name ?? null,
     agencyDefaultCommission: user?.agency?.defaultCommission ?? null,
     agencyCommissionType: user?.agency?.commissionType ?? null,
-    accounts: accounts.map(a => ({
+    accounts: allAccounts.map(a => ({
       id: a.id,
       firstName: a.firstName,
       lastName: a.lastName,

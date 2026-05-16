@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react'
 
 interface DashboardNavbarProps {
   user: {
+    id?: string
     firstName?: string
     lastName?: string
     code?: string
@@ -21,6 +22,8 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
   const [accounts, setAccounts] = useState<any[]>([])
   const [accountsOpen, setAccountsOpen] = useState(false)
   const [switchingId, setSwitchingId] = useState<string | null>(null)
+  const [currentAccountId, setCurrentAccountId] = useState<string | null>(user.id ? String(user.id) : null)
+  const [switchError, setSwitchError] = useState<string>('')
 
   const handleLogout = async () => {
     await fetch('/api/auth/logout', { method: 'POST' })
@@ -35,6 +38,8 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
         const data = await res.json()
         const list = Array.isArray(data?.accounts) ? data.accounts : []
         setAccounts(list)
+        const id = typeof data?.userId === 'string' ? data.userId : null
+        if (id) setCurrentAccountId(id)
       } catch {}
     }
     run()
@@ -43,6 +48,8 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
   const handleSwitchAccount = async (userId: string) => {
     const id = String(userId || '').trim()
     if (!id) return
+    if (currentAccountId && id === currentAccountId) return
+    setSwitchError('')
     setSwitchingId(id)
     try {
       const res = await fetch('/api/auth/switch-account', {
@@ -54,6 +61,13 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
         setAccountsOpen(false)
         router.refresh()
         return
+      }
+      try {
+        const data = await res.json()
+        const msg = typeof data?.error === 'string' ? data.error : 'Impossibile cambiare account.'
+        setSwitchError(msg)
+      } catch {
+        setSwitchError('Impossibile cambiare account.')
       }
     } finally {
       setSwitchingId(null)
@@ -152,6 +166,11 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
                   <div className="px-3 py-2 text-xs font-semibold text-gray-500 bg-gray-50">
                     Cambia account
                   </div>
+                  {switchError && (
+                    <div className="px-3 py-2 text-xs text-red-700 bg-red-50 border-b border-red-100">
+                      {switchError}
+                    </div>
+                  )}
                   <div className="py-1">
                     {accounts.map((a: any) => {
                       const label = `${a.firstName || ''} ${a.lastName || ''}`.trim() || a.code || 'Account'
@@ -163,7 +182,8 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
                           ? 'Speciale'
                           : 'Standard'
                       const agency = a.agencyName ? ` · ${a.agencyName}` : ''
-                      const disabled = switchingId === String(a.id)
+                      const isCurrent = currentAccountId ? String(a.id) === String(currentAccountId) : false
+                      const disabled = switchingId === String(a.id) || isCurrent
                       return (
                         <button
                           key={a.id}
@@ -180,7 +200,7 @@ export function DashboardNavbar({ user }: DashboardNavbarProps) {
                               {a.code ? `${a.code} · ` : ''}{roleLabel}{agency}
                             </div>
                           </div>
-                          <Check className="w-4 h-4 text-transparent" />
+                          <Check className={`w-4 h-4 ${isCurrent ? 'text-emerald-600' : 'text-transparent'}`} />
                         </button>
                       )
                     })}
