@@ -54,6 +54,17 @@ export async function GET(request: Request) {
   }
 
   try {
+    let canViewFinancials = false
+    if (session.user.id) {
+      try {
+        const operator = await prisma.user.findUnique({
+          where: { id: session.user.id },
+          select: { role: true, isSpecialAssistant: true },
+        })
+        canViewFinancials = String(operator?.role || '').toUpperCase() === 'ADMIN' || !!operator?.isSpecialAssistant
+      } catch {}
+    }
+
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
     const archived = searchParams.get('archived') === 'true'
@@ -64,7 +75,7 @@ export async function GET(request: Request) {
     now.setHours(0, 0, 0, 0)
 
     let currentUserAgencyId: string | null = null
-    if (session.user.role !== 'ADMIN') {
+    if (!canViewFinancials) {
       try {
         if (session.user.id) {
           const user = await prisma.user.findUnique({
@@ -84,7 +95,10 @@ export async function GET(request: Request) {
       whereClause.id = id
     } else {
       if (capacityPending) {
-        whereClause.date = { gte: now }
+        whereClause.OR = [
+          { endDate: { gte: now } },
+          { endDate: null, date: { gte: now } }
+        ]
         whereClause.approvalStatus = { not: 'REJECTED' }
         whereClause.capacityRequests = { some: { status: 'PENDING' } }
       } else if (pending) {
@@ -92,10 +106,16 @@ export async function GET(request: Request) {
       } else if (rejected) {
         whereClause.approvalStatus = 'REJECTED'
       } else if (archived) {
-        whereClause.date = { lt: now }
+        whereClause.OR = [
+          { endDate: { lt: now } },
+          { endDate: null, date: { lt: now } }
+        ]
         whereClause.approvalStatus = { not: 'REJECTED' }
       } else {
-        whereClause.date = { gte: now }
+        whereClause.OR = [
+          { endDate: { gte: now } },
+          { endDate: null, date: { gte: now } }
+        ]
         whereClause.approvalStatus = { not: 'REJECTED' }
       }
     }
@@ -234,7 +254,7 @@ export async function GET(request: Request) {
       pendingCapacityRequest: Array.isArray(capacityRequests) && capacityRequests.length > 0 ? capacityRequests[0] : null
     }
 
-    if (session.user.role === 'ADMIN') {
+    if (canViewFinancials) {
       result.totalCollected = totalCollected
       result.commissions = agencyCommissions || []
     } else {

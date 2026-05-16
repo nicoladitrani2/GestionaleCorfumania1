@@ -52,6 +52,17 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Non autorizzato' }, { status: 401 })
   }
 
+  let canViewFinancials = false
+  if (session.user.id) {
+    try {
+      const operator = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { role: true, isSpecialAssistant: true },
+      })
+      canViewFinancials = String(operator?.role || '').toUpperCase() === 'ADMIN' || !!operator?.isSpecialAssistant
+    } catch {}
+  }
+
   const { searchParams } = new URL(request.url)
   const id = searchParams.get('id')
   const archived = searchParams.get('archived') === 'true'
@@ -71,7 +82,7 @@ export async function GET(request: Request) {
   }
 
   let currentUserAgencyId: string | null = null
-  if (session.user.role !== 'ADMIN') {
+  if (!canViewFinancials) {
     // Fetch user to ensure we have the latest agency association
     try {
       if (session.user.id) {
@@ -93,11 +104,14 @@ export async function GET(request: Request) {
     whereClause.id = id
   } else if (!all) {
     if (archived) {
-      whereClause.endDate = { lt: cutoffDate }
+      whereClause.OR = [
+        { endDate: { lt: cutoffDate } },
+        { endDate: null, startDate: { lt: cutoffDate } }
+      ]
     } else {
       whereClause.OR = [
         { endDate: { gte: cutoffDate } },
-        { endDate: null }
+        { endDate: null, startDate: { gte: cutoffDate } }
       ]
     }
   }
@@ -167,7 +181,7 @@ export async function GET(request: Request) {
       }
 
       // Map commissions based on role
-      if (session?.user?.role === 'ADMIN') {
+      if (canViewFinancials) {
         result.totalCollected = totalCollected
         result.commissions = agencyCommissions || []
       } else {

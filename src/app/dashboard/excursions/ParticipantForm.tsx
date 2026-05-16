@@ -142,9 +142,11 @@ export function ParticipantForm({
     supplementPrice: initialData?.supplementPrice || 0,
     assistantCommission: initialData?.assistantCommission ?? agencyDefaultCommission,
     assistantCommissionType: initialData?.assistantCommissionType || agencyCommissionType,
-    agencyId: initialData?.agencyId || userAgencyId || ''
+    agencyId: initialData?.agencyId || userAgencyId || '',
+    isGroupLeader: false,
+    groupLeaderId: ''
   })
-  const [sendEmailToClient, setSendEmailToClient] = useState(true)
+  const [sendEmailToClient, setSendEmailToClient] = useState(false)
   const [countsByTier, setCountsByTier] = useState<Record<string, number>>({})
   const [paxInputs, setPaxInputs] = useState<{ adults: string; children: string }>({ adults: '1', children: '0' })
   const [tierInputs, setTierInputs] = useState<Record<string, string>>({})
@@ -159,6 +161,8 @@ export function ParticipantForm({
   )
   const [agencies, setAgencies] = useState<{ id: string, name: string, commissionType?: string, defaultCommission?: number }[]>([])
   const currentParticipantId = initialData?.id as string | undefined
+  const [groupLeaders, setGroupLeaders] = useState<{ id: string; label: string }[]>([])
+  const [groupLeadersLoading, setGroupLeadersLoading] = useState(false)
   const [capacityInfo, setCapacityInfo] = useState<{ loading: boolean; activePax: number | null }>({
     loading: false,
     activePax: null
@@ -481,7 +485,9 @@ export function ParticipantForm({
         commissionPercentage: (initialData as any).commissionPercentage || 0,
         assistantCommission: (initialData as any).assistantCommission || 0,
         assistantCommissionType: (initialData as any).assistantCommissionType || 'PERCENTAGE',
-        agencyId: (initialData as any).agencyId || userAgencyId || ''
+        agencyId: (initialData as any).agencyId || userAgencyId || '',
+        isGroupLeader: !!(initialData as any).isGroupLeader,
+        groupLeaderId: (initialData as any).groupLeaderId || ''
       })
       setSendEmailToClient(false)
       if (!isStandard) {
@@ -490,9 +496,56 @@ export function ParticipantForm({
         setCustomNationality('')
       }
     } else {
-      setSendEmailToClient(true)
+      setSendEmailToClient(false)
     }
   }, [initialData])
+
+  useEffect(() => {
+    const fetchGroupLeaders = async () => {
+      setGroupLeadersLoading(true)
+      try {
+        const params = new URLSearchParams()
+        params.set('leadersOnly', 'true')
+
+        if (type === 'EXCURSION' && excursionId) {
+          params.set('excursionId', excursionId)
+        } else if (type === 'TRANSFER' && transferId) {
+          params.set('transferId', transferId)
+        } else if (type === 'RENTAL') {
+          params.set('isRental', 'true')
+          const rt = String((formData as any).rentalType || '').trim()
+          const rs = String((formData as any).rentalStartDate || '').trim()
+          const re = String((formData as any).rentalEndDate || '').trim()
+          if (rt) params.set('rentalType', rt)
+          if (rs) params.set('rentalStartDate', rs)
+          if (re) params.set('rentalEndDate', re)
+        } else {
+          setGroupLeaders([])
+          return
+        }
+
+        const res = await fetch(`/api/participants?${params.toString()}`)
+        if (!res.ok) {
+          setGroupLeaders([])
+          return
+        }
+        const items = await res.json()
+        const options = (Array.isArray(items) ? items : [])
+          .filter((p: any) => p?.id && (!currentParticipantId || p.id !== currentParticipantId))
+          .map((p: any) => {
+            const label = `${p.firstName || ''} ${p.lastName || ''}`.trim() || p.name || p.id
+            return { id: p.id, label }
+          })
+        setGroupLeaders(options)
+      } catch {
+        setGroupLeaders([])
+      } finally {
+        setGroupLeadersLoading(false)
+      }
+    }
+
+    fetchGroupLeaders()
+  }, [type, excursionId, transferId, currentParticipantId, (formData as any).rentalType, (formData as any).rentalStartDate, (formData as any).rentalEndDate])
 
   useEffect(() => {
     const deposit = parseFloat(String(formData.deposit)) || 0
@@ -673,6 +726,19 @@ export function ParticipantForm({
       const newData = {
         ...prev,
         [name]: type === 'checkbox' ? checked : value,
+      }
+
+      if (name === 'isGroupLeader') {
+        if (checked) {
+          ;(newData as any).groupLeaderId = ''
+        }
+      }
+
+      if (name === 'groupLeaderId') {
+        const v = String(value || '').trim()
+        if (v.length > 0) {
+          ;(newData as any).isGroupLeader = false
+        }
       }
 
       // Selezionato Opzione: azzera acconto
@@ -881,6 +947,8 @@ export function ParticipantForm({
       const normalizedCountsByTier = hasTierPricing ? normalizeTierInputs(tierInputs) : undefined
       const payload: any = {
         ...formData,
+        isGroupLeader: !!(formData as any).isGroupLeader,
+        groupLeaderId: String((formData as any).groupLeaderId || '').trim() || null,
         nationality: formData.nationality === 'OTHER' ? customNationality : formData.nationality,
         price: parseFloat(String(formData.price)) || 0,
         deposit: Math.round(Math.max(0, depositAmount) * 100) / 100,
@@ -1387,6 +1455,38 @@ export function ParticipantForm({
                   className={inputClassName}
                   placeholder="Es. Rossi"
                 />
+              </div>
+
+              <div className="flex items-center gap-2 sm:col-span-2 md:col-span-1 mt-7">
+                <input
+                  type="checkbox"
+                  id="isGroupLeader"
+                  name="isGroupLeader"
+                  checked={!!(formData as any).isGroupLeader}
+                  onChange={handleChange}
+                  className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+                />
+                <label htmlFor="isGroupLeader" className="text-sm font-semibold text-gray-900 cursor-pointer select-none">
+                  Capogruppo
+                </label>
+              </div>
+
+              <div className="sm:col-span-2 md:col-span-1">
+                <label className={labelClassName}>Associato a capogruppo</label>
+                <select
+                  name="groupLeaderId"
+                  value={String((formData as any).groupLeaderId || '')}
+                  onChange={handleChange}
+                  disabled={!!(formData as any).isGroupLeader || groupLeadersLoading}
+                  className={inputClassName}
+                >
+                  <option value="">Nessuno</option>
+                  {groupLeaders.map(gl => (
+                    <option key={gl.id} value={gl.id}>
+                      {gl.label}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               {hasTierPricing ? (

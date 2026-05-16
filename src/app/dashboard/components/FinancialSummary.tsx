@@ -7,10 +7,9 @@ interface FinancialSummaryProps {
   entityId: string
   type: 'EXCURSION' | 'TRANSFER'
   refreshTrigger?: number
-  commissionConfigs?: Array<{ agencyId: string; commissionPercentage: number; commissionType?: string }>
 }
 
-export function FinancialSummary({ entityId, type, refreshTrigger = 0, commissionConfigs = [] }: FinancialSummaryProps) {
+export function FinancialSummary({ entityId, type, refreshTrigger = 0 }: FinancialSummaryProps) {
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -139,10 +138,9 @@ export function FinancialSummary({ entityId, type, refreshTrigger = 0, commissio
           agencyShare = Math.min(commissionable * 0.10, remainingPool)
           remainingPool = Math.max(0, remainingPool - agencyShare)
         } else if (!isCorfumania && ownerAgencyId && ownerAgencyName !== 'Diretto/Nessuna' && remainingPool > 0) {
-          const cfg = commissionConfigs.find(c => c.agencyId === ownerAgencyId)
-          if (cfg) {
-            const cfgType = String(cfg.commissionType || 'PERCENTAGE')
-            const cfgValue = Number(cfg.commissionPercentage || 0)
+          const cfgType = String(owner?.agency?.commissionType || 'PERCENTAGE')
+          const cfgValue = Number(owner?.agency?.defaultCommission || 0)
+          if (cfgValue > 0) {
             const raw =
               cfgType === 'FIXED'
                 ? Math.max(0, effectiveCount * cfgValue)

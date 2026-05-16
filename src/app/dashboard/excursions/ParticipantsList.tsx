@@ -55,6 +55,7 @@ interface ParticipantsTableProps {
   emptyMessage: string
   userRole: string
   currentUserId: string
+  canViewFinancials: boolean
   deadline: Date | null
   onEdit: (p: any) => void
   onDelete: (id: string) => void
@@ -84,6 +85,7 @@ interface ParticipantsTableProps {
   emptyMessage,
   userRole,
   currentUserId,
+  canViewFinancials,
   onEdit,
   onDelete,
   onSettleBalance,
@@ -139,11 +141,13 @@ interface ParticipantsTableProps {
                 <CreditCard className="w-4 h-4" /> Acconto
               </div>
             </th>
-            <th className={thClassName}>
-              <div className="flex items-center gap-2">
-                <CreditCard className="w-4 h-4" /> Metodi
-              </div>
-            </th>
+            {canViewFinancials && (
+              <th className={thClassName}>
+                <div className="flex items-center gap-2">
+                  <CreditCard className="w-4 h-4" /> Metodi
+                </div>
+              </th>
+            )}
             <th className={thClassName}>
               <div className="flex items-center gap-2">
                 <CheckCircle className="w-4 h-4" /> Stato
@@ -206,27 +210,29 @@ interface ParticipantsTableProps {
                 </td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">€ {p.price?.toFixed(2) || '0.00'}</td>
                 <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-600">€ {p.deposit?.toFixed(2) || '0.00'}</td>
-                <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-600">
-                  {(() => {
-                    const methodLabel = (raw: any) => (String(raw || '').trim().toUpperCase() === 'CASH' ? 'Contanti' : 'Digitale')
-                    const depositMethod = methodLabel(p.depositPaymentMethod || p.paymentMethod || 'CASH')
-                    const balanceMethod =
-                      p.paymentType === 'BALANCE' ? methodLabel(p.balancePaymentMethod || p.depositPaymentMethod || p.paymentMethod || 'CASH') : null
-                    const outCash = Number(p.paymentsSummary?.outgoingCash || 0)
-                    const outDigital = Number(p.paymentsSummary?.outgoingDigital || 0)
-                    const refunds =
-                      outCash > 0.009 || outDigital > 0.009
-                        ? `Rimborsi: ${outCash > 0.009 ? `Contanti € ${outCash.toFixed(2)}` : ''}${outCash > 0.009 && outDigital > 0.009 ? ' · ' : ''}${outDigital > 0.009 ? `Digitale € ${outDigital.toFixed(2)}` : ''}`
-                        : ''
-                    return (
-                      <div className="flex flex-col gap-0.5">
-                        <span>Acconto: <span className="font-semibold">{depositMethod}</span></span>
-                        {balanceMethod && <span>Saldo: <span className="font-semibold">{balanceMethod}</span></span>}
-                        {refunds && <span className="text-red-700">{refunds}</span>}
-                      </div>
-                    )
-                  })()}
-                </td>
+                {canViewFinancials && (
+                  <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-600">
+                    {(() => {
+                      const methodLabel = (raw: any) => (String(raw || '').trim().toUpperCase() === 'CASH' ? 'Contanti' : 'Digitale')
+                      const depositMethod = methodLabel(p.depositPaymentMethod || p.paymentMethod || 'CASH')
+                      const balanceMethod =
+                        p.paymentType === 'BALANCE' ? methodLabel(p.balancePaymentMethod || p.depositPaymentMethod || p.paymentMethod || 'CASH') : null
+                      const outCash = Number(p.paymentsSummary?.outgoingCash || 0)
+                      const outDigital = Number(p.paymentsSummary?.outgoingDigital || 0)
+                      const refunds =
+                        outCash > 0.009 || outDigital > 0.009
+                          ? `Rimborsi: ${outCash > 0.009 ? `Contanti € ${outCash.toFixed(2)}` : ''}${outCash > 0.009 && outDigital > 0.009 ? ' · ' : ''}${outDigital > 0.009 ? `Digitale € ${outDigital.toFixed(2)}` : ''}`
+                          : ''
+                      return (
+                        <div className="flex flex-col gap-0.5">
+                          <span>Acconto: <span className="font-semibold">{depositMethod}</span></span>
+                          {balanceMethod && <span>Saldo: <span className="font-semibold">{balanceMethod}</span></span>}
+                          {refunds && <span className="text-red-700">{refunds}</span>}
+                        </div>
+                      )
+                    })()}
+                  </td>
+                )}
                 <td className="px-6 py-4 whitespace-nowrap text-sm">
                   <span className={`px-2.5 py-1 inline-flex items-center text-xs font-medium rounded-full border ${getStatusColor(p)}`}>
                     {getStatusIcon(p)}
@@ -443,6 +449,7 @@ interface ParticipantsListProps {
   refreshTrigger: number
   currentUserId: string
   userRole: string
+  currentUserIsSpecialAssistant?: boolean
   excursion: any
   initialSelectedParticipantId?: string
 }
@@ -453,6 +460,7 @@ export function ParticipantsList({
   refreshTrigger, 
   currentUserId, 
   userRole, 
+  currentUserIsSpecialAssistant,
   excursion,
   initialSelectedParticipantId
 }: ParticipantsListProps) {
@@ -460,6 +468,7 @@ export function ParticipantsList({
   const confirmationDeadline = excursion.confirmationDeadline
   const excursionName = excursion.name
   const excursionDate = excursion.date
+  const canViewFinancials = userRole === 'ADMIN' || !!currentUserIsSpecialAssistant
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedParticipant, setSelectedParticipant] = useState<any>(null)
@@ -801,7 +810,7 @@ export function ParticipantsList({
     setShowExportModal(true)
   }
 
-  const handleFinalExport = (selectedFields: string[]) => {
+  const handleFinalExport = (options: { fields: string[]; groupByGroupLeader: boolean }) => {
     if (!listToExport) return
     
     const eventData = {
@@ -810,7 +819,7 @@ export function ParticipantsList({
     }
     
     try {
-      const doc = generateParticipantsListPDF(listToExport, eventData as any, selectedFields)
+      const doc = generateParticipantsListPDF(listToExport, eventData as any, options.fields, { groupByGroupLeader: options.groupByGroupLeader })
       doc.save(`${exportFilename}-${excursionName || 'escursione'}.pdf`)
     } catch (error) {
       console.error('Error generating PDF:', error)
@@ -880,51 +889,53 @@ export function ParticipantsList({
         <div className="flex items-center gap-1"><Trash2 className="w-4 h-4 text-red-600" /> Elimina</div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-800">Contanti</div>
-              <div className="text-xs text-gray-500">Entrate / Uscite</div>
+      {canViewFinancials && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-gray-800">Contanti</div>
+                <div className="text-xs text-gray-500">Entrate / Uscite</div>
+              </div>
+              <div className="p-2 rounded-lg bg-sky-50">
+                <CreditCard className="w-5 h-5 text-sky-600" />
+              </div>
             </div>
-            <div className="p-2 rounded-lg bg-sky-50">
-              <CreditCard className="w-5 h-5 text-sky-600" />
+            <div className="mt-3 grid grid-cols-2 gap-4 font-mono">
+              <div>
+                <div className="text-xs text-gray-500">Entrate</div>
+                <div className="text-base font-bold text-green-700">€ {paymentsByChannel.cash.incoming.toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Uscite</div>
+                <div className="text-base font-bold text-red-700">€ {paymentsByChannel.cash.outgoing.toFixed(2)}</div>
+              </div>
             </div>
           </div>
-          <div className="mt-3 grid grid-cols-2 gap-4 font-mono">
-            <div>
-              <div className="text-xs text-gray-500">Entrate</div>
-              <div className="text-base font-bold text-green-700">€ {paymentsByChannel.cash.incoming.toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">Uscite</div>
-              <div className="text-base font-bold text-red-700">€ {paymentsByChannel.cash.outgoing.toFixed(2)}</div>
-            </div>
-          </div>
-        </div>
 
-        <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-sm font-semibold text-gray-800">Pagamenti digitali</div>
-              <div className="text-xs text-gray-500">Digitale · Entrate / Uscite</div>
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-gray-200">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-sm font-semibold text-gray-800">Pagamenti digitali</div>
+                <div className="text-xs text-gray-500">Digitale · Entrate / Uscite</div>
+              </div>
+              <div className="p-2 rounded-lg bg-emerald-50">
+                <Euro className="w-5 h-5 text-emerald-600" />
+              </div>
             </div>
-            <div className="p-2 rounded-lg bg-emerald-50">
-              <Euro className="w-5 h-5 text-emerald-600" />
-            </div>
-          </div>
-          <div className="mt-3 grid grid-cols-2 gap-4 font-mono">
-            <div>
-              <div className="text-xs text-gray-500">Entrate</div>
-              <div className="text-base font-bold text-green-700">€ {paymentsByChannel.digital.incoming.toFixed(2)}</div>
-            </div>
-            <div>
-              <div className="text-xs text-gray-500">Uscite</div>
-              <div className="text-base font-bold text-red-700">€ {paymentsByChannel.digital.outgoing.toFixed(2)}</div>
+            <div className="mt-3 grid grid-cols-2 gap-4 font-mono">
+              <div>
+                <div className="text-xs text-gray-500">Entrate</div>
+                <div className="text-base font-bold text-green-700">€ {paymentsByChannel.digital.incoming.toFixed(2)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-gray-500">Uscite</div>
+                <div className="text-base font-bold text-red-700">€ {paymentsByChannel.digital.outgoing.toFixed(2)}</div>
+              </div>
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {pendingParticipants.length > 0 && (
         <div className="space-y-4">
@@ -942,6 +953,7 @@ export function ParticipantsList({
             emptyMessage="Nessun partecipante in attesa" 
             userRole={userRole}
             currentUserId={currentUserId}
+            canViewFinancials={canViewFinancials}
             deadline={deadline}
             onEdit={onEdit}
             onDelete={handleDelete}
@@ -967,6 +979,7 @@ export function ParticipantsList({
           emptyMessage="Nessun partecipante confermato" 
           userRole={userRole}
           currentUserId={currentUserId}
+          canViewFinancials={canViewFinancials}
           deadline={deadline}
           onEdit={onEdit}
           onDelete={handleDelete}
@@ -1000,6 +1013,7 @@ export function ParticipantsList({
               emptyMessage="Nessun partecipante entro scadenza" 
               userRole={userRole}
               currentUserId={currentUserId}
+              canViewFinancials={canViewFinancials}
               deadline={deadline}
               onEdit={onEdit}
               onDelete={handleDelete}
@@ -1035,6 +1049,7 @@ export function ParticipantsList({
               emptyMessage="Nessun partecipante rifiutato" 
               userRole={userRole}
               currentUserId={currentUserId}
+              canViewFinancials={canViewFinancials}
               deadline={deadline}
               onEdit={onEdit}
               onDelete={handleDelete}
@@ -1070,6 +1085,7 @@ export function ParticipantsList({
               emptyMessage="Nessun partecipante scaduto" 
               userRole={userRole}
               currentUserId={currentUserId}
+              canViewFinancials={canViewFinancials}
               deadline={deadline}
               onEdit={onEdit}
               onDelete={handleDelete}
@@ -1090,6 +1106,7 @@ export function ParticipantsList({
           }}
           participant={selectedParticipant}
           excursion={excursion}
+          canViewFinancials={canViewFinancials}
         />
       )}
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect } from 'react'
-import { Search, RefreshCw, Mail, Phone, Calendar, Clock, ChevronRight, Map, Car, Key, Users } from 'lucide-react'
+import { Search, RefreshCw, Mail, Phone, Calendar, Clock, ChevronRight, Map, Car, Key, Users, Trash2 } from 'lucide-react'
 import { ClientHistoryModal } from './ClientHistoryModal'
 import { EmailModal } from './EmailModal'
 import { ConfirmationModal } from '../components/ConfirmationModal'
@@ -62,6 +62,9 @@ export default function ClientsPage() {
   const [selectedYear, setSelectedYear] = useState<number>(new Date().getFullYear())
   const [activeTab, setActiveTab] = useState<'ALL' | 'EXCURSION' | 'TRANSFER' | 'RENTAL'>('ALL')
   const [showResetModal, setShowResetModal] = useState(false)
+  const [showCleanupModal, setShowCleanupModal] = useState(false)
+  const [cleaningUp, setCleaningUp] = useState(false)
+  const [cleanupResult, setCleanupResult] = useState<{ deleted: number } | null>(null)
 
   useEffect(() => {
     fetchClients()
@@ -104,7 +107,79 @@ export default function ClientsPage() {
     return new Date(maxDate).getFullYear()
   }
 
-  const availableYears = Array.from(new Set(clients.map(getLastActivityYear))).sort((a, b) => b - a)
+  const todayStart = (() => {
+    const now = new Date()
+    return new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+  })()
+
+  const getParticipantEventDate = (p: ClientParticipant): Date | null => {
+    const dateStr =
+      p.excursion?.startDate ||
+      p.transfer?.date ||
+      p.rentalStartDate ||
+      p.createdAt
+    const d = new Date(dateStr)
+    return Number.isNaN(d.getTime()) ? null : d
+  }
+
+  const isUpcomingParticipant = (p: ClientParticipant): boolean => {
+    const d = getParticipantEventDate(p)
+    return !!d && d.getTime() >= todayStart.getTime()
+  }
+
+  const getRubricaYear = (client: Client): number | null => {
+    if (!client.nextEventStartDate) return null
+    const d = new Date(client.nextEventStartDate)
+    return Number.isNaN(d.getTime()) ? null : d.getFullYear()
+  }
+
+  const getServiceTypesForClient = (client: Client): string[] => {
+    if (clientsMode !== 'RUBRICA') {
+      return client.derivedServiceTypes.length > 0
+        ? client.derivedServiceTypes
+        : (client.serviceType ? [client.serviceType] : [])
+    }
+
+    const types = new Set<string>()
+    for (const p of client.participants || []) {
+      if (!isUpcomingParticipant(p)) continue
+      if (p.excursion) types.add('EXCURSION')
+      if (p.transfer) types.add('TRANSFER')
+      if (p.rental) types.add('RENTAL')
+    }
+    return Array.from(types)
+  }
+
+  const getUpcomingParticipantsCount = (client: Client): number => {
+    const list = client.participants || []
+    return list.reduce((sum, p) => sum + (isUpcomingParticipant(p) ? 1 : 0), 0)
+  }
+
+  const getUpcomingPaxByType = (client: Client): Record<string, number> => {
+    const next: Record<string, number> = { EXCURSION: 0, TRANSFER: 0, RENTAL: 0 }
+    for (const p of client.participants || []) {
+      if (!isUpcomingParticipant(p)) continue
+      const pax = Math.max(1, (p.adults || 0) + (p.children || 0) + (p.infants || 0))
+      if (p.excursion) next.EXCURSION += pax
+      if (p.transfer) next.TRANSFER += pax
+      if (p.rental) next.RENTAL += pax
+    }
+    return next
+  }
+
+  const availableYears =
+    clientsMode === 'RUBRICA'
+      ? Array.from(new Set(clients.map(getRubricaYear).filter((y): y is number => typeof y === 'number'))).sort((a, b) => b - a)
+      : Array.from(new Set(clients.map(getLastActivityYear))).sort((a, b) => b - a)
+
+  const availableYearsKey = availableYears.join(',')
+
+  useEffect(() => {
+    if (availableYears.length === 0) return
+    if (!availableYears.includes(selectedYear)) {
+      setSelectedYear(availableYears[0])
+    }
+  }, [clientsMode, availableYearsKey, selectedYear])
 
   const handleSync = async () => {
     setSyncing(true)
@@ -146,11 +221,15 @@ export default function ClientsPage() {
       client.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
       (client.email && client.email.toLowerCase().includes(searchTerm.toLowerCase()))
     
-    const matchesYear = getLastActivityYear(client) === selectedYear
+    const matchesYear =
+      clientsMode === 'RUBRICA'
+        ? (getRubricaYear(client) === selectedYear)
+        : (getLastActivityYear(client) === selectedYear)
 
-    const serviceTypes = client.derivedServiceTypes.length > 0
-      ? client.derivedServiceTypes
-      : (client.serviceType ? [client.serviceType] : [])
+    if (clientsMode === 'RUBRICA' && !client.nextEventStartDate) return false
+    if (clientsMode === 'RUBRICA' && getUpcomingParticipantsCount(client) === 0) return false
+
+    const serviceTypes = getServiceTypesForClient(client)
 
     const matchesTab =
       activeTab === 'ALL'
@@ -173,6 +252,11 @@ export default function ClientsPage() {
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Anagrafica Clienti</h1>
           <p className="text-sm text-gray-500 mt-1">Elenco di tutti i clienti registrati e storico attività</p>
+          {cleanupResult && (
+            <p className="text-xs text-green-600 mt-1">
+              Prenotazioni eliminate: {cleanupResult.deleted}
+            </p>
+          )}
           {syncResult && (
             <p className="text-xs text-green-600 mt-1">
               Sincronizzati: {syncResult.processed}. Rimanenti da sincronizzare: {syncResult.remaining}
@@ -180,6 +264,20 @@ export default function ClientsPage() {
           )}
         </div>
         <div className="flex items-center gap-4">
+          {clientsMode === 'RUBRICA' && (
+            <button
+              onClick={() => setShowCleanupModal(true)}
+              disabled={cleaningUp}
+              className={`flex items-center gap-2 px-4 py-2 text-sm font-medium rounded-lg shadow-sm transition-all ${
+                cleaningUp
+                  ? 'bg-gray-100 text-gray-400 border border-gray-200 cursor-not-allowed'
+                  : 'bg-white text-red-700 border border-red-300 hover:bg-red-50 hover:border-red-400'
+              }`}
+            >
+              <Trash2 className={`w-4 h-4 ${cleaningUp ? 'animate-pulse' : ''}`} />
+              Elimina prenotazioni passate
+            </button>
+          )}
           <button
             onClick={handleSync}
             disabled={syncing}
@@ -430,10 +528,15 @@ export default function ClientsPage() {
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <div className="flex flex-wrap gap-2">
-                        {(client.derivedServiceTypes.length > 0 ? client.derivedServiceTypes : [client.serviceType])
-                          .filter(Boolean)
-                          .map((type, idx) => {
-                            const pax = client.servicePaxByType?.[String(type)] ?? null
+                        {(() => {
+                          const types = getServiceTypesForClient(client)
+                          const paxByType =
+                            clientsMode === 'RUBRICA' ? getUpcomingPaxByType(client) : (client.servicePaxByType || {})
+
+                          return types
+                            .filter(Boolean)
+                            .map((type, idx) => {
+                            const pax = paxByType?.[String(type)] ?? null
                             const label =
                               type === 'EXCURSION'
                                 ? 'Escursione'
@@ -459,12 +562,13 @@ export default function ClientsPage() {
                              <ChevronRight className="w-3 h-3 opacity-50" />
                           </button>
                             )
-                          })}
+                          })
+                        })()}
                       </div>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap">
                       <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
-                        {client._count.participants}
+                        {clientsMode === 'RUBRICA' ? getUpcomingParticipantsCount(client) : client._count.participants}
                       </span>
                     </td>
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -535,6 +639,38 @@ export default function ClientsPage() {
         confirmText="Sì, resetta"
         cancelText="Annulla"
         variant="warning"
+      />
+
+      <ConfirmationModal
+        isOpen={showCleanupModal}
+        onClose={() => setShowCleanupModal(false)}
+        onConfirm={async () => {
+          setCleaningUp(true)
+          setCleanupResult(null)
+          try {
+            const res = await fetch('/api/clients', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ action: 'CLEANUP_PAST_BOOKINGS' })
+            })
+            const data = await res.json().catch(() => ({} as any))
+            if (!res.ok) {
+              console.error('Failed to cleanup past bookings', data)
+              return
+            }
+            setCleanupResult({ deleted: Number(data.deleted || 0) })
+            fetchClients()
+          } catch (error) {
+            console.error('Error cleaning up past bookings:', error)
+          } finally {
+            setCleaningUp(false)
+          }
+        }}
+        title="Elimina prenotazioni passate"
+        message="Vuoi eliminare tutte le prenotazioni (escursioni, trasferimenti, noleggi) con data evento già passata? In rubrica resteranno solo i contatti legati a eventi futuri."
+        confirmText={cleaningUp ? 'Eliminazione...' : 'Sì, elimina'}
+        cancelText="Annulla"
+        variant="danger"
       />
     </div>
   )

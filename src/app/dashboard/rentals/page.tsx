@@ -12,6 +12,8 @@ export default async function RentalsPage() {
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: { 
+      role: true,
+      isSpecialAssistant: true,
       agencyId: true,
       agency: {
         select: {
@@ -21,12 +23,14 @@ export default async function RentalsPage() {
       }
     }
   })
+  const effectiveRole = String(user?.role || session.user.role || '')
 
   return (
     <div className="p-6">
       <RentalsManager 
         currentUserId={session.user.id} 
-        userRole={session.user.role}
+        userRole={effectiveRole}
+        currentUserIsSpecialAssistant={!!user?.isSpecialAssistant}
         userAgencyId={user?.agencyId || undefined}
         agencyDefaultCommission={user?.agency?.defaultCommission}
         agencyCommissionType={user?.agency?.commissionType}

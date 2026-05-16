@@ -10,6 +10,7 @@ interface ExportRentalsModalProps {
     startDate?: string
     endDate?: string
     fields: string[]
+    groupByGroupLeader: boolean
   }) => void
   agencies: string[]
   suppliers: string[]
@@ -17,6 +18,8 @@ interface ExportRentalsModalProps {
 }
 
 export const RENTAL_EXPORT_FIELDS = [
+  { id: 'isGroupLeader', label: 'Capogruppo' },
+  { id: 'groupLeader', label: 'Associato a capogruppo' },
   { id: 'client', label: 'Cliente' },
   { id: 'phoneNumber', label: 'Telefono' },
   { id: 'rentalType', label: 'Tipo Mezzo' },
@@ -47,6 +50,7 @@ export function ExportRentalsModal({
   const [selectedFields, setSelectedFields] = useState<string[]>(RENTAL_EXPORT_FIELDS.map(f => f.id))
   const [startDate, setStartDate] = useState<string>('')
   const [endDate, setEndDate] = useState<string>('')
+  const [groupByGroupLeader, setGroupByGroupLeader] = useState(false)
 
   const toggleValue = (current: string[], value: string) => {
     if (current.includes(value)) {
@@ -72,6 +76,7 @@ export function ExportRentalsModal({
       startDate: startDate || undefined,
       endDate: endDate || undefined,
       fields: selectedFields,
+      groupByGroupLeader,
     })
     onClose()
   }
@@ -217,6 +222,19 @@ export function ExportRentalsModal({
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="groupByGroupLeader"
+              checked={groupByGroupLeader}
+              onChange={(e) => setGroupByGroupLeader(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+            />
+            <label htmlFor="groupByGroupLeader" className="text-sm font-medium text-gray-800 cursor-pointer select-none">
+              Raggruppa per capogruppo
+            </label>
           </div>
 
           <div className="space-y-3">

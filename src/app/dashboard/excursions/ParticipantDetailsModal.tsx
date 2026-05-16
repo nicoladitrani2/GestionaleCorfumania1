@@ -6,9 +6,10 @@ interface ParticipantDetailsModalProps {
   onClose: () => void
   participant: any
   excursion?: any
+  canViewFinancials?: boolean
 }
 
-export function ParticipantDetailsModal({ isOpen, onClose, participant, excursion }: ParticipantDetailsModalProps) {
+export function ParticipantDetailsModal({ isOpen, onClose, participant, excursion, canViewFinancials = false }: ParticipantDetailsModalProps) {
   if (!isOpen || !participant) return null
 
   const formatDate = (date: string | Date) => {
@@ -186,9 +187,11 @@ export function ParticipantDetailsModal({ isOpen, onClose, participant, excursio
                       {formatCurrency((participant.price || 0) - (participant.deposit || 0))}
                     </span>
                   </div>
-                  <p className="text-xs text-gray-500 mt-2 font-medium">
-                    Metodo: {participant.paymentMethod === 'CASH' ? 'Contanti' : 'Carta/POS'}
-                  </p>
+                  {canViewFinancials && (
+                    <p className="text-xs text-gray-500 mt-2 font-medium">
+                      Metodo: {participant.paymentMethod === 'CASH' ? 'Contanti' : 'Carta/POS'}
+                    </p>
+                  )}
                 </div>
               </div>
             </div>

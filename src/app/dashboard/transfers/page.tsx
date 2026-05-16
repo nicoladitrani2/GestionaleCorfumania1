@@ -14,6 +14,7 @@ export default async function TransfersPage() {
   const user = await prisma.user.findUnique({
     where: { id: session.user.id },
     select: { 
+      role: true,
       isSpecialAssistant: true,
       agencyId: true,
       agency: {
@@ -28,12 +29,13 @@ export default async function TransfersPage() {
   const isSpecialAssistant = !!user?.isSpecialAssistant
   const effectiveAgencyDefaultCommission = user?.agency?.defaultCommission
   const effectiveAgencyCommissionType = user?.agency?.commissionType
+  const effectiveRole = String(user?.role || session.user.role || '')
 
   return (
     <div className="p-6">
       <TransfersManager 
         currentUserId={session.user.id} 
-        userRole={session.user.role}
+        userRole={effectiveRole}
         userAgencyId={user?.agencyId || undefined}
         agencyDefaultCommission={effectiveAgencyDefaultCommission}
         agencyCommissionType={effectiveAgencyCommissionType}

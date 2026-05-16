@@ -444,8 +444,9 @@ export function TaxParticipantsList({
     setShowExportModal(true)
   }
 
-  const executeExport = (selectedFields: string[]) => {
+  const executeExport = (options: { fields: string[]; groupByGroupLeader: boolean }) => {
     if (!listToExport) return
+    const selectedFields = options.fields
     
     // Generate PDF using jsPDF
     const doc = new jsPDF()

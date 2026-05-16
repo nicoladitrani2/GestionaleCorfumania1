@@ -13,6 +13,7 @@ import { ExportRentalsModal, RENTAL_EXPORT_FIELDS } from './ExportRentalsModal'
 interface RentalsManagerProps {
   currentUserId: string
   userRole: string
+  currentUserIsSpecialAssistant?: boolean
   currentUserSupplierName?: string
   userAgencyId?: string
   agencyDefaultCommission?: number
@@ -22,6 +23,7 @@ interface RentalsManagerProps {
 export function RentalsManager({ 
   currentUserId, 
   userRole, 
+  currentUserIsSpecialAssistant,
   currentUserSupplierName, 
   userAgencyId,
   agencyDefaultCommission,
@@ -86,11 +88,12 @@ export function RentalsManager({
     startDate?: string
     endDate?: string
     fields: string[]
+    groupByGroupLeader: boolean
   }) => {
     if (userRole !== 'ADMIN') return
     if (!allRentals.length) return
 
-    const { agencies, suppliers, rentalTypes, startDate, endDate, fields } = options
+    const { agencies, suppliers, rentalTypes, startDate, endDate, fields, groupByGroupLeader } = options
 
     const filtered = allRentals.filter(r => {
       const user = r.assignedTo || r.createdBy
@@ -133,7 +136,7 @@ export function RentalsManager({
       return def?.label || f
     })]
 
-    const rows = filtered.map(r => {
+    const buildRow = (r: any) => {
       const pax =
         (r.adults || 0) +
         (r.children || 0) +
@@ -147,6 +150,16 @@ export function RentalsManager({
 
       fields.forEach(field => {
         switch (field) {
+          case 'isGroupLeader':
+            base.push(r.isGroupLeader ? 'Sì' : 'No')
+            break
+          case 'groupLeader':
+            base.push(
+              r.groupLeader
+                ? `${r.groupLeader.firstName || ''} ${r.groupLeader.lastName || ''}`.trim() || r.groupLeader.name || ''
+                : ''
+            )
+            break
           case 'client':
             base.push(`${r.firstName || ''} ${r.lastName || ''}`.trim())
             break
@@ -212,13 +225,106 @@ export function RentalsManager({
       })
 
       return base
-    })
+    }
+
+    const getId = (r: any) => {
+      const id = r?.id
+      return typeof id === 'string' && id.trim().length > 0 ? id.trim() : null
+    }
+
+    const getLabel = (p: any) => {
+      const label = `${p?.firstName || ''} ${p?.lastName || ''}`.trim()
+      return label || p?.name || '-'
+    }
+
+    const buildLeaderGroups = (list: any[]) => {
+      const byId = new Map<string, any>()
+      list.forEach(r => {
+        const id = getId(r)
+        if (id) byId.set(id, r)
+      })
+
+      const NO_GROUP = '__NO_GROUP__'
+      const groups = new Map<string, { key: string; leaderId: string | null; members: any[] }>()
+
+      list.forEach(r => {
+        const id = getId(r)
+        const leaderId =
+          r?.isGroupLeader && id
+            ? id
+            : (r?.groupLeaderId || r?.groupLeader?.id || null)
+        const key = leaderId || NO_GROUP
+        if (!groups.has(key)) groups.set(key, { key, leaderId, members: [] })
+        groups.get(key)!.members.push(r)
+      })
+
+      const toSortKey = (s: string) => String(s || '').trim().toLowerCase()
+
+      const resolveLabel = (g: { key: string; leaderId: string | null; members: any[] }) => {
+        if (!g.leaderId) return 'Senza capogruppo'
+        const leader = byId.get(g.key)
+        if (leader) return getLabel(leader)
+        const fallback = g.members.find(m => m?.groupLeader)?.groupLeader
+        return fallback ? getLabel(fallback) : g.key
+      }
+
+      return Array.from(groups.values())
+        .map(g => {
+          const label = resolveLabel(g)
+          const leaderId = g.leaderId
+          const members = [...g.members].sort((a, b) => {
+            const aId = getId(a)
+            const bId = getId(b)
+            if (leaderId) {
+              const aIsLeader = aId === leaderId
+              const bIsLeader = bId === leaderId
+              if (aIsLeader !== bIsLeader) return aIsLeader ? -1 : 1
+            }
+            const aKey = `${a?.lastName || ''} ${a?.firstName || ''}`.trim()
+            const bKey = `${b?.lastName || ''} ${b?.firstName || ''}`.trim()
+            return toSortKey(aKey).localeCompare(toSortKey(bKey))
+          })
+          return { ...g, label, members }
+        })
+        .sort((a, b) => {
+          if (a.key === NO_GROUP && b.key !== NO_GROUP) return 1
+          if (b.key === NO_GROUP && a.key !== NO_GROUP) return -1
+          return toSortKey(a.label).localeCompare(toSortKey(b.label))
+        })
+    }
+
+    const body = (() => {
+      if (!groupByGroupLeader) {
+        return filtered.map(buildRow)
+      }
+
+      const out: any[] = []
+      const groups = buildLeaderGroups(filtered)
+      groups.forEach(g => {
+        const paxTotal = g.members.reduce((acc, r) => acc + ((r.adults || 0) + (r.children || 0) + (r.infants || 0) || 1), 0)
+        if (g.leaderId) {
+          out.push([{
+            content: `Capogruppo: ${g.label} (Pax: ${paxTotal})`,
+            colSpan: header.length,
+            styles: { fillColor: [237, 233, 254], fontStyle: 'bold', textColor: [88, 28, 135], halign: 'left' },
+          }])
+        } else {
+          out.push([{
+            content: `Senza capogruppo (Pax: ${paxTotal})`,
+            colSpan: header.length,
+            styles: { fillColor: [243, 244, 246], fontStyle: 'bold', textColor: [107, 114, 128], halign: 'left' },
+          }])
+        }
+        g.members.forEach(r => out.push(buildRow(r)))
+      })
+      return out
+    })()
 
     const doc = new jsPDF('landscape', 'pt', 'a4')
 
     autoTable(doc, {
       head: [header],
-      body: rows,
+      body,
       styles: { fontSize: 8 },
       headStyles: {
         fillColor: [37, 99, 235],
@@ -317,6 +423,7 @@ export function RentalsManager({
         <RentalsList 
           currentUserId={currentUserId}
           userRole={userRole}
+          currentUserIsSpecialAssistant={!!currentUserIsSpecialAssistant}
           refreshTrigger={refreshTrigger}
           search={search}
           onLoaded={handleRentalsLoaded}

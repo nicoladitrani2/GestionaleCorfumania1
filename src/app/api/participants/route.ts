@@ -211,8 +211,23 @@ function computeIsSpecialAssistant(user: any, agencyName?: string | null): boole
   return user.isSpecialAssistant === true
 }
 
+function redactPaymentInfoFromNotes(raw: unknown): string | null {
+  if (raw === null || raw === undefined) return null
+  const text = typeof raw === 'string' ? raw : String(raw)
+  if (!text) return text
+  const lines = text.split(/\r?\n/)
+  const cleaned = lines.map(line => {
+    const l = String(line || '')
+    if (!/\brimborsat/i.test(l)) return l
+    if (!/€\s*[0-9]/.test(l)) return l
+    return '[dati rimborso nascosti]'
+  })
+  const joined = cleaned.join('\n').trim()
+  return joined.length > 0 ? joined : null
+}
+
 function mapParticipantForClient(p: any) {
-  const { user, client, assignedTo, paymentEvents, ...rest } = p
+  const { user, client, assignedTo, paymentEvents, groupLeader, ...rest } = p
   const paymentType = rest.paymentType || 'BALANCE'
 
   const rawName = String(rest.name || '').trim()
@@ -351,6 +366,16 @@ function mapParticipantForClient(p: any) {
     createdById: rest.userId,
     assignedTo: assignedTo ? { ...assignedTo, isSpecialAssistant: computeIsSpecialAssistant(assignedTo, assignedTo?.agency?.name) } : assignedTo,
     assignedToId: rest.assignedToId,
+    isGroupLeader: !!rest.isGroupLeader,
+    groupLeaderId: rest.groupLeaderId || null,
+    groupLeader: groupLeader
+      ? {
+          id: groupLeader.id,
+          firstName: groupLeader.firstName || null,
+          lastName: groupLeader.lastName || null,
+          name: groupLeader.name || null,
+        }
+      : null,
     price: rest.totalPrice,
     deposit:
       typeof rest.depositPaidAmount === 'number'
@@ -377,10 +402,24 @@ export async function GET(request: Request) {
   if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   try {
+    let canViewFinancials = false
+    if (session.user.id) {
+      const operator = await prisma.user.findUnique({
+        where: { id: session.user.id },
+        select: { role: true, isSpecialAssistant: true },
+      })
+      canViewFinancials = String(operator?.role || '').toUpperCase() === 'ADMIN' || !!operator?.isSpecialAssistant
+    }
+
     const { searchParams } = new URL(request.url)
     const excursionId = searchParams.get('excursionId')
     const transferId = searchParams.get('transferId')
     const isRental = searchParams.get('isRental') === 'true'
+    const rentalId = searchParams.get('rentalId')
+    const rentalTypeFilter = searchParams.get('rentalType')
+    const rentalStartDateFilter = searchParams.get('rentalStartDate')
+    const rentalEndDateFilter = searchParams.get('rentalEndDate')
+    const leadersOnly = searchParams.get('leadersOnly') === 'true'
     const search = searchParams.get('search') || undefined
 
     if (!excursionId && !transferId && !isRental && !search) {
@@ -390,7 +429,24 @@ export async function GET(request: Request) {
     const whereClause: any = {}
     if (excursionId) whereClause.excursionId = excursionId
     if (transferId) whereClause.transferId = transferId
-    if (isRental) whereClause.rentalId = { not: null }
+    if (rentalId) whereClause.rentalId = rentalId
+    else if (isRental) whereClause.rentalId = { not: null }
+    if (rentalTypeFilter) whereClause.rentalType = rentalTypeFilter
+    if (leadersOnly) whereClause.isGroupLeader = true
+
+    const parseDateOnly = (raw: string | null) => {
+      const v = String(raw || '').trim()
+      if (!v) return null
+      const d = new Date(v)
+      if (Number.isNaN(d.getTime())) return null
+      const start = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0)
+      const end = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 23, 59, 59, 999)
+      return { start, end }
+    }
+    const startRange = parseDateOnly(rentalStartDateFilter)
+    const endRange = parseDateOnly(rentalEndDateFilter)
+    if (startRange) whereClause.rentalStartDate = { gte: startRange.start, lte: startRange.end }
+    if (endRange) whereClause.rentalEndDate = { gte: endRange.start, lte: endRange.end }
     if (search) {
       const term = String(search || '').trim()
       if (term.length > 0) {
@@ -431,6 +487,21 @@ export async function GET(request: Request) {
       take: isGlobalSearch ? 100 : undefined,
       orderBy: { createdAt: 'desc' },
       include: {
+        groupLeader: {
+          select: {
+            id: true,
+            name: true,
+            firstName: true,
+            lastName: true,
+            excursionId: true,
+            transferId: true,
+            rentalId: true,
+            rentalType: true,
+            rentalStartDate: true,
+            rentalEndDate: true,
+            isGroupLeader: true,
+          },
+        },
         paymentEvents: {
           select: {
             direction: true,
@@ -501,7 +572,18 @@ export async function GET(request: Request) {
       }
     })
 
-    const mapped = participants.map(mapParticipantForClient)
+    const mapped = participants.map(mapParticipantForClient).map((p: any) => {
+      if (canViewFinancials) return p
+      const out: any = { ...p }
+      delete out.paymentsSummary
+      delete out.paymentMethod
+      delete out.depositPaymentMethod
+      delete out.balancePaymentMethod
+      delete out.paidAmount
+      delete out.depositPaidAmount
+      out.notes = redactPaymentInfoFromNotes(out.notes)
+      return out
+    })
 
     return NextResponse.json(mapped)
   } catch (error) {
@@ -557,7 +639,9 @@ export async function POST(request: Request) {
       assistantCommission,
       assistantCommissionType,
       assignedToId: rawAssignedToId,
-      agencyId
+      agencyId,
+      isGroupLeader,
+      groupLeaderId
     } = body
 
     const name = `${firstName || ''} ${lastName || ''}`.trim()
@@ -895,6 +979,48 @@ export async function POST(request: Request) {
       resolvedRentalId = rental.id
     }
 
+    const groupLeaderIdValue = typeof groupLeaderId === 'string' && groupLeaderId.trim().length > 0 ? groupLeaderId.trim() : null
+    const isGroupLeaderValue = !!isGroupLeader
+    if (isGroupLeaderValue && groupLeaderIdValue) {
+      return NextResponse.json({ error: 'Un capogruppo non può essere associato ad un altro capogruppo.' }, { status: 400 })
+    }
+    if (groupLeaderIdValue) {
+      const leader = await prisma.participant.findUnique({
+        where: { id: groupLeaderIdValue },
+        select: {
+          id: true,
+          isGroupLeader: true,
+          excursionId: true,
+          transferId: true,
+          rentalId: true,
+          rentalType: true,
+          rentalStartDate: true,
+          rentalEndDate: true,
+        },
+      })
+      if (!leader) {
+        return NextResponse.json({ error: 'Capogruppo non trovato.' }, { status: 400 })
+      }
+      if (!leader.isGroupLeader) {
+        return NextResponse.json({ error: 'Il partecipante selezionato non è un capogruppo.' }, { status: 400 })
+      }
+      if (excursionId) {
+        if (leader.excursionId !== excursionId) return NextResponse.json({ error: 'Capogruppo non valido per questa escursione.' }, { status: 400 })
+      } else if (transferId) {
+        if (leader.transferId !== transferId) return NextResponse.json({ error: 'Capogruppo non valido per questo trasferimento.' }, { status: 400 })
+      } else if (resolvedRentalId) {
+        if (leader.rentalId !== resolvedRentalId) return NextResponse.json({ error: 'Capogruppo non valido per questo noleggio.' }, { status: 400 })
+      } else if (isRental) {
+        const norm = (d: any) => (d ? new Date(d).toISOString().slice(0, 10) : null)
+        const sameType = String(leader.rentalType || '') === String(rentalType || '')
+        const sameStart = norm(leader.rentalStartDate) === norm(parsedRentalStartDate)
+        const sameEnd = norm(leader.rentalEndDate) === norm(parsedRentalEndDate)
+        if (!sameType || !sameStart || !sameEnd) {
+          return NextResponse.json({ error: 'Capogruppo non valido per questo noleggio (tipo o date diverse).' }, { status: 400 })
+        }
+      }
+    }
+
     const participant = await prisma.participant.create({
       data: {
         excursionId: excursionId || null,
@@ -946,7 +1072,9 @@ export async function POST(request: Request) {
         needsTransfer: !!needsTransfer,
         commissionPercentage: commissionPercentage || 0,
         agencyId,
-        approvalStatus: approvalStatus || 'APPROVED'
+        approvalStatus: approvalStatus || 'APPROVED',
+        isGroupLeader: isGroupLeaderValue,
+        groupLeaderId: groupLeaderIdValue
       }
     })
 

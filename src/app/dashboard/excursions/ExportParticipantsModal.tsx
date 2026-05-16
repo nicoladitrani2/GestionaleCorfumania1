@@ -3,10 +3,12 @@ import { X, FileDown, CheckSquare, Square } from 'lucide-react'
 
 interface ExportParticipantsModalProps {
   onClose: () => void
-  onExport: (selectedFields: string[]) => void
+  onExport: (options: { fields: string[]; groupByGroupLeader: boolean }) => void
 }
 
 export const EXPORT_FIELDS = [
+  { id: 'isGroupLeader', label: 'Capogruppo' },
+  { id: 'groupLeader', label: 'Associato a capogruppo' },
   { id: 'accommodation', label: 'Struttura' },
   { id: 'pickupLocation', label: 'Partenza' },
   { id: 'pickupTime', label: 'Ora Partenza' },
@@ -27,6 +29,7 @@ export const EXPORT_FIELDS = [
 
 export function ExportParticipantsModal({ onClose, onExport }: ExportParticipantsModalProps) {
   const [selectedFields, setSelectedFields] = useState<string[]>(EXPORT_FIELDS.map(f => f.id))
+  const [groupByGroupLeader, setGroupByGroupLeader] = useState(false)
 
   const toggleField = (id: string) => {
     setSelectedFields(prev => {
@@ -38,7 +41,7 @@ export function ExportParticipantsModal({ onClose, onExport }: ExportParticipant
   }
 
   const handleExport = () => {
-    onExport(selectedFields)
+    onExport({ fields: selectedFields, groupByGroupLeader })
     onClose()
   }
 
@@ -91,6 +94,19 @@ export function ExportParticipantsModal({ onClose, onExport }: ExportParticipant
                 )
               })}
             </div>
+          </div>
+
+          <div className="flex items-center gap-2 mb-6">
+            <input
+              type="checkbox"
+              id="groupByGroupLeader"
+              checked={groupByGroupLeader}
+              onChange={(e) => setGroupByGroupLeader(e.target.checked)}
+              className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+            />
+            <label htmlFor="groupByGroupLeader" className="text-sm font-medium text-gray-800 cursor-pointer select-none">
+              Raggruppa per capogruppo
+            </label>
           </div>
 
           <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">

@@ -14,7 +14,7 @@ services:
       timeout: 5s
       retries: 20
     ports:
-      - "55432:5432"
+      - "${DB_BIND_IP:-127.0.0.1}:55432:5432"
 
   app:
     build: .
@@ -27,9 +27,8 @@ services:
       JWT_SECRET: change-me-in-prod
       SESSION_TTL_SECONDS: 28800
       NEXT_PUBLIC_ENABLE_PWA: "false"
-      APP_ORIGIN: http://localhost:3000
     ports:
-      - "3000:3000"
+      - "${APP_BIND_IP:-127.0.0.1}:3000:3000"
 
 volumes:
   corfumania_db:

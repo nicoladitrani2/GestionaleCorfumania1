@@ -117,50 +117,6 @@ export async function GET(request: Request) {
         return true
     })
 
-    // Fetch Commissions
-    const excursionIdsList = participants
-        .map(p => p.excursionId)
-        .filter((id): id is string => !!id)
-    
-    const transferIdsList = participants
-        .map(p => p.transferId)
-        .filter((id): id is string => !!id)
-    
-    let commissionsMap: Record<string, any[]> = {}
-    let transferCommissionsMap: Record<string, any[]> = {}
-    
-    if (excursionIdsList.length > 0) {
-        try {
-            const commissions = await prisma.excursionAgencyCommission.findMany({
-                where: { excursionId: { in: excursionIdsList } }
-            })
-            commissions.forEach(c => {
-                if (!commissionsMap[c.excursionId]) {
-                    commissionsMap[c.excursionId] = []
-                }
-                commissionsMap[c.excursionId].push(c)
-            })
-        } catch (e) {
-            console.error("Failed to fetch commissions:", e)
-        }
-    }
-
-    if (transferIdsList.length > 0) {
-        try {
-            const commissions = await prisma.transferAgencyCommission.findMany({
-                where: { transferId: { in: transferIdsList } }
-            })
-            commissions.forEach(c => {
-                if (!transferCommissionsMap[c.transferId]) {
-                    transferCommissionsMap[c.transferId] = []
-                }
-                transferCommissionsMap[c.transferId].push(c)
-            })
-        } catch (e) {
-            console.error("Failed to fetch transfer commissions:", e)
-        }
-    }
-
     // Process Data
     let totalRevenue = 0
     let totalCommission = 0 // Mixed: agency commissions + brokerage/net components
@@ -695,21 +651,7 @@ export async function GET(request: Request) {
               let ruleType = (agency as any).commissionType || 'PERCENTAGE'
               let ruleValue = agency.defaultCommission || 0
 
-              if (p.excursion) {
-                const excursionCommissions = commissionsMap[p.excursion.id] || []
-                const commRule = excursionCommissions.find(c => c.agencyId === userAgencyId)
-                if (commRule) {
-                  ruleValue = commRule.commissionPercentage
-                  ruleType = (commRule as any).commissionType || 'PERCENTAGE'
-                }
-              } else if (p.transfer) {
-                const transferCommissions = transferCommissionsMap[p.transfer.id] || []
-                const commRule = transferCommissions.find(c => c.agencyId === userAgencyId)
-                if (commRule) {
-                  ruleValue = commRule.commissionPercentage
-                  ruleType = (commRule as any).commissionType || 'PERCENTAGE'
-                }
-              }
+              // Commissioni sempre derivate dalla configurazione Agenzia (niente override per escursione/transfer)
 
               const rawAgencyShare =
                 ruleType === 'FIXED'

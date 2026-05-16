@@ -20,9 +20,10 @@ interface AuditLogListProps {
   excursionId?: string
   transferId?: string
   rentalId?: string
+  canViewFinancials?: boolean
 }
 
-export function AuditLogList({ excursionId, transferId, rentalId }: AuditLogListProps) {
+export function AuditLogList({ excursionId, transferId, rentalId, canViewFinancials = false }: AuditLogListProps) {
   const [logs, setLogs] = useState<AuditLog[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedUser, setSelectedUser] = useState<string>('ALL')
@@ -92,18 +93,26 @@ export function AuditLogList({ excursionId, transferId, rentalId }: AuditLogList
   }
 
   const formatDetails = (details: string) => {
-    return details
+    const base = details
       .replace(/\bBALANCE\b/g, 'Saldo')
       .replace(/\bDEPOSIT\b/g, 'Acconto')
       .replace(/\bOPTION\b/g, 'Opzione')
-      .replace(/\bCASH\b/g, 'Contanti')
-      .replace(/\bDIGITAL\b/g, 'Digitale')
-      .replace(/\bTRANSFER\b/g, 'Digitale')
-      .replace(/\bCARD\b/g, 'Digitale')
       .replace(/\bPENDING_APPROVAL\b/g, 'In attesa di approvazione')
       .replace(/\bAPPROVED\b/g, 'Approvato')
       .replace(/\bREJECTED\b/g, 'Rifiutato')
-      .replace(/\bCREATE_PARTICIPANT\b/g, 'Aggiunta Partecipante') // Fallback
+      .replace(/\bCREATE_PARTICIPANT\b/g, 'Aggiunta Partecipante')
+
+    if (canViewFinancials) {
+      return base
+        .replace(/\bCASH\b/g, 'Contanti')
+        .replace(/\bDIGITAL\b/g, 'Digitale')
+        .replace(/\bTRANSFER\b/g, 'Digitale')
+        .replace(/\bCARD\b/g, 'Digitale')
+    }
+
+    return base
+      .replace(/€\s*([0-9]+(?:[.,][0-9]+)?)/g, '€ —')
+      .replace(/\b(CASH|DIGITAL|TRANSFER|CARD)\b/g, 'METODO_NASCOSTO')
   }
 
   if (loading) {

@@ -2,6 +2,7 @@ import jsPDF from 'jspdf'
 import autoTable from 'jspdf-autotable'
 
 interface ParticipantData {
+  id?: string
   firstName: string
   lastName: string
   nationality: string
@@ -15,6 +16,14 @@ interface ParticipantData {
   paymentMethod?: string // Legacy or fallback
   depositPaymentMethod?: string
   balancePaymentMethod?: string
+  isGroupLeader?: boolean
+  groupLeaderId?: string | null
+  groupLeader?: {
+    id: string
+    firstName?: string | null
+    lastName?: string | null
+    name?: string | null
+  } | null
   adults?: number
   children?: number
   infants?: number
@@ -531,9 +540,13 @@ export const generateParticipantPDF = (
 export const generateParticipantsListPDF = (
   participants: ParticipantData[],
   event: ExcursionData | TransferData,
-  selectedFields: string[]
+  selectedFields: string[],
+  options?: {
+    groupByGroupLeader?: boolean
+  }
 ): jsPDF => {
   const doc = new jsPDF({ orientation: 'landscape' }) // Landscape for better fit
+  const groupByGroupLeader = !!options?.groupByGroupLeader
 
   // --- Header ---
   const eventName = event.name
@@ -570,6 +583,8 @@ export const generateParticipantsListPDF = (
   if (selectedFields.includes('nationality')) head[0].push('Nazionalità')
   if (selectedFields.includes('docType') || selectedFields.includes('docNumber')) head[0].push('Documento')
   if (selectedFields.includes('email')) head[0].push('Email')
+  if (selectedFields.includes('isGroupLeader')) head[0].push('Capogruppo')
+  if (selectedFields.includes('groupLeader')) head[0].push('Associato a')
   if (selectedFields.includes('price')) head[0].push('Prezzo')
   if (selectedFields.includes('deposit')) head[0].push('Acconto')
   if (selectedFields.includes('paymentType')) head[0].push('Stato')
@@ -588,12 +603,86 @@ export const generateParticipantsListPDF = (
   }
 
   // --- Table Body ---
+  const getPaxCount = (p: ParticipantData) =>
+    (p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1
+
+  const getParticipantId = (p: ParticipantData) => {
+    const id = (p as any)?.id ?? p.id
+    return typeof id === 'string' && id.trim().length > 0 ? id.trim() : null
+  }
+
+  const getLabel = (p: any) => {
+    const label = `${p?.firstName || ''} ${p?.lastName || ''}`.trim()
+    return label || p?.name || '-'
+  }
+
+  const buildLeaderGroups = (list: ParticipantData[]) => {
+    const byId = new Map<string, ParticipantData>()
+    list.forEach(p => {
+      const id = getParticipantId(p)
+      if (id) byId.set(id, p)
+    })
+
+    const NO_GROUP = '__NO_GROUP__'
+    const groups = new Map<string, { key: string; leaderId: string | null; members: ParticipantData[] }>()
+
+    list.forEach(p => {
+      const id = getParticipantId(p)
+      const leaderId =
+        p.isGroupLeader && id
+          ? id
+          : (p.groupLeaderId || p.groupLeader?.id || null)
+      const key = leaderId || NO_GROUP
+
+      if (!groups.has(key)) {
+        groups.set(key, { key, leaderId: leaderId, members: [] })
+      }
+      groups.get(key)!.members.push(p)
+    })
+
+    const resolveLeaderLabel = (g: { key: string; leaderId: string | null; members: ParticipantData[] }) => {
+      if (!g.leaderId) return 'Senza capogruppo'
+      const leader = byId.get(g.key)
+      if (leader) return getLabel(leader)
+      const fallback = g.members.find(m => (m as any)?.groupLeader)?.groupLeader
+      return fallback ? getLabel(fallback) : g.key
+    }
+
+    const toSortKey = (s: string) => String(s || '').trim().toLowerCase()
+
+    const sorted = Array.from(groups.values())
+      .map(g => {
+        const label = resolveLeaderLabel(g)
+        const leaderId = g.leaderId
+        const members = [...g.members].sort((a: any, b: any) => {
+          const aId = getParticipantId(a)
+          const bId = getParticipantId(b)
+          if (leaderId) {
+            const aIsLeader = aId === leaderId
+            const bIsLeader = bId === leaderId
+            if (aIsLeader !== bIsLeader) return aIsLeader ? -1 : 1
+          }
+          const aKey = `${a?.lastName || ''} ${a?.firstName || ''}`.trim()
+          const bKey = `${b?.lastName || ''} ${b?.firstName || ''}`.trim()
+          return toSortKey(aKey).localeCompare(toSortKey(bKey))
+        })
+        return { ...g, label, members }
+      })
+      .sort((a, b) => {
+        if (a.key === NO_GROUP && b.key !== NO_GROUP) return 1
+        if (b.key === NO_GROUP && a.key !== NO_GROUP) return -1
+        return toSortKey(a.label).localeCompare(toSortKey(b.label))
+      })
+
+    return sorted
+  }
+
   const buildRow = (p: ParticipantData, index: number) => {
     const row = [
       (index + 1).toString(),
       `${p.firstName} ${p.lastName}`,
       p.phoneNumber || '-',
-      ((p.adults || 0) + (p.children || 0) + (p.infants || 0) || 1).toString()
+      getPaxCount(p).toString()
     ]
 
     if (selectedFields.includes('nationality')) row.push(p.nationality || '-')
@@ -603,6 +692,19 @@ export const generateParticipantsListPDF = (
     }
     
     if (selectedFields.includes('email')) row.push(p.email || '-')
+
+    if (selectedFields.includes('isGroupLeader')) {
+      row.push(p.isGroupLeader ? 'Sì' : 'No')
+    }
+
+    if (selectedFields.includes('groupLeader')) {
+      const gl = p.groupLeader
+      const label = gl
+        ? `${gl.firstName || ''} ${gl.lastName || ''}`.trim() || gl.name || '-'
+        : '-'
+      row.push(label)
+    }
+
     if (selectedFields.includes('price')) row.push(`€ ${p.price?.toFixed(2) || '0.00'}`)
     if (selectedFields.includes('deposit')) row.push(`€ ${p.deposit?.toFixed(2) || '0.00'}`)
     
@@ -660,6 +762,30 @@ export const generateParticipantsListPDF = (
     return row
   }
 
+  const pushGroupLeaderRows = (list: ParticipantData[], globalIndexRef: { value: number }) => {
+    const groups = buildLeaderGroups(list)
+    groups.forEach(g => {
+      const paxTotal = g.members.reduce((acc, p) => acc + getPaxCount(p), 0)
+      if (g.leaderId) {
+        body.push([{
+          content: `Capogruppo: ${g.label} (Pax: ${paxTotal})`,
+          colSpan: head[0].length,
+          styles: { fillColor: [237, 233, 254], fontStyle: 'bold', textColor: [88, 28, 135], halign: 'left' }
+        }])
+      } else {
+        body.push([{
+          content: `Senza capogruppo (Pax: ${paxTotal})`,
+          colSpan: head[0].length,
+          styles: { fillColor: [243, 244, 246], fontStyle: 'bold', textColor: [107, 114, 128], halign: 'left' }
+        }])
+      }
+
+      g.members.forEach(p => {
+        body.push(buildRow(p, globalIndexRef.value++))
+      })
+    })
+  }
+
   if (selectedFields.includes('pickupLocation')) {
     const groups: Record<string, ParticipantData[]> = {}
     const noLocation: ParticipantData[] = []
@@ -675,20 +801,24 @@ export const generateParticipantsListPDF = (
     })
 
     const sortedLocations = Object.keys(groups).sort()
-    let globalIndex = 0
+    const globalIndexRef = { value: 0 }
 
     sortedLocations.forEach(loc => {
       // Add Header Row
-      const groupTotal = groups[loc].reduce((acc, p) => acc + ((p.adults || 0) + (p.children || 0) + (p.infants || 0)), 0)
+      const groupTotal = groups[loc].reduce((acc, p) => acc + getPaxCount(p), 0)
       body.push([{ 
         content: `Partenza: ${loc} (Pax: ${groupTotal})`, 
         colSpan: head[0].length, 
         styles: { fillColor: [230, 240, 255], fontStyle: 'bold', textColor: [30, 64, 175], halign: 'left' } 
       }])
-      
-      groups[loc].forEach(p => {
-        body.push(buildRow(p, globalIndex++))
-      })
+
+      if (groupByGroupLeader) {
+        pushGroupLeaderRows(groups[loc], globalIndexRef)
+      } else {
+        groups[loc].forEach(p => {
+          body.push(buildRow(p, globalIndexRef.value++))
+        })
+      }
     })
 
     if (noLocation.length > 0) {
@@ -697,15 +827,24 @@ export const generateParticipantsListPDF = (
         colSpan: head[0].length, 
         styles: { fillColor: [243, 244, 246], fontStyle: 'bold', textColor: [107, 114, 128], halign: 'left' } 
       }])
-      noLocation.forEach(p => {
-        body.push(buildRow(p, globalIndex++))
-      })
+      if (groupByGroupLeader) {
+        pushGroupLeaderRows(noLocation, globalIndexRef)
+      } else {
+        noLocation.forEach(p => {
+          body.push(buildRow(p, globalIndexRef.value++))
+        })
+      }
     }
 
   } else {
-    participants.forEach((p, index) => {
-      body.push(buildRow(p, index))
-    })
+    if (groupByGroupLeader) {
+      const globalIndexRef = { value: 0 }
+      pushGroupLeaderRows(participants, globalIndexRef)
+    } else {
+      participants.forEach((p, index) => {
+        body.push(buildRow(p, index))
+      })
+    }
   }
 
   autoTable(doc, {

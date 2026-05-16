@@ -31,6 +31,7 @@ export function ExcursionsManager({
   agencyCommissionType,
   currentUserIsSpecialAssistant
 }: ExcursionsManagerProps) {
+  const canViewFinancials = userRole === 'ADMIN' || !!currentUserIsSpecialAssistant
   const [excursions, setExcursions] = useState<any[]>([])
   const [templates, setTemplates] = useState<any[]>([])
   const [activeTab, setActiveTab] = useState('ACTIVE')
@@ -79,10 +80,6 @@ export function ExcursionsManager({
     agencyCommissionType: string | null
   } | null>(null)
 
-  // State for agencies and commissions
-  const [agencies, setAgencies] = useState<{ id: string, name: string, defaultCommission: number, commissionType: string }[]>([])
-  const [commissions, setCommissions] = useState<{ agencyId: string, percentage: string, commissionType: string }[]>([])
-  
   // Selection State
   const [selectedExcursions, setSelectedExcursions] = useState<string[]>([])
 
@@ -118,7 +115,6 @@ export function ExcursionsManager({
 
   useEffect(() => {
     fetchTemplates()
-    fetchAgencies()
     fetchCurrentUserMeta()
   }, [])
 
@@ -173,28 +169,6 @@ export function ExcursionsManager({
         }
       }
     } catch {}
-  }
-
-  const fetchAgencies = async () => {
-    try {
-      const res = await fetch('/api/agencies')
-      if (res.ok) {
-        const data = await res.json()
-        if (Array.isArray(data)) {
-          setAgencies(data)
-          // Initialize commissions with default values if not editing
-          if (!editingExcursionId) {
-             setCommissions(data.map((a: any) => ({ 
-               agencyId: a.id, 
-               percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
-               commissionType: a.commissionType || 'PERCENTAGE'
-             })))
-          }
-        }
-      }
-    } catch (e) {
-      console.error('Error fetching agencies:', e)
-    }
   }
 
   useEffect(() => {
@@ -377,13 +351,6 @@ export function ExcursionsManager({
     setRecurrenceFrequency('WEEKLY')
     setRecurrenceEndDate('')
     setRecurrenceDays([])
-
-    // Reset commissions
-    setCommissions(agencies.map(a => ({ 
-      agencyId: a.id, 
-      percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
-      commissionType: a.commissionType || 'PERCENTAGE'
-    })))
     setIsCreating(true)
   }
 
@@ -453,24 +420,6 @@ export function ExcursionsManager({
     setRecurrenceFrequency('WEEKLY')
     setRecurrenceEndDate('')
     setRecurrenceDays([])
-    
-    // Populate commissions
-    if (excursion.commissions) {
-      setCommissions(agencies.map(a => {
-        const comm = excursion.commissions.find((c: any) => c.agencyId === a.id)
-        return {
-          agencyId: a.id,
-          percentage: comm ? comm.commissionPercentage.toString() : (a.defaultCommission ? a.defaultCommission.toString() : ''),
-          commissionType: comm ? (comm.commissionType || 'PERCENTAGE') : (a.commissionType || 'PERCENTAGE')
-        }
-      }))
-    } else {
-      setCommissions(agencies.map(a => ({ 
-        agencyId: a.id, 
-        percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
-        commissionType: a.commissionType || 'PERCENTAGE'
-      })))
-    }
     
     setIsCreating(true)
   }
@@ -584,8 +533,7 @@ export function ExcursionsManager({
         priceTiers: tiersPayload,
         transferDepartureLocation: newTransferDepartureLocation,
         transferDestinationLocation: newTransferDestinationLocation,
-        transferTime: newTransferTime,
-        commissions // Add commissions
+        transferTime: newTransferTime
       }
 
       if (isRecurring) {
@@ -1141,54 +1089,6 @@ export function ExcursionsManager({
                   )}
                 </div>
 
-              <div>
-                <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Agenzie (Default)</label>
-                <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
-                  {agencies.length === 0 && <p className="text-sm text-gray-500 italic">Nessuna agenzia disponibile.</p>}
-                  {agencies && agencies.length > 0 && agencies.map(agency => (
-                    agency ? (
-                    <div key={agency.id || agency.name} className="flex items-center justify-between gap-3">
-                      <span className="text-sm font-medium text-gray-700 truncate flex-1" title={agency.name}>{agency.name}</span>
-                      <div className="flex gap-2 w-48">
-                          <select
-                              value={commissions.find(c => c.agencyId === agency.id)?.commissionType || 'PERCENTAGE'}
-                              onChange={(e) => {
-                                  const val = e.target.value
-                                  setCommissions(prev => prev.map(c => 
-                                      c.agencyId === agency.id ? { ...c, commissionType: val } : c
-                                  ))
-                              }}
-                              className="w-20 text-xs border border-gray-300 rounded-md py-1 px-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                          >
-                              <option value="PERCENTAGE">%</option>
-                              <option value="FIXED">€/pax</option>
-                          </select>
-                          <div className="relative flex-1">
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.01"
-                              placeholder="0"
-                              value={commissions.find(c => c.agencyId === agency.id)?.percentage || ''}
-                              onChange={(e) => {
-                                const val = e.target.value
-                                setCommissions(prev => prev.map(c => 
-                                  c.agencyId === agency.id ? { ...c, percentage: val } : c
-                                ))
-                              }}
-                              className="block w-full border border-gray-300 rounded-md py-1 px-2 text-right pr-6 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                            />
-                            <span className="absolute right-2 top-1.5 text-gray-400 text-xs">
-                                {commissions.find(c => c.agencyId === agency.id)?.commissionType === 'FIXED' ? '€' : '%'}
-                            </span>
-                          </div>
-                      </div>
-                    </div>
-                    ) : null
-                  ))}
-                </div>
-              </div>
-
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
                   type="button"
@@ -1290,7 +1190,7 @@ export function ExcursionsManager({
                     </div>
                     )
                   })()}
-                  {userRole === 'ADMIN' && (selectedExcursion.totalCollected !== undefined) && (
+                  {canViewFinancials && (selectedExcursion.totalCollected !== undefined) && (
                     <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
                       <Euro className="w-4 h-4 text-green-600 shrink-0" />
                       <div className="flex flex-col">
@@ -1323,7 +1223,7 @@ export function ExcursionsManager({
               <Users className="w-4 h-4" />
               Partecipanti
             </button>
-            {userRole === 'ADMIN' && (
+            {canViewFinancials && (
               <button
                 onClick={() => setViewMode('LEADERBOARD')}
                 className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
@@ -1336,7 +1236,7 @@ export function ExcursionsManager({
                 Classifica
               </button>
             )}
-            {userRole === 'ADMIN' && (
+            {canViewFinancials && (
               <button
                 onClick={() => setViewMode('SUMMARY')}
                 className={`pb-3 px-1 font-medium text-sm border-b-2 transition-colors flex items-center gap-2 ${
@@ -1401,6 +1301,7 @@ export function ExcursionsManager({
               onUpdate={fetchExcursions}
               currentUserId={currentUserId}
               userRole={userRole}
+              currentUserIsSpecialAssistant={!!currentUserIsSpecialAssistant}
               initialSelectedParticipantId={searchParams.get('participantId') || undefined}
             />
           )}
@@ -1412,17 +1313,16 @@ export function ExcursionsManager({
             />
           )}
 
-          {viewMode === 'SUMMARY' && userRole === 'ADMIN' && (
+          {viewMode === 'SUMMARY' && canViewFinancials && (
             <FinancialSummary 
               entityId={selectedExcursion.id}
               type="EXCURSION"
               refreshTrigger={refreshParticipantsTrigger}
-              commissionConfigs={selectedExcursion.commissions || []}
             />
           )}
 
           {viewMode === 'HISTORY' && (
-            <AuditLogList excursionId={selectedExcursion.id} />
+            <AuditLogList excursionId={selectedExcursion.id} canViewFinancials={canViewFinancials} />
           )}
         </div>
       ) : (

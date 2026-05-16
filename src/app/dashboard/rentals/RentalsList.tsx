@@ -74,6 +74,7 @@ interface RentalsTableProps {
   emptyMessage: string
   userRole: string
   currentUserId: string
+  canViewFinancials: boolean
   onEdit: (p: any) => void
   onDelete: (id: string) => void
   onSettleBalance: (p: any) => void
@@ -87,6 +88,7 @@ const RentalsTable = ({
   emptyMessage,
   userRole,
   currentUserId,
+  canViewFinancials,
   onEdit,
   onDelete,
   onSettleBalance,
@@ -379,7 +381,7 @@ const RentalsTable = ({
         <span className="font-semibold">Totale noleggi: {data.length}</span>
         <span>Pax: {totalPax}</span>
       </div>
-      {userRole === 'ADMIN' && (
+      {canViewFinancials && (
         <div className="flex items-center gap-4 font-mono">
           <span>Prezzo: € {totalPrice.toFixed(2)}</span>
           <span>Incassato (registrato): € {totalDeposit.toFixed(2)}</span>
@@ -396,8 +398,6 @@ const RentalsTable = ({
       {data.map((p) => {
         const canEdit = userRole === 'ADMIN' || p.createdById === currentUserId
         const isManaged = p.rentalType === 'CAR'
-        const canSeeFinancial =
-          userRole === 'ADMIN' || p.createdById === currentUserId || p.assignedToId === currentUserId
         
         return (
           <div 
@@ -443,44 +443,38 @@ const RentalsTable = ({
 
             <div className="flex justify-between items-center pt-2 border-t border-gray-100/50">
                <div className="flex gap-3 text-sm">
-                 {canSeeFinancial ? (
-                   <>
-                     <div className="flex flex-col">
-                       <span className="text-xs text-gray-400">Prezzo</span>
-                       <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
-                     </div>
-                     {p.rentalType === 'CAR' && (
-                       <div className="flex flex-col">
-                         <span className="text-xs text-gray-400">Acconto</span>
-                         <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
-                       </div>
-                     )}
-                     <div className="flex flex-col">
-                       <span className="text-xs text-gray-400">Metodi</span>
-                       {(() => {
-                         const methodLabel = (raw: any) => (String(raw || '').trim().toUpperCase() === 'CASH' ? 'Contanti' : 'Digitale')
-                         const depositMethod = methodLabel(p.depositPaymentMethod || p.paymentMethod || 'CASH')
-                         const balanceMethod =
-                           p.paymentType === 'BALANCE' ? methodLabel(p.balancePaymentMethod || p.depositPaymentMethod || p.paymentMethod || 'CASH') : null
-                         const outCash = Number(p.paymentsSummary?.outgoingCash || 0)
-                         const outDigital = Number(p.paymentsSummary?.outgoingDigital || 0)
-                         const refunds =
-                           outCash > 0.009 || outDigital > 0.009
-                             ? `${outCash > 0.009 ? `Rimb. Contanti € ${outCash.toFixed(2)}` : ''}${outCash > 0.009 && outDigital > 0.009 ? ' · ' : ''}${outDigital > 0.009 ? `Rimb. Digitale € ${outDigital.toFixed(2)}` : ''}`
-                             : ''
-                         return (
-                           <span className="text-xs text-gray-700">
-                             Acconto: <span className="font-semibold">{depositMethod}</span>
-                             {balanceMethod ? <> · Saldo: <span className="font-semibold">{balanceMethod}</span></> : null}
-                             {refunds ? <> · <span className="text-red-700">{refunds}</span></> : null}
-                           </span>
-                         )
-                       })()}
-                     </div>
-                   </>
-                 ) : (
-                   <div className="text-xs text-gray-400">
-                     Dati economici non visibili
+                 <div className="flex flex-col">
+                   <span className="text-xs text-gray-400">Prezzo</span>
+                   <span className="font-mono">€ {p.price?.toFixed(2) || '0.00'}</span>
+                 </div>
+                 {p.rentalType === 'CAR' && (
+                   <div className="flex flex-col">
+                     <span className="text-xs text-gray-400">Acconto</span>
+                     <span className="font-mono">€ {p.deposit?.toFixed(2) || '0.00'}</span>
+                   </div>
+                 )}
+                 {canViewFinancials && (
+                   <div className="flex flex-col">
+                     <span className="text-xs text-gray-400">Metodi</span>
+                     {(() => {
+                       const methodLabel = (raw: any) => (String(raw || '').trim().toUpperCase() === 'CASH' ? 'Contanti' : 'Digitale')
+                       const depositMethod = methodLabel(p.depositPaymentMethod || p.paymentMethod || 'CASH')
+                       const balanceMethod =
+                         p.paymentType === 'BALANCE' ? methodLabel(p.balancePaymentMethod || p.depositPaymentMethod || p.paymentMethod || 'CASH') : null
+                       const outCash = Number(p.paymentsSummary?.outgoingCash || 0)
+                       const outDigital = Number(p.paymentsSummary?.outgoingDigital || 0)
+                       const refunds =
+                         outCash > 0.009 || outDigital > 0.009
+                           ? `${outCash > 0.009 ? `Rimb. Contanti € ${outCash.toFixed(2)}` : ''}${outCash > 0.009 && outDigital > 0.009 ? ' · ' : ''}${outDigital > 0.009 ? `Rimb. Digitale € ${outDigital.toFixed(2)}` : ''}`
+                           : ''
+                       return (
+                         <span className="text-xs text-gray-700">
+                           Acconto: <span className="font-semibold">{depositMethod}</span>
+                           {balanceMethod ? <> · Saldo: <span className="font-semibold">{balanceMethod}</span></> : null}
+                           {refunds ? <> · <span className="text-red-700">{refunds}</span></> : null}
+                         </span>
+                       )
+                     })()}
                    </div>
                  )}
                </div>
@@ -562,6 +556,7 @@ interface RentalsListProps {
   refreshTrigger: number
   currentUserId: string
   userRole: string
+  currentUserIsSpecialAssistant?: boolean
   search?: string
   onLoaded?: (participants: any[]) => void
   initialSelectedParticipantId?: string
@@ -573,10 +568,12 @@ export function RentalsList({
   refreshTrigger, 
   currentUserId, 
   userRole,
+  currentUserIsSpecialAssistant,
   search = '',
   onLoaded,
   initialSelectedParticipantId,
   }: RentalsListProps) {
+  const canViewFinancials = userRole === 'ADMIN' || !!currentUserIsSpecialAssistant
   const [participants, setParticipants] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [showExpiredSection, setShowExpiredSection] = useState(false)
@@ -931,6 +928,7 @@ export function RentalsList({
             emptyMessage="Nessun partecipante in approvazione"
             userRole={userRole}
             currentUserId={currentUserId}
+            canViewFinancials={canViewFinancials}
             onEdit={onEdit}
             onDelete={handleDelete}
             onSettleBalance={handleSettleBalance}
@@ -966,6 +964,7 @@ export function RentalsList({
           emptyMessage="Nessun noleggio attivo"
           userRole={userRole}
           currentUserId={currentUserId}
+          canViewFinancials={canViewFinancials}
           onEdit={onEdit}
           onDelete={handleDelete}
           onSettleBalance={handleSettleBalance}
@@ -1009,6 +1008,7 @@ export function RentalsList({
                 emptyMessage="Nessun noleggio scaduto"
                 userRole={userRole}
                 currentUserId={currentUserId}
+                canViewFinancials={canViewFinancials}
                 onEdit={onEdit}
                 onDelete={handleDelete}
                 onSettleBalance={handleSettleBalance}
@@ -1055,6 +1055,7 @@ export function RentalsList({
                 emptyMessage="Nessun noleggio rimborsato"
                 userRole={userRole}
                 currentUserId={currentUserId}
+                canViewFinancials={canViewFinancials}
                 onEdit={onEdit}
                 onDelete={handleDelete}
                 onSettleBalance={handleSettleBalance}
@@ -1085,6 +1086,7 @@ export function RentalsList({
         }}
         participant={selectedParticipant}
         excursion={null} // No excursion object for rentals, generic logic inside modal handles it
+        canViewFinancials={canViewFinancials}
       />
 
       {showHistory && historyRentalId && (
@@ -1111,7 +1113,7 @@ export function RentalsList({
               </button>
             </div>
             <div className="p-6 overflow-y-auto">
-              <AuditLogList rentalId={historyRentalId} />
+              <AuditLogList rentalId={historyRentalId} canViewFinancials={canViewFinancials} />
             </div>
           </div>
         </div>

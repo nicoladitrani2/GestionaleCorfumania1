@@ -126,3 +126,58 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'Failed to fetch clients' }, { status: 500 })
   }
 }
+
+export async function POST(request: Request) {
+  const session = await getSession()
+  if (!session) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  if (session.user.role !== 'ADMIN') {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  try {
+    const body = await request.json().catch(() => ({} as any))
+    const action = String(body?.action || '').trim()
+    if (action !== 'CLEANUP_PAST_BOOKINGS') {
+      return NextResponse.json({ error: 'Invalid action' }, { status: 400 })
+    }
+
+    const now = new Date()
+    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0)
+
+    const result = await prisma.participant.deleteMany({
+      where: {
+        clientId: { not: null },
+        OR: [
+          {
+            excursion: {
+              OR: [
+                { endDate: { lt: todayStart } },
+                { endDate: null, startDate: { lt: todayStart } },
+              ],
+            },
+          },
+          {
+            transfer: {
+              OR: [
+                { endDate: { lt: todayStart } },
+                { endDate: null, date: { lt: todayStart } },
+              ],
+            },
+          },
+          {
+            rentalId: { not: null },
+            OR: [
+              { rentalEndDate: { lt: todayStart } },
+              { rentalEndDate: null, rentalStartDate: { lt: todayStart } },
+            ],
+          },
+        ],
+      },
+    })
+
+    return NextResponse.json({ success: true, deleted: result.count })
+  } catch (error) {
+    console.error('Error cleaning up past bookings:', error)
+    return NextResponse.json({ error: 'Failed to cleanup past bookings' }, { status: 500 })
+  }
+}

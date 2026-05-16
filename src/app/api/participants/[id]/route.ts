@@ -575,6 +575,73 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
         ? String(rawNextBalancePaymentMethod).trim()
         : null
 
+    const nextIsGroupLeader =
+      body.isGroupLeader !== undefined ? !!body.isGroupLeader : !!(participant as any).isGroupLeader
+    let nextGroupLeaderId =
+      body.groupLeaderId !== undefined
+        ? (typeof body.groupLeaderId === 'string' && body.groupLeaderId.trim().length > 0 ? body.groupLeaderId.trim() : null)
+        : ((participant as any).groupLeaderId || null)
+
+    if (nextIsGroupLeader) {
+      nextGroupLeaderId = null
+    }
+
+    if (!nextIsGroupLeader) {
+      const membersCount = await prisma.participant.count({ where: { groupLeaderId: id } })
+      if (membersCount > 0 && body.isGroupLeader === false) {
+        return NextResponse.json(
+          { error: 'Non puoi togliere il ruolo di capogruppo: ci sono partecipanti associati.' },
+          { status: 400 }
+        )
+      }
+    }
+
+    if (nextGroupLeaderId) {
+      const leader = await prisma.participant.findUnique({
+        where: { id: nextGroupLeaderId },
+        select: {
+          id: true,
+          isGroupLeader: true,
+          excursionId: true,
+          transferId: true,
+          rentalId: true,
+          rentalType: true,
+          rentalStartDate: true,
+          rentalEndDate: true,
+        },
+      })
+      if (!leader) {
+        return NextResponse.json({ error: 'Capogruppo non trovato.' }, { status: 400 })
+      }
+      if (!leader.isGroupLeader) {
+        return NextResponse.json({ error: 'Il partecipante selezionato non è un capogruppo.' }, { status: 400 })
+      }
+      if (participant.excursionId) {
+        if (leader.excursionId !== participant.excursionId) {
+          return NextResponse.json({ error: 'Capogruppo non valido per questa escursione.' }, { status: 400 })
+        }
+      } else if (participant.transferId) {
+        if (leader.transferId !== participant.transferId) {
+          return NextResponse.json({ error: 'Capogruppo non valido per questo trasferimento.' }, { status: 400 })
+        }
+      } else if (participant.rentalId) {
+        if (leader.rentalId !== participant.rentalId) {
+          return NextResponse.json({ error: 'Capogruppo non valido per questo noleggio.' }, { status: 400 })
+        }
+      } else if (body.isRental) {
+        const nextType = body.rentalType ?? (participant as any).rentalType
+        const nextStart = body.rentalStartDate ? new Date(body.rentalStartDate) : (participant as any).rentalStartDate
+        const nextEnd = body.rentalEndDate ? new Date(body.rentalEndDate) : (participant as any).rentalEndDate
+        const norm = (d: any) => (d ? new Date(d).toISOString().slice(0, 10) : null)
+        const sameType = String(leader.rentalType || '') === String(nextType || '')
+        const sameStart = norm(leader.rentalStartDate) === norm(nextStart)
+        const sameEnd = norm(leader.rentalEndDate) === norm(nextEnd)
+        if (!sameType || !sameStart || !sameEnd) {
+          return NextResponse.json({ error: 'Capogruppo non valido per questo noleggio (tipo o date diverse).' }, { status: 400 })
+        }
+      }
+    }
+
     const updated = await prisma.participant.update({
       where: { id },
       data: {
@@ -621,6 +688,8 @@ export async function PUT(request: Request, { params }: { params: Promise<{ id: 
           assistantCommissionType: body.assistantCommissionType ?? participant.assistantCommissionType,
           needsTransfer: body.needsTransfer !== undefined ? body.needsTransfer : participant.needsTransfer,
           commissionPercentage: body.commissionPercentage !== undefined ? body.commissionPercentage : participant.commissionPercentage,
+          isGroupLeader: nextIsGroupLeader,
+          groupLeaderId: nextGroupLeaderId,
         }),
         paidAmount,
         depositPaidAmount,

@@ -103,7 +103,6 @@ export function TransfersManager({
 
   // State for agencies and commissions
   const [agencies, setAgencies] = useState<{ id: string, name: string, defaultCommission: number, commissionType: string }[]>([])
-  const [commissions, setCommissions] = useState<{ agencyId: string, percentage: string, commissionType: string }[]>([])
 
   const [editingTransferId, setEditingTransferId] = useState<string | null>(null)
   const [error, setError] = useState('')
@@ -211,14 +210,6 @@ export function TransfersManager({
         const data = await res.json()
         if (Array.isArray(data)) {
           setAgencies(data)
-          // Initialize commissions with default values if not editing
-          if (!editingTransferId) {
-             setCommissions(data.map((a: any) => ({ 
-               agencyId: a.id, 
-               percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
-               commissionType: a.commissionType || 'PERCENTAGE'
-             })))
-          }
         }
       }
     } catch (e) {
@@ -382,14 +373,7 @@ export function TransfersManager({
       { id: `${Date.now().toString(36)}_child`, label: 'Bambini', price: '' },
     ])
     setNewMaxParticipants('')
-    
-    // Reset commissions
-    setCommissions(agencies.map(a => ({ 
-      agencyId: a.id, 
-      percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
-      commissionType: a.commissionType || 'PERCENTAGE'
-    })))
-    
+
     // Logica di default fornitore
     let defaultSup = 'GO4SEA'
     if (currentUserSupplierName) {
@@ -491,24 +475,6 @@ export function TransfersManager({
       ])
     }
     setNewMaxParticipants(transfer.maxParticipants ? transfer.maxParticipants.toString() : '')
-    
-    // Populate commissions
-    if (transfer.commissions) {
-      setCommissions(agencies.map(a => {
-        const comm = transfer.commissions.find((c: any) => c.agencyId === a.id)
-        return {
-          agencyId: a.id,
-          percentage: comm ? comm.commissionPercentage.toString() : (a.defaultCommission ? a.defaultCommission.toString() : ''),
-          commissionType: comm ? (comm.commissionType || 'PERCENTAGE') : (a.commissionType || 'PERCENTAGE')
-        }
-      }))
-    } else {
-      setCommissions(agencies.map(a => ({ 
-        agencyId: a.id, 
-        percentage: a.defaultCommission ? a.defaultCommission.toString() : '',
-        commissionType: a.commissionType || 'PERCENTAGE'
-      })))
-    }
 
     setIsCreating(true)
   }
@@ -610,7 +576,6 @@ export function TransfersManager({
         dropoffLocation: newDropoffLocation,
         supplier: newSupplier,
         maxParticipants: newMaxParticipants ? parseInt(newMaxParticipants) : null,
-        commissions, // Add commissions
         priceTiers: tiersPayload
       }
 
@@ -1001,6 +966,16 @@ export function TransfersManager({
   }
 
   const getTransferCommission = (transfer: any) => {
+    const role = String(currentUserMeta?.role || userRole || '').toUpperCase()
+    const agencyNameLower = String(currentUserMeta?.agencyName || '').toLowerCase().trim()
+    const isSpecial = (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true
+    const isGo4Sea = agencyNameLower.includes('go4sea')
+    const isCorfumania = role === 'ADMIN' || agencyNameLower.includes('corfumania')
+
+    if (isSpecial) return { value: 10, type: 'PERCENTAGE' as const }
+    if (isGo4Sea) return { value: 5, type: 'PERCENTAGE' as const }
+    if (isCorfumania) return { value: 1, type: 'FIXED' as const }
+
     let commValue = null
     let commType = null
     
@@ -1335,56 +1310,6 @@ export function TransfersManager({
                 />
               </div>
 
-              {userRole === 'ADMIN' && (
-                <div>
-                  <label className="block text-sm font-bold text-gray-900 mb-2">Commissioni Agenzie (Default)</label>
-                  <div className="bg-gray-50 p-3 rounded-lg border border-gray-200 space-y-3 max-h-40 overflow-y-auto">
-                    {agencies.length === 0 && <p className="text-sm text-gray-500 italic">Nessuna agenzia disponibile.</p>}
-                    {agencies && agencies.length > 0 && agencies.map(agency => (
-                      agency ? (
-                      <div key={agency.id || agency.name} className="flex items-center justify-between gap-3">
-                        <span className="text-sm font-medium text-gray-700 truncate flex-1" title={agency.name}>{agency.name}</span>
-                        <div className="flex gap-2 w-48">
-                            <select
-                                value={commissions.find(c => c.agencyId === agency.id)?.commissionType || 'PERCENTAGE'}
-                                onChange={(e) => {
-                                    const val = e.target.value
-                                    setCommissions(prev => prev.map(c => 
-                                        c.agencyId === agency.id ? { ...c, commissionType: val } : c
-                                    ))
-                                }}
-                                className="w-20 text-xs border border-gray-300 rounded-md py-1 px-1 focus:ring-blue-500 focus:border-blue-500 bg-white"
-                            >
-                                <option value="PERCENTAGE">%</option>
-                                <option value="FIXED">€/pax</option>
-                            </select>
-                            <div className="relative flex-1">
-                              <input
-                                type="number"
-                                min="0"
-                                step="0.01"
-                                placeholder="0"
-                                value={commissions.find(c => c.agencyId === agency.id)?.percentage || ''}
-                                onChange={(e) => {
-                                  const val = e.target.value
-                                  setCommissions(prev => prev.map(c => 
-                                    c.agencyId === agency.id ? { ...c, percentage: val } : c
-                                  ))
-                                }}
-                                className="block w-full border border-gray-300 rounded-md py-1 px-2 text-right pr-6 focus:ring-blue-500 focus:border-blue-500 text-sm"
-                              />
-                              <span className="absolute right-2 top-1.5 text-gray-400 text-xs">
-                                  {commissions.find(c => c.agencyId === agency.id)?.commissionType === 'FIXED' ? '€' : '%'}
-                              </span>
-                            </div>
-                        </div>
-                      </div>
-                      ) : null
-                    ))}
-                  </div>
-                </div>
-              )}
-
               <div className="flex justify-end gap-3 pt-4 border-t border-gray-100">
                 <button
                   type="button"
@@ -1578,7 +1503,7 @@ export function TransfersManager({
                     )
                   })()}
 
-                  {userRole === 'ADMIN' && typeof selectedTransfer.totalCollected === 'number' && (
+                  {(userRole === 'ADMIN' || (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true) && typeof selectedTransfer.totalCollected === 'number' && (
                     <div className="flex items-center gap-2 bg-green-50 px-3 py-2 rounded-lg text-green-800 border border-green-100">
                       <Euro className="w-4 h-4 text-green-600 shrink-0" />
                       <div className="flex flex-col">
@@ -1700,7 +1625,7 @@ export function TransfersManager({
                 <span className="absolute bottom-0 left-0 w-full h-0.5 bg-blue-600 rounded-t-full" />
               )}
             </button>
-            {userRole === 'ADMIN' && (
+            {(userRole === 'ADMIN' || (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true) && (
               <button
                 onClick={() => setViewMode('SUMMARY')}
                 className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
@@ -1715,7 +1640,7 @@ export function TransfersManager({
                 )}
               </button>
             )}
-            {userRole === 'ADMIN' && (
+            {(userRole === 'ADMIN' || (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true) && (
               <button
                 onClick={() => setViewMode('LEADERBOARD')}
                 className={`pb-3 px-1 text-sm font-medium transition-colors relative ${
@@ -1760,26 +1685,26 @@ export function TransfersManager({
                }}
                currentUserId={currentUserId}
                userRole={userRole}
+               currentUserIsSpecialAssistant={(currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true}
                onUpdate={fetchTransfers}
              />
           )}
 
-          {viewMode === 'SUMMARY' && userRole === 'ADMIN' && (
+          {viewMode === 'SUMMARY' && (userRole === 'ADMIN' || (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true) && (
               <FinancialSummary
                 entityId={selectedTransfer.id}
                 type="TRANSFER"
                 refreshTrigger={refreshParticipantsTrigger}
-                commissionConfigs={selectedTransfer.commissions || []}
               />
             )}
           
-          {viewMode === 'LEADERBOARD' && userRole === 'ADMIN' && (
+          {viewMode === 'LEADERBOARD' && (userRole === 'ADMIN' || (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true) && (
             <TransferLeaderboard transfer={selectedTransfer} userRole={userRole} />
           )}
             
             {viewMode === 'HISTORY' && (
             <div className="mt-6">
-                <AuditLogList transferId={selectedTransfer.id} />
+                <AuditLogList transferId={selectedTransfer.id} canViewFinancials={userRole === 'ADMIN' || (currentUserMeta?.isSpecialAssistant ?? currentUserIsSpecialAssistant) === true} />
             </div>
           )}
 

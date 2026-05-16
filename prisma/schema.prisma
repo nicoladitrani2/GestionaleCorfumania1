@@ -258,6 +258,13 @@ model Participant {
   dateOfBirth           DateTime?
   docNumber             String?
   docType               String?
+
+  isGroupLeader         Boolean  @default(false)
+  groupLeaderId         String?
+  groupLeader           Participant? @relation("ParticipantGroupLeader", fields: [groupLeaderId], references: [id], onDelete: SetNull)
+  groupMembers          Participant[] @relation("ParticipantGroupLeader")
+
+  @@index([groupLeaderId])
 }
 
 model ParticipantPaymentEvent {
